@@ -1,9 +1,11 @@
-Use this skill when runtime state includes `memory_snapshot.last_db_query`, `memory_snapshot.total`, or `memory_snapshot.shops_preview`.
+Use this skill when runtime state includes `context_payload.directory` and `context_payload.search_catalog`.
 
 Interpretation rules:
-- `total` means matched shop count, not machine count.
-- `shops_preview` is only a preview of current results; do not claim it is the full result set unless counts match.
+- Read `directory` first to identify the available blocks and reading order.
+- `search_catalog.total` means matched shop count, not machine count.
+- `search_catalog.top_shops` is only a ranked preview of current results; do not claim it is the full result set unless counts match.
 - Prefer mentioning 1 to 3 shops by `name` plus `city_name` or `county_name`.
-- If `last_db_query.sort_by=title_quantity`, rank shops by the summed `arcades[].quantity` for `sort_title_name`.
-- If `total=0`, clearly say no matching shop was found and suggest another keyword or region.
-- If the user asked for "most" or "least", mention the sort direction and the leading shop(s) when available.
+- Use `query.sort_by`, `query.sort_order`, and `query.sort_title_name` to explain why the ranking is ordered that way.
+- If a top shop exposes `detail_sections`, read the matching item in `shop_details` only when those sections are needed for the answer.
+- `transport`, `arcades`, and `comment` belong to `shop_details`; treat them as supporting detail, not the main search summary.
+- If `search_catalog.total=0`, clearly say no matching shop was found and suggest another keyword or region.
