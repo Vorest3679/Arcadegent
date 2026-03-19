@@ -75,10 +75,17 @@ class ContextBuilder:
             "memory_summary": {
                 "has_shops": bool(session_state.working_memory.get("shops")),
                 "has_route": bool(session_state.working_memory.get("route")),
+                "last_mcp_result": self._compact_value(
+                    session_state.working_memory.get("last_mcp_result")
+                ),
+                "last_error": self._compact_value(
+                    session_state.working_memory.get("last_error")
+                ),
             },
             "context_payload": self._compact_value(
                 context_payload.model_dump(mode="json", exclude_none=True)
             ),
+            "recent_tool_results": self._build_recent_tool_results(session_state.turns),
         }
 
         instruction_parts = [base_prompt]
@@ -91,7 +98,124 @@ class ContextBuilder:
                 json.dumps(runtime_hint, ensure_ascii=False),
             )
         )
+        """
+        instruction的标准报文结构如下：
+        [系统基础指令]
+        [技能参考文档块（如果有）]
+        [子Agent指令]
+        Runtime state (JSON):
+        {
+            "session_id": "...",
+            "turn_index": 3,
+            "active_subagent": "shop_recommender",
+            "intent": "find_shop",
+            "request": {
+            ...
+            },
+            "memory_summary": {
+                "has_shops": true,
+                "has_route": false,
+                "last_mcp_result": {
+                ...
+                },
+                "last_error": null
+            },
+            "context_payload": {
+                "directory": {
+                    "active_intent": "find_shop",
+                    "active_subagent": "shop_recommender",
+                    "available_blocks": [
+                        {
+                            "block": "route",
+                            "purpose": "Primary navigation facts for the final answer.",
+                            "primary_fields": ["destination_name", "mode", "distance_m", "duration_s", "hint"]
+                        },
+                        {
+                            "block": "search_catalog",
+                            "purpose": "Top-level matched shop count and ranking preview.",
+                            "primary_fields": ["total", "top_shops"]
+                        },
+                        ...
+                    ],
+                    "reading_order": ["route", "search_catalog", "query", "shop_details"],
+                    "focus": "Use route as the main answer. Add destination detail only when it improves the reply.",
+                    "top_shop_ids": [123, 456, 789]
+                },
+                "query": {
+                    "keyword": "街机店",
+                    "province_code": "31",
+                    ...
+                },
+                "search_catalog": {
+                    "total": 12,
+                    "top_shops": [
+                        {
+                            ... shop summary fields ...,
+                            "detail_sections": ["basic", "transport"]
+                        },
+                        ...
+                    ]
+                },
+                "shop_details": [
+                    {
+                        "source_id": 123,
+                        "basic": {
+                            "name": "上海街机店A",
+                            ...
+                        },
+                        "transport": {
+                            "summary": "地铁2号线XX站步行500米"
+                        },
+                        "arcades": [
+                            {
+                                "title_name": "街霸5",
+                                "quantity": 2,
+                                "version": "2024夏季更新",
+                                "comment": "新版本，支持联机对战"
+                            },
+                            ...
+                        ],
+                        "comment": {
+                            "summary": "店内环境不错，适合聚会。"
+                        }
+                    },
+                    ...
+                ],
+                "route": {
+                    "destination_source_id": 123,
+                    "destination_name": "上海街机店A",
+                    "provider": "amap",
+                    "mode": "driving",
+                    "distance_m": 8500,
+                    "duration_s": 1800,
+                    "hint": "建议避开早晚高峰，途经XX路和YY路，可能有拥堵。"
+                }
+            },
+            "recent_tool_results": [
+                {
+                    "tool": "amap_route",
+                    "call_id": "abc123",
+                    "status": "success",
+                    "result": {
+                        ... raw tool result, pruned and compacted for readability ...
+                    }  
+                },
+                ...
+            ]}
+        """
         instructions = "\n\n".join(part for part in instruction_parts if part)
+        """
+        messages的结构是当前对话历史中最近的若干轮（由history_turn_limit控制），每轮包含：
+        {
+            "role": "user" | "assistant" | "tool",
+            "content": "...",
+            "name": "...",  # 可选，仅tool角色可能包含，表示工具名称
+            "tool_call_id": "...",  # 可选，仅tool角色可能包含，表示工具调用ID
+            "payload": {...}  # 可选，原始工具调用结果等额外信息
+        }
+        其中，tool角色的消息会额外包含工具调用的结果摘要（如果有），
+        以便模型参考最近的工具输出进行决策。用户和助手消息则直接反映对话内容。
+        """
         messages = [self._to_model_message(turn) for turn in self._tail_turns(session_state.turns)]
         return BuiltContext(instructions=instructions, messages=messages)
 
@@ -236,6 +360,74 @@ class ContextBuilder:
         if isinstance(total, int) and total > 0:
             return "Answer with matched count first, then mention top shops. Use detail sections only when relevant."
         return "Ask for the minimum missing input and avoid guessing unavailable facts."
+
+    def _build_recent_tool_results(self, turns: list[AgentTurn]) -> list[dict[str, Any]]:
+        tool_turns = [turn for turn in turns if turn.role == "tool"]
+        if not tool_turns:
+            return []
+
+        recent = tool_turns[-6:]
+        results: list[dict[str, Any]] = []
+        for turn in recent:
+            item: dict[str, Any] = {}
+            if isinstance(turn.name, str) and turn.name:
+                item["tool"] = turn.name
+            if isinstance(turn.call_id, str) and turn.call_id:
+                item["call_id"] = turn.call_id
+            status = turn.payload.get("status") if isinstance(turn.payload, dict) else None
+            if isinstance(status, str) and status:
+                item["status"] = status
+            result_payload = self._tool_turn_result(turn)
+            compact_result = self._compact_value(self._prune_tool_result(result_payload))
+            if compact_result not in (None, "", [], {}):
+                item["result"] = compact_result
+            if item:
+                results.append(item)
+        return results
+
+    def _tool_turn_result(self, turn: AgentTurn) -> Any:
+        payload_result = turn.payload.get("result") if isinstance(turn.payload, dict) else None
+        if isinstance(payload_result, dict):
+            return payload_result
+        try:
+            parsed = json.loads(turn.content)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _prune_tool_result(self, value: Any, *, depth: int = 0) -> Any:
+        if depth >= 4:
+            if isinstance(value, str):
+                return value[:240]
+            return value
+        if isinstance(value, dict):
+            compact: dict[str, Any] = {}
+            for key, item in value.items():
+                if key == "content" and isinstance(item, list):
+                    # Keep only a small slice of textual MCP content blocks; structured data is more useful.
+                    item = item[:2]
+                if key == "shops" and isinstance(item, list):
+                    item = item[:3]
+                normalized = self._prune_tool_result(item, depth=depth + 1)
+                if normalized in (None, "", [], {}):
+                    continue
+                compact[str(key)] = normalized
+            return compact
+        if isinstance(value, list):
+            return [
+                item
+                for item in (
+                    self._prune_tool_result(entry, depth=depth + 1)
+                    for entry in value[:4]
+                )
+                if item not in (None, "", [], {})
+            ]
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            return text[:240]
+        return value
 
     def _build_query_context(
         self,

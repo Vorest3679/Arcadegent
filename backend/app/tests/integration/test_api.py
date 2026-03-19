@@ -40,6 +40,7 @@ def _build_client(tmp_path: Path, *, session_store_path: Path | None = None) -> 
     _seed_data(data_path)
     os.environ["ARCADE_DATA_JSONL"] = str(data_path)
     os.environ["CHAT_SESSION_STORE_PATH"] = str(session_store_path or (tmp_path / "chat_sessions.json"))
+    os.environ["MCP_AMAP_ENABLED"] = "false"
 
     from app.main import create_app
 
@@ -59,6 +60,7 @@ def _build_client_with_rows(
             handle.write("\n")
     os.environ["ARCADE_DATA_JSONL"] = str(data_path)
     os.environ["CHAT_SESSION_STORE_PATH"] = str(session_store_path or (tmp_path / "chat_sessions.json"))
+    os.environ["MCP_AMAP_ENABLED"] = "false"
 
     from app.main import create_app
 
@@ -71,6 +73,7 @@ def test_health_arcades_and_chat(tmp_path: Path) -> None:
     health = client.get("/health")
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
+    assert health.json()["mcp"]["enabled"] is False
 
     listing = client.get("/api/v1/arcades", params={"keyword": "Gamma"})
     assert listing.status_code == 200

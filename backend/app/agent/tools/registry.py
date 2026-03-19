@@ -14,6 +14,7 @@ from app.agent.tools.builtin.geo_resolve_tool import GeoResolveTool
 from app.agent.tools.builtin.route_plan_tool import RoutePlanTool
 from app.agent.tools.builtin.select_next_subagent_tool import SelectNextSubagentTool
 from app.agent.tools.builtin.summary_tool import SummaryTool
+from app.agent.tools.mcp_gateway import MCPToolGateway
 from app.agent.tools.permission import ToolPermissionChecker, ToolPermissionError
 from app.agent.tools.schemas import (
     DBQueryArgs,
@@ -76,6 +77,7 @@ class ToolRegistry:
         summary_tool: SummaryTool,
         select_next_subagent_tool: SelectNextSubagentTool,
         permission_checker: ToolPermissionChecker,
+        mcp_tool_gateway: MCPToolGateway | None = None,
         strict_schema: bool = True,
     ) -> None:
         self._db_query_tool = db_query_tool
@@ -84,10 +86,22 @@ class ToolRegistry:
         self._summary_tool = summary_tool
         self._select_next_subagent_tool = select_next_subagent_tool
         self._permission_checker = permission_checker
+        self._mcp_tool_gateway = mcp_tool_gateway or MCPToolGateway()
         self._strict_schema = strict_schema
 
     def tool_definitions(self, *, allowed_tools: list[str]) -> list[dict[str, Any]]:
-        return build_tool_definitions(allowed_tools, strict=self._strict_schema)
+        builtin = build_tool_definitions(allowed_tools, strict=self._strict_schema)
+        dynamic = self._mcp_tool_gateway.build_tool_definitions(
+            allowed_tools=allowed_tools,
+            strict=self._strict_schema,
+        )
+        return builtin + dynamic
+
+    def refresh_mcp_tools(self) -> None:
+        self._mcp_tool_gateway.refresh()
+
+    def mcp_health(self) -> dict[str, Any]:
+        return self._mcp_tool_gateway.health()
 
     def execute(
         self,
@@ -99,6 +113,18 @@ class ToolRegistry:
     ) -> ToolExecutionResult:
         try:
             self._permission_checker.ensure_allowed(tool_name=tool_name, allowed_tools=allowed_tools)
+            if self._mcp_tool_gateway.has_tool(tool_name):
+                mcp_result = self._mcp_tool_gateway.execute(
+                    tool_name=tool_name,
+                    raw_arguments=raw_arguments,
+                )
+                return ToolExecutionResult(
+                    call_id=call_id,
+                    tool_name=tool_name,
+                    status=mcp_result.status,
+                    output=mcp_result.output,
+                    error_message=mcp_result.error_message,
+                )
             validated = self._validate_arguments(tool_name=tool_name, raw_arguments=raw_arguments)
             output = self._dispatch(tool_name=tool_name, validated=validated)
             return ToolExecutionResult(
@@ -222,12 +248,22 @@ class ToolRegistry:
 
         if tool_name == "route_plan_tool":
             args = validated if isinstance(validated, RoutePlanArgs) else RoutePlanArgs.model_validate(validated)
-            route = self._route_plan_tool.plan_route(
-                provider=args.provider,
-                mode=args.mode,
-                origin=Location(lng=args.origin.lng, lat=args.origin.lat),
-                destination=Location(lng=args.destination.lng, lat=args.destination.lat),
-            )
+            origin = Location(lng=args.origin.lng, lat=args.origin.lat)
+            destination = Location(lng=args.destination.lng, lat=args.destination.lat)
+            route = None
+            if args.provider == "amap":
+                route = self._mcp_tool_gateway.plan_amap_route(
+                    mode=args.mode,
+                    origin=origin,
+                    destination=destination,
+                )
+            if route is None:
+                route = self._route_plan_tool.plan_route(
+                    provider=args.provider,
+                    mode=args.mode,
+                    origin=origin,
+                    destination=destination,
+                )
             return {"route": route.model_dump(mode="json")}
 
         if tool_name == "summary_tool":

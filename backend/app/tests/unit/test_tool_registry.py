@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from fastmcp import FastMCP
+
 from app.agent.tools.builtin.db_query_tool import DBQueryTool
 from app.agent.tools.builtin.geo_resolve_tool import GeoResolveTool
 from app.agent.tools.builtin.route_plan_tool import RoutePlanTool
 from app.agent.tools.builtin.select_next_subagent_tool import SelectNextSubagentTool
 from app.agent.tools.builtin.summary_tool import SummaryTool
+from app.agent.tools.mcp_gateway import MCPServerConfig, MCPToolGateway
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.infra.db.local_store import LocalArcadeStore
@@ -37,7 +40,11 @@ def _write_rows(path: Path) -> None:
             handle.write("\n")
 
 
-def _build_registry(tmp_path: Path) -> ToolRegistry:
+def _build_registry(
+    tmp_path: Path,
+    *,
+    mcp_tool_gateway: MCPToolGateway | None = None,
+) -> ToolRegistry:
     data_path = tmp_path / "shops.jsonl"
     _write_rows(data_path)
     store = LocalArcadeStore.from_jsonl(data_path)
@@ -48,8 +55,47 @@ def _build_registry(tmp_path: Path) -> ToolRegistry:
         summary_tool=SummaryTool(),
         select_next_subagent_tool=SelectNextSubagentTool(),
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
+        mcp_tool_gateway=mcp_tool_gateway,
         strict_schema=True,
     )
+
+
+def _build_mcp_gateway() -> MCPToolGateway:
+    mcp = FastMCP("Test AMap MCP")
+
+    @mcp.tool(name="maps_direction_walking", description="步行路径规划，输入 origin 和 destination，输出 paths。")
+    def maps_direction_walking(origin: str, destination: str) -> dict[str, object]:
+        return {
+            "origin": origin,
+            "destination": destination,
+            "paths": [
+                {
+                    "distance": 1234,
+                    "duration": 678,
+                    "steps": [
+                        {
+                            "instruction": "walk forward",
+                            "polyline": "116.3,39.9;116.4,39.91",
+                        }
+                    ],
+                }
+            ],
+        }
+
+    gateway = MCPToolGateway(
+        servers=[
+            MCPServerConfig(
+                name="amap",
+                enabled=True,
+                source=mcp,
+                url="memory://amap",
+                timeout_seconds=3,
+                route_tool_name="maps_direction_walking",
+            )
+        ]
+    )
+    gateway.refresh()
+    return gateway
 
 
 def test_tool_registry_returns_validation_error_for_bad_args(tmp_path: Path) -> None:
@@ -227,3 +273,58 @@ def test_tool_registry_backfills_sort_title_name_from_keyword(tmp_path: Path) ->
     assert result.status == "completed"
     assert [row["source_id"] for row in result.output["shops"]] == [2, 1]
     assert result.output["query"]["sort_title_name"] == "maimai"
+
+
+def test_tool_registry_includes_discovered_mcp_tools_when_allowed(tmp_path: Path) -> None:
+    registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
+
+    definitions = registry.tool_definitions(allowed_tools=["route_plan_tool", "mcp__*"])
+    names = [
+        item["function"]["name"]
+        for item in definitions
+        if isinstance(item, dict) and isinstance(item.get("function"), dict)
+    ]
+
+    assert "route_plan_tool" in names
+    assert "mcp__amap__maps_direction_walking" in names
+
+
+def test_tool_registry_can_execute_discovered_mcp_tool(tmp_path: Path) -> None:
+    registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
+
+    result = registry.execute(
+        call_id="c6",
+        tool_name="mcp__amap__maps_direction_walking",
+        raw_arguments={
+            "origin": "116.3,39.9",
+            "destination": "116.4,39.91",
+        },
+        allowed_tools=["mcp__*"],
+    )
+
+    assert result.status == "completed"
+    assert result.output["server"] == "amap"
+    assert result.output["tool"] == "maps_direction_walking"
+    assert result.output["route"]["distance_m"] == 1234
+    assert result.output["route"]["duration_s"] == 678
+
+
+def test_route_plan_tool_prefers_amap_mcp_when_available(tmp_path: Path) -> None:
+    registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
+
+    result = registry.execute(
+        call_id="c7",
+        tool_name="route_plan_tool",
+        raw_arguments={
+            "provider": "amap",
+            "mode": "walking",
+            "origin": {"lng": 116.3, "lat": 39.9},
+            "destination": {"lng": 116.4, "lat": 39.91},
+        },
+        allowed_tools=["route_plan_tool", "mcp__*"],
+    )
+
+    assert result.status == "completed"
+    assert result.output["route"]["provider"] == "amap"
+    assert result.output["route"]["distance_m"] == 1234
+    assert result.output["route"]["duration_s"] == 678

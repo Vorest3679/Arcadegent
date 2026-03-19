@@ -54,6 +54,10 @@ class TransitionPolicy:
             return "navigation_agent"
         if tool_name == "route_plan_tool":
             return "summary_agent" if has_route else "navigation_agent"
+        if tool_name.startswith("mcp__"):
+            if isinstance(tool_output.get("route"), dict) or has_route:
+                return "summary_agent"
+            return current_subagent
         if tool_name == "summary_tool":
             return "summary_agent"
         if current_subagent == "intent_router":

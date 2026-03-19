@@ -15,6 +15,7 @@ from app.agent.runtime.session_state import SessionStateStore
 from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.runtime.orchestrator import Orchestrator
 from app.agent.tools.permission import ToolPermissionChecker
+from app.agent.tools.mcp_gateway import MCPToolGateway, build_amap_mcp_server_config
 from app.agent.tools.registry import ToolRegistry
 from app.agent.tools.builtin.db_query_tool import DBQueryTool
 from app.agent.tools.builtin.geo_resolve_tool import GeoResolveTool
@@ -33,6 +34,7 @@ class AppContainer:
     store: LocalArcadeStore
     replay_buffer: ReplayBuffer
     session_store: SessionStateStore
+    tool_registry: ToolRegistry
     react_runtime: ReactRuntime
     orchestrator: Orchestrator
 
@@ -61,6 +63,17 @@ def build_container(settings: Settings) -> AppContainer:
         enable_yaml_overlay=settings.agent_subagent_yaml_overlay_enabled,
     )
     permission_checker = ToolPermissionChecker(policy_file=settings.agent_tool_policy_file)
+    mcp_tool_gateway = MCPToolGateway(
+        servers=[
+            build_amap_mcp_server_config(
+                enabled=settings.mcp_amap_enabled,
+                base_url=settings.mcp_amap_base_url,
+                api_key=settings.mcp_amap_api_key,
+                timeout_seconds=settings.mcp_amap_timeout_seconds,
+                route_tool_name=settings.mcp_amap_route_tool_name or None,
+            )
+        ]
+    )
     tool_registry = ToolRegistry(
         db_query_tool=db_query_tool,
         geo_resolve_tool=GeoResolveTool(),
@@ -68,6 +81,7 @@ def build_container(settings: Settings) -> AppContainer:
         summary_tool=SummaryTool(),
         select_next_subagent_tool=SelectNextSubagentTool(),
         permission_checker=permission_checker,
+        mcp_tool_gateway=mcp_tool_gateway,
         strict_schema=True,
     )
     session_store = SessionStateStore(storage_path=settings.chat_session_store_path)
@@ -89,6 +103,7 @@ def build_container(settings: Settings) -> AppContainer:
         store=store,
         replay_buffer=replay_buffer,
         session_store=session_store,
+        tool_registry=tool_registry,
         react_runtime=react_runtime,
         orchestrator=orchestrator,
     )

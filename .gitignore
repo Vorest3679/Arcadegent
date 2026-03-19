@@ -16,7 +16,9 @@ apps/web/dist/
 # Runtime outputs
 data/
 
-docs/
+docs/*
+!docs/issues/
+!docs/issues/**
 # IDEs
 .vscode/
 .idea/
@@ -27,3 +29,4 @@ scripts/
 .runtime_smoke/
 .tmp_pytest/
 .tmp_pytest_run/
+g:/

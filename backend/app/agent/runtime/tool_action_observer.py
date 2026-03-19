@@ -161,11 +161,10 @@ class ToolActionObserver:
                 "call_id": result.call_id,
                 "active_subagent": previous_subagent,
             }
-            if result.tool_name == "route_plan_tool":
-                route = result.output.get("route")
-                if isinstance(route, dict):
-                    completed_payload["distance_m"] = route.get("distance_m")
-                    self._replay_buffer.append(session_id, "navigation.route_ready", route)
+            route = result.output.get("route")
+            if isinstance(route, dict):
+                completed_payload["distance_m"] = route.get("distance_m")
+                self._replay_buffer.append(session_id, "navigation.route_ready", route)
             self._replay_buffer.append(session_id, "tool.completed", completed_payload)
             if result.tool_name == "db_query_tool":
                 total = int(result.output.get("total") or 0)
@@ -435,6 +434,14 @@ class ToolActionObserver:
             if isinstance(route, dict):
                 state.working_memory["route"] = route
                 state.intent = "navigate"
+            return
+
+        if result.tool_name.startswith("mcp__"):
+            route = result.output.get("route")
+            if isinstance(route, dict):
+                state.working_memory["route"] = route
+                state.intent = "navigate"
+            state.working_memory["last_mcp_result"] = result.output
             return
 
         if result.tool_name == "summary_tool":

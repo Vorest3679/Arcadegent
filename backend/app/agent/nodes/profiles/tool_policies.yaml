@@ -16,3 +16,6 @@ tool_policies:
   select_next_subagent:
     read_only: true
     concurrency_safe: true
+
+mcp_defaults:
+  allow_all: true

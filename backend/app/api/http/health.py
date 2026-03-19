@@ -16,5 +16,5 @@ def health(container: AppContainer = Depends(get_container)) -> dict:
         "status": "ok",
         "store": container.store.health(),
         "env": container.settings.env,
+        "mcp": container.tool_registry.mcp_health(),
     }
-

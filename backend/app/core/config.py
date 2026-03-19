@@ -80,13 +80,18 @@ class Settings:
     llm_timeout_seconds: float = 20.0
     llm_temperature: float = 0.2
     llm_max_tokens: int = 500
-    agent_max_steps: int = 6
+    agent_max_steps: int = 20
     agent_context_window: int = 24
     agent_nodes_definitions_dir: Path = Path("app/agent/nodes/definitions")
     agent_tool_policy_file: Path = Path("app/agent/nodes/profiles/tool_policies.yaml")
     agent_subagent_yaml_overlay_enabled: bool = True
     agent_provider_profiles_file: Path = Path("app/agent/nodes/profiles/provider_profiles.yaml")
     agent_provider_profile: str = "default"
+    mcp_amap_enabled: bool = False
+    mcp_amap_base_url: str = "https://mcp.amap.com/mcp"
+    mcp_amap_api_key: str = ""
+    mcp_amap_timeout_seconds: float = 10.0
+    mcp_amap_route_tool_name: str = ""
     amap_api_key: str = ""
     amap_base_url: str = "https://restapi.amap.com"
     amap_timeout_seconds: float = 8.0
@@ -157,6 +162,19 @@ class Settings:
             agent_provider_profile=os.getenv(
                 "AGENT_PROVIDER_PROFILE",
                 cls.agent_provider_profile,
+            ),
+            mcp_amap_enabled=_env_bool("MCP_AMAP_ENABLED", cls.mcp_amap_enabled),
+            mcp_amap_base_url=os.getenv("MCP_AMAP_BASE_URL", cls.mcp_amap_base_url),
+            mcp_amap_api_key=os.getenv(
+                "MCP_AMAP_API_KEY",
+                os.getenv("AMAP_API_KEY", cls.mcp_amap_api_key),
+            ),
+            mcp_amap_timeout_seconds=float(
+                os.getenv("MCP_AMAP_TIMEOUT_SECONDS", str(cls.mcp_amap_timeout_seconds))
+            ),
+            mcp_amap_route_tool_name=os.getenv(
+                "MCP_AMAP_ROUTE_TOOL_NAME",
+                cls.mcp_amap_route_tool_name,
             ),
             amap_api_key=os.getenv("AMAP_API_KEY", cls.amap_api_key),
             amap_base_url=os.getenv("AMAP_BASE_URL", cls.amap_base_url),

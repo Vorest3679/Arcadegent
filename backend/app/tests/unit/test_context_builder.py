@@ -134,3 +134,116 @@ def test_context_builder_injects_route_block_before_shop_details(tmp_path: Path)
     assert '"route"' in context.instructions
     assert '"destination_name": "Bravo"' in context.instructions
     assert '"reading_order": ["route", "search_catalog", "shop_details"]' in context.instructions
+
+
+def test_context_builder_exposes_last_mcp_result_in_runtime_hint(tmp_path: Path) -> None:
+    prompt_root = tmp_path / "prompts"
+    skill_root = tmp_path / "skills"
+    prompt_root.mkdir()
+    skill_root.mkdir()
+    (prompt_root / "system_base.md").write_text("base prompt", encoding="utf-8")
+    (prompt_root / "navigation_agent.md").write_text("navigation prompt", encoding="utf-8")
+
+    builder = ContextBuilder(
+        prompt_root=prompt_root,
+        skill_root=skill_root,
+        history_turn_limit=6,
+    )
+    state = AgentSessionState(session_id="s3", active_subagent="navigation_agent")
+    state.working_memory["last_mcp_result"] = {
+        "server": "amap",
+        "tool": "maps_geo",
+        "data": {
+            "locations": [
+                {"name": "虹口足球场", "lng": 121.48, "lat": 31.27},
+                {"name": "街机烈火", "lng": 121.49, "lat": 31.28},
+            ]
+        },
+    }
+
+    context = builder.build(
+        session_state=state,
+        request=ChatRequest(message="从虹口足球场去街机烈火怎么走"),
+        subagent=SubAgentProfile(
+            name="navigation_agent",
+            prompt_file="navigation_agent.md",
+            allowed_tools=[],
+            skill_files=[],
+        ),
+    )
+
+    assert '"last_mcp_result"' in context.instructions
+    assert '"tool": "maps_geo"' in context.instructions
+    assert '"name": "虹口足球场"' in context.instructions
+
+
+def test_context_builder_includes_recent_tool_results_history(tmp_path: Path) -> None:
+    prompt_root = tmp_path / "prompts"
+    skill_root = tmp_path / "skills"
+    prompt_root.mkdir()
+    skill_root.mkdir()
+    (prompt_root / "system_base.md").write_text("base prompt", encoding="utf-8")
+    (prompt_root / "navigation_agent.md").write_text("navigation prompt", encoding="utf-8")
+
+    builder = ContextBuilder(
+        prompt_root=prompt_root,
+        skill_root=skill_root,
+        history_turn_limit=6,
+    )
+    state = AgentSessionState(
+        session_id="s4",
+        active_subagent="navigation_agent",
+        turns=[
+            AgentTurn(role="user", content="从虹口足球场去街机烈火怎么走"),
+            AgentTurn(
+                role="tool",
+                name="mcp__amap__maps_geo",
+                call_id="call_geo_1",
+                content='{"server":"amap","tool":"maps_geo","data":{"locations":[{"name":"虹口足球场","lng":"121.48","lat":"31.27"}]}}',
+                payload={
+                    "status": "completed",
+                    "result": {
+                        "server": "amap",
+                        "tool": "maps_geo",
+                        "data": {
+                            "locations": [
+                                {"name": "虹口足球场", "lng": "121.48", "lat": "31.27"},
+                            ]
+                        },
+                    },
+                },
+            ),
+            AgentTurn(
+                role="tool",
+                name="mcp__amap__maps_geo",
+                call_id="call_geo_2",
+                content='{"error":{"type":"runtime_error","message":"API 调用失败：ENGINE_RESPONSE_DATA_ERROR"}}',
+                payload={
+                    "status": "failed",
+                    "result": {
+                        "error": {
+                            "type": "runtime_error",
+                            "message": "API 调用失败：ENGINE_RESPONSE_DATA_ERROR",
+                        }
+                    },
+                },
+            ),
+        ],
+    )
+
+    context = builder.build(
+        session_state=state,
+        request=ChatRequest(message="从虹口足球场去街机烈火怎么走"),
+        subagent=SubAgentProfile(
+            name="navigation_agent",
+            prompt_file="navigation_agent.md",
+            allowed_tools=[],
+            skill_files=[],
+        ),
+    )
+
+    assert '"recent_tool_results"' in context.instructions
+    assert '"call_id": "call_geo_1"' in context.instructions
+    assert '"status": "completed"' in context.instructions
+    assert '"status": "failed"' in context.instructions
+    assert 'ENGINE_RESPONSE_DATA_ERROR' in context.instructions

@@ -52,6 +52,7 @@ class SubAgentBuilder:
                     "db_query_tool",
                     "geo_resolve_tool",
                     "route_plan_tool",
+                    "mcp__*",
                     "select_next_subagent",
                 ],
                 skill_files=["search_result_reading.md", "navigation_result_reading.md"],
