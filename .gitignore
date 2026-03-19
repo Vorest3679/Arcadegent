@@ -30,3 +30,6 @@ scripts/
 .tmp_pytest/
 .tmp_pytest_run/
 g:/
+
+backend/app/tests/
+backend/app/tests/unit/
