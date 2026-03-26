@@ -166,8 +166,8 @@ ToolRegistry
 
 以下方向值得继续做，但不属于本 issue 的未完成项：
 
-1. zip 一键解析并加载 executor、tool definitions 与 manifest。
-2. 一键卸载 tools，并联动 registry refresh 与本地安装状态清理。
+1. `P2`: zip 一键解析并加载 executor、tool definitions 与 manifest。
+2. `P3`: 一键卸载 tools，并联动 registry refresh 与本地安装状态清理。
 
 这些能力更接近“tool bundle / plugin package management”，可以单独立新 issue 继续推进。
 

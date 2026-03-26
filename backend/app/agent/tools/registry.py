@@ -27,7 +27,13 @@ class ToolExecutionResult:
 
 
 class ToolRegistry:
-    """Provider-oriented runtime entrypoint for builtin and MCP tools."""
+    """Provider-oriented runtime entrypoint for builtin and MCP tools.
+    面向提供程序的运行时入口，用于内置和 MCP 工具。
+    This registry aggregates tools from multiple providers, 
+    applies permission checks, validates input against provider-declared JSON Schemas, 
+    and routes execution to the appropriate provider implementation.
+    该注册表聚合来自多个提供程序的工具，应用权限检查，
+    根据提供程序声明的 JSON Schema 验证输入，并将执行路由到适当的提供程序实现。 """
 
     def __init__(
         self,
@@ -54,10 +60,13 @@ class ToolRegistry:
         }
 
     def gettools(self, *, allowed_tools: list[str] | None = None) -> dict[str, ToolDescriptor]:
-        """Compatibility alias for provider-aggregated tool discovery."""
+        """Compatibility alias for provider-aggregated tool discovery.
+        用于提供程序聚合工具发现的兼容性别名。"""
         return self.get_tools(allowed_tools=allowed_tools)
 
     def tool_definitions(self, *, allowed_tools: list[str]) -> list[dict[str, Any]]:
+        """Return the tool definitions for the tools matching the allowed patterns, including their JSON Schemas.
+        返回与允许的模式匹配的工具的工具定义，包括它们的 JSON Schema。"""
         tools = self.get_tools()
         definitions: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -107,6 +116,8 @@ class ToolRegistry:
         allowed_tools: list[str],
     ) -> ToolExecutionResult:
         try:
+            # Perform permission check before any other processing to fail fast on unauthorized access.
+            # 在任何其他处理之前执行权限检查，以便在未经授权访问时快速失败。
             self._permission_checker.ensure_allowed(tool_name=tool_name, allowed_tools=allowed_tools)
             tools, owners = self._collect_tools()
             descriptor = tools.get(tool_name)
@@ -116,6 +127,8 @@ class ToolRegistry:
             validated = raw_arguments
             if descriptor.validator is not None:
                 validated = descriptor.validator(raw_arguments)
+
+
             result = provider.execute(
                 tool_name=tool_name,
                 raw_arguments=raw_arguments,
@@ -160,6 +173,8 @@ class ToolRegistry:
             )
 
     def _build_legacy_providers(self, *, legacy_dependencies: dict[str, Any]) -> list[ToolProvider]:
+        """Build providers based on legacy dependencies, supporting both direct service instances and factory-based specifications.
+        根据传统依赖关系构建提供程序，支持直接服务实例和基于工厂的规范。"""
         legacy = dict(legacy_dependencies)
         mcp_tool_gateway = legacy.pop("mcp_tool_gateway", None) or MCPToolGateway()
         builtin_services = {
@@ -187,6 +202,8 @@ class ToolRegistry:
         return providers
 
     def _collect_tools(self) -> tuple[dict[str, ToolDescriptor], dict[str, ToolProvider]]:
+        """Aggregate tools from all providers, ensuring no name conflicts and building a mapping of tool names to their owning providers.
+        从所有提供程序聚合工具，确保没有名称冲突，并构建工具名称到其所属提供程序的映射。"""
         tools: dict[str, ToolDescriptor] = {}
         owners: dict[str, ToolProvider] = {}
         for provider in self._providers:

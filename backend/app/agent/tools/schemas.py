@@ -1,4 +1,5 @@
-"""JSON Schema helpers used by provider-backed tool registration."""
+"""JSON Schema helpers used by provider-backed tool registration.
+提供程序支持的工具注册使用的 JSON Schema 帮助程序。"""
 
 from __future__ import annotations
 
@@ -116,6 +117,8 @@ def _pick_branch_schema(
     value: Any,
     root_schema: dict[str, Any],
 ) -> dict[str, Any]:
+    """If the schema has anyOf/oneOf branches, pick the first one that matches the value (or has a default) and return it.
+    如果 schema 有 anyOf/oneOf 分支，选择第一个与值匹配（或具有默认值）的分支并返回它。"""
     for branch_key in ("anyOf", "oneOf"):
         candidates = schema.get(branch_key)
         if not isinstance(candidates, list):
@@ -154,6 +157,8 @@ def _resolve_schema(
 
 
 def _resolve_json_pointer(root_schema: dict[str, Any], ref: str) -> Any:
+    """Resolve a JSON Pointer reference within the root schema, ensuring it is a local reference and does not contain cycles.
+    在根模式中解析 JSON Pointer 引用，确保它是本地引用并且不包含循环。"""
     if not ref.startswith("#/"):
         raise ValueError(f"unsupported_json_schema_ref:{ref}")
     current: Any = root_schema

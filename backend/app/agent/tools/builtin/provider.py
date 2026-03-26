@@ -1,4 +1,6 @@
-"""Manifest-driven builtin tool provider with split manifest and per-tool JSON files."""
+"""Manifest-driven builtin tool provider with split manifest and per-tool JSON files.
+由 manifest 驱动的内置工具提供程序，具有分离的 manifest 和每个工具的 JSON 文件。
+"""
 
 from __future__ import annotations
 
@@ -13,8 +15,10 @@ from app.agent.tools.schemas import build_json_schema_validator, load_json_schem
 
 _DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
-
 def _import_object(import_path: str) -> Any:
+    """Import a Python object given its full import path, e.g. "module.sub:object.attr".
+    给定完整的导入路径（例如 "module.sub:object.attr"）导入 Python 对象。
+    """
     module_path, separator, attribute_path = import_path.partition(":")
     if not separator or not module_path.strip() or not attribute_path.strip():
         raise ValueError(f"invalid_import_path:{import_path}")
@@ -56,7 +60,7 @@ BuiltinToolExecutor = Callable[[BuiltinToolContext, dict[str, Any]], dict[str, A
 class _BuiltinServiceSpec:
     factory: str
     dependencies: dict[str, Any] = field(default_factory=dict)
-    singleton: bool = True
+    singleton: bool = True # whether to cache the resolved instance for future use
 
 
 @dataclass(frozen=True)
@@ -67,7 +71,8 @@ class _BuiltinToolBinding:
 
 
 class BuiltinToolProvider:
-    """Load builtin tools from a manifest index plus per-tool JSON definitions."""
+    """Load builtin tools from a manifest index plus per-tool JSON definitions.
+    从 manifest 索引和每个工具的 JSON 定义中加载内置工具。"""
 
     def __init__(
         self,
@@ -84,20 +89,20 @@ class BuiltinToolProvider:
         self._runtime_services = merged_runtime_services
         self._context = BuiltinToolContext(self._resolve_service)
         self._manifest_path = manifest_path or Path(__file__).with_name("tools_manifest.json")
-        self._bindings: dict[str, _BuiltinToolBinding] = {}
-        self._service_specs: dict[str, _BuiltinServiceSpec] = {}
-        self._service_cache: dict[str, Any] = {}
-        self._resolving_services: set[str] = set()
-        self.refresh()
+        self._bindings: dict[str, _BuiltinToolBinding] = {} # tool_name -> binding
+        self._service_specs: dict[str, _BuiltinServiceSpec] = {} # service_name -> spec
+        self._service_cache: dict[str, Any] = {} # service_name -> instance
+        self._resolving_services: set[str] = set() # service_names currently being resolved (for cycle detection)
+        self.refresh() # load tools and services on initialization
 
     @property
     def provider_name(self) -> str:
         return "builtin"
 
     def refresh(self) -> None:
-        self._service_specs = {}
-        self._service_cache = {}
-        self._resolving_services = set()
+        self._service_specs = {} # service_name -> spec
+        self._service_cache = {} # service_name -> instance
+        self._resolving_services = set() # service_names currently being resolved (for cycle detection)
         self._bindings = self._load_bindings()
 
     def get_tools(self) -> dict[str, ToolDescriptor]:
@@ -113,6 +118,9 @@ class BuiltinToolProvider:
         raw_arguments: dict[str, Any],
         validated_arguments: Any | None = None,
     ) -> ProviderExecutionResult:
+        """Execute a builtin tool by name with the given arguments, validating against the tool's declared JSON Schema.
+        根据工具声明的 JSON Schema 验证，使用给定的参数按名称执行内置工具。
+        """
         _ = raw_arguments
         binding = self._bindings.get(tool_name)
         if binding is None:
@@ -137,6 +145,8 @@ class BuiltinToolProvider:
         }
 
     def _load_bindings(self) -> dict[str, _BuiltinToolBinding]:
+        """Load tool bindings from manifest and tool definition files, resolving service dependencies as needed.
+        根据需要从 manifest 和工具定义文件加载工具绑定，解析服务依赖关系。"""
         raw_manifest = load_json_schema(self._manifest_path)
         tool_paths, service_specs = self._parse_manifest(raw_manifest)
         self._service_specs = service_specs
@@ -181,6 +191,8 @@ class BuiltinToolProvider:
         self,
         raw: dict[str, Any],
     ) -> tuple[list[Path], dict[str, _BuiltinServiceSpec]]:
+        """Parse the manifest JSON, extracting tool definition paths and builtin service specifications.
+        解析 manifest JSON，提取工具定义路径和内置服务规范。"""
         tool_entries = raw.get("tools")
         if not isinstance(tool_entries, list):
             raise ValueError("builtin_tool_manifest_tools_must_be_list")
@@ -224,6 +236,8 @@ class BuiltinToolProvider:
         return tool_paths, service_specs
 
     def _resolve_service(self, service_name: str) -> Any:
+        """Resolve a service by name, instantiating it if needed based on its specification and dependencies.
+        根据规范和依赖关系按名称解析服务，必要时实例化它。"""
         normalized_name = service_name.strip()
         if not normalized_name:
             raise ValueError("empty_builtin_service_name")
@@ -245,7 +259,7 @@ class BuiltinToolProvider:
                 parameter_name: self._resolve_dependency_value(reference)
                 for parameter_name, reference in spec.dependencies.items()
             }
-            instance = factory(**kwargs)
+            instance = factory(**kwargs) # instantiate the service using the factory and resolved dependencies
             if spec.singleton:
                 self._service_cache[normalized_name] = instance
             return instance
