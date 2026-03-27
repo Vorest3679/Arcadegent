@@ -169,7 +169,7 @@ class ReactRuntime:
         self._session_store.save(state)
         self._replay_buffer.reset(session_id)
 
-    def run_chat(self, request: ChatRequest) -> ChatResponse:
+    async def run_chat(self, request: ChatRequest) -> ChatResponse:
         """Session-aware chat execution with multi-turn tool loop."""
         session_id = request.session_id or f"s_{uuid4().hex[:12]}"
         state = self._session_store.get_or_create(session_id)
@@ -178,7 +178,7 @@ class ReactRuntime:
         state.updated_at = _utc_now_iso()
         self._session_store.save(state)
         try:
-            return self._run_chat_session(request=request, session_id=session_id, state=state)
+            return await self._run_chat_session(request=request, session_id=session_id, state=state)
         except Exception as exc:
             error_message = _short(f"{type(exc).__name__}: {exc}", limit=280) if str(exc) else type(exc).__name__
             state.status = "failed"
@@ -201,7 +201,7 @@ class ReactRuntime:
             )
             raise
 
-    def _run_chat_session(
+    async def _run_chat_session(
         self,
         *,
         request: ChatRequest,
@@ -305,10 +305,10 @@ class ReactRuntime:
                     state.working_memory.get("total"),
                     len(context.messages),
                 )
-            model_response = self._provider_adapter.complete(
+            model_response = await self._provider_adapter.complete(
                 instructions=context.instructions,
                 messages=context.messages,
-                tools=self._tool_registry.tool_definitions(allowed_tools=subagent.allowed_tools),
+                tools=await self._tool_registry.tool_definitions(allowed_tools=subagent.allowed_tools),
                 runtime_hints={
                     "active_subagent": state.active_subagent,
                     "intent": state.intent,
@@ -328,7 +328,7 @@ class ReactRuntime:
             )
 
             if model_response.tool_calls:
-                terminal_after_tools = self._tool_action_observer.execute_tool_calls(
+                terminal_after_tools = await self._tool_action_observer.execute_tool_calls(
                     session_id=session_id,
                     state=state,
                     tool_calls=model_response.tool_calls,

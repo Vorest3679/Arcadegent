@@ -29,7 +29,7 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        on_startup(container)
+        await on_startup(container)
         try:
             yield
         finally:

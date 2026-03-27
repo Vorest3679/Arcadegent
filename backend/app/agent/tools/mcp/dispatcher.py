@@ -338,7 +338,7 @@ class MCPDispatcher:
     def __init__(self, *, client_manager: MCPClientManager | None = None) -> None:
         self._client_manager = client_manager or MCPClientManager()
 
-    def execute(
+    async def execute(
         self,
         *,
         config: MCPServerConfig,
@@ -353,7 +353,7 @@ class MCPDispatcher:
             )
 
         try:
-            result = self._client_manager.call_tool(
+            result = await self._client_manager.call_tool(
                 config=config,
                 remote_name=descriptor.remote_name,
                 arguments=raw_arguments,

@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import Any
-from urllib import error, request
 from uuid import uuid4
+
+import httpx
 
 from app.agent.llm.llm_config import LLMConfig
 from app.infra.observability.logger import get_logger
@@ -52,7 +53,7 @@ class ProviderAdapter:
     def enabled(self) -> bool:
         return self._config.enabled
 
-    def complete(
+    async def complete(
         self,
         *,
         instructions: str,
@@ -89,7 +90,7 @@ class ProviderAdapter:
         responses_error: str | None
         chat_error: str | None
         if self._prefer_chat_completions():
-            by_chat, chat_error = self._try_chat_completions(
+            by_chat, chat_error = await self._try_chat_completions(
                 instructions=instructions,
                 messages=messages,
                 tools=tools,
@@ -101,7 +102,7 @@ class ProviderAdapter:
                     response=by_chat,
                 )
                 return by_chat
-            by_responses, responses_error = self._try_responses_api(
+            by_responses, responses_error = await self._try_responses_api(
                 instructions=instructions,
                 messages=messages,
                 tools=tools,
@@ -114,7 +115,7 @@ class ProviderAdapter:
                 )
                 return by_responses
         else:
-            by_responses, responses_error = self._try_responses_api(
+            by_responses, responses_error = await self._try_responses_api(
                 instructions=instructions,
                 messages=messages,
                 tools=tools,
@@ -127,7 +128,7 @@ class ProviderAdapter:
                 )
                 return by_responses
 
-            by_chat, chat_error = self._try_chat_completions(
+            by_chat, chat_error = await self._try_chat_completions(
                 instructions=instructions,
                 messages=messages,
                 tools=tools,
@@ -151,47 +152,40 @@ class ProviderAdapter:
             f"chat_completions_error={self._format_error(chat_error)}"
         )
 
-    def _post_json(
+    async def _post_json(
         self,
         *,
         endpoint: str,
         payload: dict[str, Any],
     ) -> tuple[dict[str, Any] | None, str | None]:
-        body = json.dumps(payload).encode("utf-8")
-        req = request.Request(
-            endpoint,
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {self._config.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-        )
         try:
-            with request.urlopen(req, timeout=self._config.timeout_seconds) as resp:
-                decoded = _safe_json_loads(resp.read().decode("utf-8", errors="replace"))
-                if not isinstance(decoded, dict):
-                    return None, "response body is not a JSON object"
-                return decoded, None
-        except error.HTTPError as exc:
-            details = ""
-            try:
-                raw = exc.read()
-                if raw:
-                    details = " ".join(raw.decode("utf-8", errors="replace").split())
-            except Exception:
-                details = ""
+            async with httpx.AsyncClient(timeout=self._config.timeout_seconds) as client:
+                response = await client.post(
+                    endpoint,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {self._config.api_key}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                )
+                response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            details = " ".join(exc.response.text.split()) if exc.response is not None else ""
             suffix = f"; body={details[:280]}" if details else ""
-            return None, f"http_error status={exc.code} reason={exc.reason}{suffix}"
-        except error.URLError as exc:
-            return None, f"url_error reason={exc.reason}"
-        except TimeoutError:
+            return None, f"http_error status={exc.response.status_code} reason={exc.response.reason_phrase}{suffix}"
+        except httpx.TimeoutException:
             return None, "timeout_error request timed out"
+        except httpx.RequestError as exc:
+            return None, f"url_error reason={exc}"
         except Exception as exc:  # pragma: no cover
             return None, f"unexpected_error {type(exc).__name__}: {exc}"
+        decoded = _safe_json_loads(response.text)
+        if not isinstance(decoded, dict):
+            return None, "response body is not a JSON object"
+        return decoded, None
 
-    def _try_responses_api(
+    async def _try_responses_api(
         self,
         *,
         instructions: str,
@@ -212,7 +206,7 @@ class ProviderAdapter:
         if tools:
             payload["tools"] = [self._to_responses_tool(tool) for tool in tools]
 
-        decoded, request_error = self._post_json(endpoint=endpoint, payload=payload)
+        decoded, request_error = await self._post_json(endpoint=endpoint, payload=payload)
         if not isinstance(decoded, dict):
             return None, request_error or "responses api returned no data"
 
@@ -302,7 +296,7 @@ class ProviderAdapter:
                         chunks.append(text)
         return chunks
 
-    def _try_chat_completions(
+    async def _try_chat_completions(
         self,
         *,
         instructions: str,
@@ -331,7 +325,7 @@ class ProviderAdapter:
             tool_choice=tool_choice,
         )
 
-        decoded, request_error = self._post_json(endpoint=endpoint, payload=payload)
+        decoded, request_error = await self._post_json(endpoint=endpoint, payload=payload)
         if not isinstance(decoded, dict):
             return None, request_error or "chat completions api returned no data"
 

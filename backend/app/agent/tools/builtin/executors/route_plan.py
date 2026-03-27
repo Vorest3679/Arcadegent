@@ -8,7 +8,7 @@ from app.agent.tools.builtin.provider import BuiltinToolContext
 from app.protocol.messages import Location
 
 
-def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]:
+async def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]:
     """Prefer MCP-based AMap routing when available, otherwise use local fallback."""
     tool = context.require("route_plan_tool")
     origin = Location.model_validate(args["origin"])
@@ -17,13 +17,13 @@ def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]
     route = None
     mcp_tool_gateway = context.get("mcp_tool_gateway")
     if args["provider"] == "amap" and mcp_tool_gateway is not None:
-        route = mcp_tool_gateway.plan_amap_route(
+        route = await mcp_tool_gateway.plan_amap_route(
             mode=args["mode"],
             origin=origin,
             destination=destination,
         )
     if route is None:
-        route = tool.plan_route(
+        route = await tool.plan_route(
             provider=args["provider"],
             mode=args["mode"],
             origin=origin,

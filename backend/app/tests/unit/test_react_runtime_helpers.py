@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+
+from app.agent.events.replay_buffer import ReplayBuffer
+from app.agent.llm.provider_adapter import ModelToolCall
+from app.agent.orchestration.transition_policy import TransitionPolicy
 from app.agent.runtime.react_runtime import _chunk_stream_text
-from app.agent.runtime.session_state import AgentSessionState
+from app.agent.runtime.session_state import AgentSessionState, SessionStateStore
 from app.agent.runtime.tool_action_observer import ToolActionObserver
+from app.agent.tools.registry import ToolExecutionResult
 
 
 def _observer() -> ToolActionObserver:
@@ -137,3 +144,43 @@ def test_chunk_stream_text_keeps_order_and_sentence_boundary() -> None:
     assert "".join(chunks) == text
     assert any(item.endswith(".") for item in chunks)
     assert any(item.endswith("!") for item in chunks)
+
+
+def test_execute_tool_calls_runs_async_tools_in_parallel() -> None:
+    class FakeToolRegistry:
+        async def execute(self, *, call_id: str, tool_name: str, raw_arguments: dict, allowed_tools: list[str]):
+            await asyncio.sleep(0.15)
+            return ToolExecutionResult(
+                call_id=call_id,
+                tool_name=tool_name,
+                status="completed",
+                output={"echo": raw_arguments, "allowed_tools": allowed_tools},
+            )
+
+    observer = ToolActionObserver(
+        tool_registry=FakeToolRegistry(),  # type: ignore[arg-type]
+        transition_policy=TransitionPolicy(),
+        replay_buffer=ReplayBuffer(),
+        session_store=SessionStateStore(),
+    )
+    state = AgentSessionState(session_id="s_parallel")
+    state.active_subagent = "search_agent"
+    tool_calls = [
+        ModelToolCall(call_id="call_1", name="custom_tool_a", arguments={"value": 1}),
+        ModelToolCall(call_id="call_2", name="custom_tool_b", arguments={"value": 2}),
+    ]
+
+    started_at = time.perf_counter()
+    terminal = asyncio.run(
+        observer.execute_tool_calls(
+            session_id="s_parallel",
+            state=state,
+            tool_calls=tool_calls,
+            allowed_tools=["custom_tool_a", "custom_tool_b"],
+        )
+    )
+    elapsed = time.perf_counter() - started_at
+
+    assert terminal is False
+    assert elapsed < 0.28
+    assert [turn.name for turn in state.turns] == ["custom_tool_a", "custom_tool_b"]

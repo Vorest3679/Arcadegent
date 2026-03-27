@@ -76,7 +76,7 @@ class MCPToolGateway:
     def enabled(self) -> bool:
         return any(config.enabled for config in self._servers.values())
 
-    def refresh(self) -> None:
+    async def refresh(self) -> None:
         """Refresh all configured MCP tool definitions.
         刷新所有配置的MCP工具定义。
         这个方法会遍历所有配置的MCP服务器，尝试从每个服务器获取工具列表，
@@ -108,7 +108,7 @@ class MCPToolGateway:
                 continue
 
             try:
-                raw_tools = self._client_manager.list_tools(config)
+                raw_tools = await self._client_manager.list_tools(config)
                 discovered = discover_tools(server_name, raw_tools)
                 for descriptor in discovered:
                     descriptors[descriptor.local_name] = descriptor
@@ -136,12 +136,12 @@ class MCPToolGateway:
         self._tools = descriptors
         self._discovered_once = True
 
-    def ensure_ready(self) -> None:
+    async def ensure_ready(self) -> None:
         if self.enabled and not self._discovered_once:
-            self.refresh()
+            await self.refresh()
 
-    def get_tools(self) -> dict[str, ToolDescriptor]:
-        self.ensure_ready()
+    async def get_tools(self) -> dict[str, ToolDescriptor]:
+        await self.ensure_ready()
         descriptors: dict[str, ToolDescriptor] = {}
         for local_name, descriptor in self._tools.items():
             descriptors[local_name] = ToolDescriptor(
@@ -154,9 +154,9 @@ class MCPToolGateway:
             )
         return descriptors
 
-    def build_tool_definitions(self, *, allowed_tools: list[str], strict: bool) -> list[dict[str, Any]]:
+    async def build_tool_definitions(self, *, allowed_tools: list[str], strict: bool) -> list[dict[str, Any]]:
         definitions: list[dict[str, Any]] = []
-        tools = self.get_tools()
+        tools = await self.get_tools()
         allow_all_mcp = "mcp__*" in allowed_tools
         for tool_name in sorted(tools):
             if not (allow_all_mcp or tool_name in allowed_tools):
@@ -176,10 +176,9 @@ class MCPToolGateway:
         return definitions
 
     def has_tool(self, tool_name: str) -> bool:
-        self.ensure_ready()
         return tool_name in self._tools
 
-    def execute(
+    async def execute(
         self,
         *,
         tool_name: str,
@@ -187,7 +186,7 @@ class MCPToolGateway:
         validated_arguments: Any | None = None,
     ) -> MCPExecutionResult:
         _ = validated_arguments
-        self.ensure_ready()
+        await self.ensure_ready()
         descriptor = self._tools.get(tool_name)
         if descriptor is None:
             return MCPExecutionResult(
@@ -203,13 +202,13 @@ class MCPToolGateway:
                 output={"error": {"type": "runtime_error", "message": message}},
                 error_message=message,
             )
-        return self._dispatcher.execute(
+        return await self._dispatcher.execute(
             config=config,
             descriptor=descriptor,
             raw_arguments=raw_arguments,
         )
 
-    def plan_amap_route(
+    async def plan_amap_route(
         self,
         *,
         mode: str,
@@ -218,7 +217,7 @@ class MCPToolGateway:
     ) -> RouteSummaryDto | None:
         """Use a discovered AMap MCP route tool when one is available.
         当有可用的已发现的AMap MCP路线工具时使用它。"""
-        self.ensure_ready()
+        await self.ensure_ready()
         descriptor = pick_route_descriptor(
             descriptors=list(self._tools.values()),
             server_name="amap",
@@ -232,7 +231,7 @@ class MCPToolGateway:
             destination=destination,
             mode=mode,
         )
-        result = self.execute(tool_name=descriptor.local_name, raw_arguments=arguments)
+        result = await self.execute(tool_name=descriptor.local_name, raw_arguments=arguments)
         if result.status != "completed":
             logger.warning(
                 "mcp.route.failed tool=%s error=%s",
@@ -249,7 +248,6 @@ class MCPToolGateway:
             return None
 
     def health(self) -> dict[str, Any]:
-        self.ensure_ready()
         return {
             "enabled": self.enabled,
             "discovered_tool_count": len(self._tools),

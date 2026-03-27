@@ -1,4 +1,4 @@
-"""Shared descriptor, validation, and provider interfaces for runtime tools."""
+"""Shared descriptor, validation, and async provider interfaces for runtime tools."""
 
 from __future__ import annotations
 
@@ -50,10 +50,10 @@ class ToolProvider(Protocol):
     def provider_name(self) -> str:
         """Stable provider id used for metadata and health aggregation."""
 
-    def get_tools(self) -> dict[str, ToolDescriptor]:
+    async def get_tools(self) -> dict[str, ToolDescriptor]:
         """Return current tool descriptors keyed by local tool name."""
 
-    def execute(
+    async def execute(
         self,
         *,
         tool_name: str,
@@ -62,7 +62,7 @@ class ToolProvider(Protocol):
     ) -> ProviderExecutionResult:
         """Execute one tool call and normalize the result."""
 
-    def refresh(self) -> None:
+    async def refresh(self) -> None:
         """Refresh provider state when underlying tools can change."""
 
     def health(self) -> dict[str, Any]:

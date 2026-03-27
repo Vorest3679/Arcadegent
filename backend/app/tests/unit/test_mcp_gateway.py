@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -106,14 +107,16 @@ def test_mcp_gateway_discovers_and_executes_http_tools() -> None:
             ]
         )
 
-        gateway.refresh()
-        definitions = gateway.build_tool_definitions(allowed_tools=["mcp__*"], strict=True)
+        asyncio.run(gateway.refresh())
+        definitions = asyncio.run(gateway.build_tool_definitions(allowed_tools=["mcp__*"], strict=True))
         names = [item["function"]["name"] for item in definitions]
         assert "mcp__amap__maps_direction_walking" in names
 
-        result = gateway.execute(
-            tool_name="mcp__amap__maps_direction_walking",
-            raw_arguments={"origin": "116.3,39.9", "destination": "116.4,39.91"},
+        result = asyncio.run(
+            gateway.execute(
+                tool_name="mcp__amap__maps_direction_walking",
+                raw_arguments={"origin": "116.3,39.9", "destination": "116.4,39.91"},
+            )
         )
 
         assert result.status == "completed"

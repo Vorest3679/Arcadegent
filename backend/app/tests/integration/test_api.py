@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -45,7 +46,9 @@ def _build_client(tmp_path: Path, *, session_store_path: Path | None = None) -> 
 
     from app.main import create_app
 
-    return TestClient(create_app())
+    client = TestClient(create_app())
+    client.__enter__()
+    return client
 
 
 def _build_client_with_rows(
@@ -65,7 +68,9 @@ def _build_client_with_rows(
 
     from app.main import create_app
 
-    return TestClient(create_app())
+    client = TestClient(create_app())
+    client.__enter__()
+    return client
 
 
 def _wait_for_session_status(
@@ -234,9 +239,9 @@ def test_chat_dispatch_rejects_duplicate_running_session(tmp_path: Path) -> None
     runtime = client.app.state.container.react_runtime
     original_run_chat = runtime.run_chat
 
-    def slow_run_chat(request):
-        time.sleep(0.2)
-        return original_run_chat(request)
+    async def slow_run_chat(request):
+        await asyncio.sleep(0.2)
+        return await original_run_chat(request)
 
     runtime.run_chat = slow_run_chat  # type: ignore[method-assign]
 

@@ -154,7 +154,7 @@ def _to_detail(state: AgentSessionState) -> ChatSessionDetailDto:
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(
+async def chat(
     request: ChatRequest,
     container: AppContainer = Depends(get_container),
 ) -> ChatResponse:
@@ -166,7 +166,7 @@ def chat(
         " ".join(request.message.split())[:160],
     )
     try:
-        response = container.orchestrator.run_chat(request)
+        response = await container.orchestrator.run_chat(request)
     except SessionAlreadyRunningError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     logger.info(
@@ -195,7 +195,7 @@ async def dispatch_chat_session(
         " ".join(request.message.split())[:160],
     )
     try:
-        session_id = container.orchestrator.dispatch_chat(request)
+        session_id = await container.orchestrator.dispatch_chat(request)
     except SessionAlreadyRunningError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ChatSessionDispatchDto(session_id=session_id, status="running")

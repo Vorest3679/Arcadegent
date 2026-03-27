@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -12,6 +13,10 @@ from app.agent.tools.mcp_gateway import MCPServerConfig, MCPToolGateway
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.infra.db.local_store import LocalArcadeStore
+
+
+def _run(awaitable):
+    return asyncio.run(awaitable)
 
 
 def _write_rows(path: Path) -> None:
@@ -94,13 +99,13 @@ def _build_mcp_gateway() -> MCPToolGateway:
             )
         ]
     )
-    gateway.refresh()
+    _run(gateway.refresh())
     return gateway
 
 
 def test_tool_registry_returns_validation_error_for_bad_args(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path)
-    result = registry.execute(
+    result = _run(registry.execute(
         call_id="c1",
         tool_name="route_plan_tool",
         raw_arguments={
@@ -110,14 +115,14 @@ def test_tool_registry_returns_validation_error_for_bad_args(tmp_path: Path) -> 
             "destination": {"lng": 116.4},
         },
         allowed_tools=["route_plan_tool"],
-    )
+    ))
     assert result.status == "failed"
     assert result.output["error"]["type"] == "validation_error"
 
 
 def test_tool_registry_can_lookup_one_shop(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path)
-    result = registry.execute(
+    result = _run(registry.execute(
         call_id="c2",
         tool_name="db_query_tool",
         raw_arguments={
@@ -131,14 +136,14 @@ def test_tool_registry_can_lookup_one_shop(tmp_path: Path) -> None:
             "shop_id": 1,
         },
         allowed_tools=["db_query_tool"],
-    )
+    ))
     assert result.status == "completed"
     assert result.output["shop"]["source_id"] == 1
 
 
 def test_tool_registry_normalizes_city_name_in_city_code_field(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path)
-    result = registry.execute(
+    result = _run(registry.execute(
         call_id="c3",
         tool_name="db_query_tool",
         raw_arguments={
@@ -155,7 +160,7 @@ def test_tool_registry_normalizes_city_name_in_city_code_field(tmp_path: Path) -
             "shop_id": None,
         },
         allowed_tools=["db_query_tool"],
-    )
+    ))
     assert result.status == "completed"
     assert result.output["total"] == 1
     assert result.output["shops"][0]["source_id"] == 1
@@ -206,7 +211,7 @@ def test_tool_registry_supports_title_quantity_sorting(tmp_path: Path) -> None:
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
         strict_schema=True,
     )
-    result = registry.execute(
+    result = _run(registry.execute(
         call_id="c4",
         tool_name="db_query_tool",
         raw_arguments={
@@ -219,7 +224,7 @@ def test_tool_registry_supports_title_quantity_sorting(tmp_path: Path) -> None:
             "page_size": 10,
         },
         allowed_tools=["db_query_tool"],
-    )
+    ))
     assert result.status == "completed"
     assert result.output["total"] == 3
     assert [row["source_id"] for row in result.output["shops"]] == [2, 1, 3]
@@ -266,7 +271,7 @@ def test_tool_registry_backfills_sort_title_name_from_keyword(tmp_path: Path) ->
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
         strict_schema=True,
     )
-    result = registry.execute(
+    result = _run(registry.execute(
         call_id="c5",
         tool_name="db_query_tool",
         raw_arguments={
@@ -279,7 +284,7 @@ def test_tool_registry_backfills_sort_title_name_from_keyword(tmp_path: Path) ->
             "page_size": 10,
         },
         allowed_tools=["db_query_tool"],
-    )
+    ))
     assert result.status == "completed"
     assert [row["source_id"] for row in result.output["shops"]] == [2, 1]
     assert result.output["query"]["sort_title_name"] == "maimai"
@@ -288,7 +293,7 @@ def test_tool_registry_backfills_sort_title_name_from_keyword(tmp_path: Path) ->
 def test_tool_registry_includes_discovered_mcp_tools_when_allowed(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
 
-    definitions = registry.tool_definitions(allowed_tools=["route_plan_tool", "mcp__*"])
+    definitions = _run(registry.tool_definitions(allowed_tools=["route_plan_tool", "mcp__*"]))
     names = [
         item["function"]["name"]
         for item in definitions
@@ -302,7 +307,7 @@ def test_tool_registry_includes_discovered_mcp_tools_when_allowed(tmp_path: Path
 def test_tool_registry_gettools_aggregates_builtin_and_mcp_tools(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
 
-    tools = registry.gettools()
+    tools = _run(registry.gettools())
 
     assert "db_query_tool" in tools
     assert tools["db_query_tool"].provider == "builtin"
@@ -314,7 +319,7 @@ def test_tool_registry_gettools_aggregates_builtin_and_mcp_tools(tmp_path: Path)
 def test_tool_registry_can_execute_discovered_mcp_tool(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
 
-    result = registry.execute(
+    result = _run(registry.execute(
         call_id="c6",
         tool_name="mcp__amap__maps_direction_walking",
         raw_arguments={
@@ -322,7 +327,7 @@ def test_tool_registry_can_execute_discovered_mcp_tool(tmp_path: Path) -> None:
             "destination": "116.4,39.91",
         },
         allowed_tools=["mcp__*"],
-    )
+    ))
 
     assert result.status == "completed"
     assert result.output["server"] == "amap"
@@ -334,7 +339,7 @@ def test_tool_registry_can_execute_discovered_mcp_tool(tmp_path: Path) -> None:
 def test_route_plan_tool_prefers_amap_mcp_when_available(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
 
-    result = registry.execute(
+    result = _run(registry.execute(
         call_id="c7",
         tool_name="route_plan_tool",
         raw_arguments={
@@ -344,7 +349,7 @@ def test_route_plan_tool_prefers_amap_mcp_when_available(tmp_path: Path) -> None
             "destination": {"lng": 116.4, "lat": 39.91},
         },
         allowed_tools=["route_plan_tool", "mcp__*"],
-    )
+    ))
 
     assert result.status == "completed"
     assert result.output["route"]["provider"] == "amap"

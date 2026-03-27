@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
-from urllib import error, parse, request
+from urllib import parse
+
+import httpx
 
 from app.protocol.messages import Location, ProviderType, RouteSummaryDto
 
@@ -57,7 +59,7 @@ class RoutePlanTool:
     def __init__(self, amap_config: AMapConfig | None = None) -> None:
         self._amap_config = amap_config
 
-    def _plan_with_amap(
+    async def _plan_with_amap(
         self,
         *,
         mode: str,
@@ -77,15 +79,15 @@ class RoutePlanTool:
             }
         )
         url = self._amap_config.base_url.rstrip("/") + endpoint + "?" + query
-        req = request.Request(url, method="GET")
         try:
-            with request.urlopen(req, timeout=self._amap_config.timeout_seconds) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-        except (error.URLError, error.HTTPError, TimeoutError):
+            async with httpx.AsyncClient(timeout=self._amap_config.timeout_seconds) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+        except (httpx.HTTPError, TimeoutError):
             return None
 
         try:
-            payload = json.loads(raw)
+            payload = response.json()
         except json.JSONDecodeError:
             return None
 
@@ -122,7 +124,7 @@ class RoutePlanTool:
             hint=None,
         )
 
-    def plan_route(
+    async def plan_route(
         self,
         *,
         provider: ProviderType,
@@ -133,7 +135,7 @@ class RoutePlanTool:
         """规划路线，优先使用高德地图API，失败时返回离线估算结果。"""
         amap_result = None
         if provider == "amap":
-            amap_result = self._plan_with_amap(
+            amap_result = await self._plan_with_amap(
                 mode=mode,
                 origin=origin,
                 destination=destination,

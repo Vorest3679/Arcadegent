@@ -4,11 +4,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 import importlib
+import inspect
 import os
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 
 from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
 from app.agent.tools.schemas import build_json_schema_validator, load_json_schema
@@ -53,7 +55,10 @@ class BuiltinToolContext:
             return None
 
 
-BuiltinToolExecutor = Callable[[BuiltinToolContext, dict[str, Any]], dict[str, Any]]
+BuiltinToolExecutor = Callable[
+    [BuiltinToolContext, dict[str, Any]],
+    dict[str, Any] | Awaitable[dict[str, Any]],
+]
 
 
 @dataclass(frozen=True)
@@ -93,25 +98,25 @@ class BuiltinToolProvider:
         self._service_specs: dict[str, _BuiltinServiceSpec] = {} # service_name -> spec
         self._service_cache: dict[str, Any] = {} # service_name -> instance
         self._resolving_services: set[str] = set() # service_names currently being resolved (for cycle detection)
-        self.refresh() # load tools and services on initialization
+        self._bindings = self._load_bindings() # load tools and services on initialization
 
     @property
     def provider_name(self) -> str:
         return "builtin"
 
-    def refresh(self) -> None:
+    async def refresh(self) -> None:
         self._service_specs = {} # service_name -> spec
         self._service_cache = {} # service_name -> instance
         self._resolving_services = set() # service_names currently being resolved (for cycle detection)
         self._bindings = self._load_bindings()
 
-    def get_tools(self) -> dict[str, ToolDescriptor]:
+    async def get_tools(self) -> dict[str, ToolDescriptor]:
         return {
             name: binding.descriptor
             for name, binding in self._bindings.items()
         }
 
-    def execute(
+    async def execute(
         self,
         *,
         tool_name: str,
@@ -126,7 +131,10 @@ class BuiltinToolProvider:
         if binding is None:
             raise ValueError(f"unknown_tool:{tool_name}")
         payload = validated_arguments if isinstance(validated_arguments, dict) else raw_arguments
-        output = binding.executor(self._context, payload)
+        if inspect.iscoroutinefunction(binding.executor):
+            output = await binding.executor(self._context, payload)
+        else:
+            output = await asyncio.to_thread(binding.executor, self._context, payload)
         return ProviderExecutionResult(status="completed", output=output)
 
     def health(self) -> dict[str, Any]:

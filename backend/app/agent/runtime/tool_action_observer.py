@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -94,7 +95,7 @@ class ToolActionObserver:
         self._replay_buffer = replay_buffer
         self._session_store = session_store
 
-    def execute_tool_calls(
+    async def execute_tool_calls(
         self,
         *,
         session_id: str,
@@ -103,6 +104,7 @@ class ToolActionObserver:
         allowed_tools: list[str],
     ) -> bool:
         terminal = False
+        execution_tasks: list[asyncio.Task[ToolExecutionResult]] = []
         for call in tool_calls:
             prepared_args, hydrated_fields = self._prepare_tool_arguments(
                 state=state,
@@ -133,12 +135,18 @@ class ToolActionObserver:
                     "active_subagent": state.active_subagent,
                 },
             )
-            result = self._tool_registry.execute(
-                call_id=call.call_id,
-                tool_name=call.name,
-                raw_arguments=prepared_args,
-                allowed_tools=allowed_tools,
+            execution_tasks.append(
+                asyncio.create_task(
+                    self._tool_registry.execute(
+                        call_id=call.call_id,
+                        tool_name=call.name,
+                        raw_arguments=prepared_args,
+                        allowed_tools=allowed_tools,
+                    )
+                )
             )
+        results = await asyncio.gather(*execution_tasks) if execution_tasks else []
+        for result in results:
             self.record_tool_result(session_id=session_id, state=state, result=result)
             if self._transition_policy.is_terminal_tool(
                 tool_name=result.tool_name,

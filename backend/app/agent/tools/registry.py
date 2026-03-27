@@ -1,4 +1,4 @@
-"""Unified tool registry with provider-based validation and execution routing."""
+"""Unified async tool registry with provider-based validation and execution routing."""
 
 from __future__ import annotations
 
@@ -49,8 +49,8 @@ class ToolRegistry:
             providers or self._build_legacy_providers(legacy_dependencies=legacy_dependencies)
         )
 
-    def get_tools(self, *, allowed_tools: list[str] | None = None) -> dict[str, ToolDescriptor]:
-        tools, _ = self._collect_tools()
+    async def get_tools(self, *, allowed_tools: list[str] | None = None) -> dict[str, ToolDescriptor]:
+        tools, _ = await self._collect_tools()
         if allowed_tools is None:
             return tools
         return {
@@ -59,15 +59,15 @@ class ToolRegistry:
             if self._matches_allowed_tools(name, allowed_tools)
         }
 
-    def gettools(self, *, allowed_tools: list[str] | None = None) -> dict[str, ToolDescriptor]:
+    async def gettools(self, *, allowed_tools: list[str] | None = None) -> dict[str, ToolDescriptor]:
         """Compatibility alias for provider-aggregated tool discovery.
         用于提供程序聚合工具发现的兼容性别名。"""
-        return self.get_tools(allowed_tools=allowed_tools)
+        return await self.get_tools(allowed_tools=allowed_tools)
 
-    def tool_definitions(self, *, allowed_tools: list[str]) -> list[dict[str, Any]]:
+    async def tool_definitions(self, *, allowed_tools: list[str]) -> list[dict[str, Any]]:
         """Return the tool definitions for the tools matching the allowed patterns, including their JSON Schemas.
         返回与允许的模式匹配的工具的工具定义，包括它们的 JSON Schema。"""
-        tools = self.get_tools()
+        tools = await self.get_tools()
         definitions: list[dict[str, Any]] = []
         seen: set[str] = set()
         for pattern in allowed_tools:
@@ -82,14 +82,14 @@ class ToolRegistry:
                 seen.add(name)
         return definitions
 
-    def refresh_tools(self) -> None:
+    async def refresh_tools(self) -> None:
         for provider in self._providers:
-            provider.refresh()
+            await provider.refresh()
 
-    def refresh_mcp_tools(self) -> None:
+    async def refresh_mcp_tools(self) -> None:
         for provider in self._providers:
             if provider.provider_name == "mcp":
-                provider.refresh()
+                await provider.refresh()
 
     def provider_health(self) -> dict[str, Any]:
         return {
@@ -107,7 +107,7 @@ class ToolRegistry:
             "servers": {},
         }
 
-    def execute(
+    async def execute(
         self,
         *,
         call_id: str,
@@ -119,7 +119,7 @@ class ToolRegistry:
             # Perform permission check before any other processing to fail fast on unauthorized access.
             # 在任何其他处理之前执行权限检查，以便在未经授权访问时快速失败。
             self._permission_checker.ensure_allowed(tool_name=tool_name, allowed_tools=allowed_tools)
-            tools, owners = self._collect_tools()
+            tools, owners = await self._collect_tools()
             descriptor = tools.get(tool_name)
             provider = owners.get(tool_name)
             if descriptor is None or provider is None:
@@ -128,8 +128,7 @@ class ToolRegistry:
             if descriptor.validator is not None:
                 validated = descriptor.validator(raw_arguments)
 
-
-            result = provider.execute(
+            result = await provider.execute(
                 tool_name=tool_name,
                 raw_arguments=raw_arguments,
                 validated_arguments=validated,
@@ -201,13 +200,13 @@ class ToolRegistry:
         providers.append(mcp_tool_gateway)
         return providers
 
-    def _collect_tools(self) -> tuple[dict[str, ToolDescriptor], dict[str, ToolProvider]]:
+    async def _collect_tools(self) -> tuple[dict[str, ToolDescriptor], dict[str, ToolProvider]]:
         """Aggregate tools from all providers, ensuring no name conflicts and building a mapping of tool names to their owning providers.
         从所有提供程序聚合工具，确保没有名称冲突，并构建工具名称到其所属提供程序的映射。"""
         tools: dict[str, ToolDescriptor] = {}
         owners: dict[str, ToolProvider] = {}
         for provider in self._providers:
-            for name, descriptor in provider.get_tools().items():
+            for name, descriptor in (await provider.get_tools()).items():
                 if name in tools:
                     raise ValueError(f"duplicate_tool:{name}")
                 tools[name] = descriptor
