@@ -102,38 +102,50 @@ LLM_API_KEY=
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
 
-MCP_AMAP_ENABLED=true
-MCP_AMAP_BASE_URL=https://mcp.amap.com/mcp
-MCP_AMAP_ROUTE_TOOL_NAME=
+MCP_SERVERS_DIR=backend/app/agent/tools/mcp/servers
+MCP_DEFAULT_TIMEOUT_SECONDS=10
 
 AMAP_API_KEY=
 AMAP_BASE_URL=https://restapi.amap.com
-MCP_AMAP_API_KEY=
 ```
 
 说明：
 
 - `ARCADE_DATA_JSONL` 是后端实际读取的数据源，默认指向 `data/raw/bemanicn/shops_detail.jsonl`。
 - 未配置 `LLM_API_KEY` 时服务仍可启动，但 Agent 对话会明显退化，联调前建议配置。
-- 现在也支持直接通过标准 `mcpServers` JSON 加载 MCP server，可用 `MCP_SERVERS_JSON` 或 `MCP_SERVERS_PATH` 提供配置。
-- `MCP_AMAP_ENABLED=true` 时，后端会启用 FastMCP Client 并在启动时探测高德 MCP tools。
-- `MCP_AMAP_ROUTE_TOOL_NAME` 可选。留空时后端会在启动时自动挑选 route tool；如果自动识别不准确，可以手动指定。
+- MCP server 推荐按目录组织 JSON 配置，默认会扫描 `backend/app/agent/tools/mcp/servers/*.json`；也可以通过 `MCP_SERVERS_DIR` 指向别的目录。
 - `AMAP_API_KEY` 会被 MCP 和 REST fallback 共同复用；只配这一项就可以。
-- `MCP_AMAP_API_KEY` 现在只是可选覆盖项。只有在你想让 MCP 和 REST 使用不同 key 时才需要单独填写。
 - 当前推荐路径是高德官方 `Streamable HTTP` MCP endpoint，不需要额外安装 Node.js MCP server。
-- 如果标准 JSON 里已经定义了同名 `amap` server，容器会优先使用 JSON 配置，不再额外追加 legacy 的 `MCP_AMAP_*` 配置。
 
-标准 MCP JSON 配置示例：
+目录中的单文件配置示例：
 
-```dotenv
-MCP_SERVERS_JSON={"mcpServers":{"fetch":{"type":"sse","url":"https://mcp.api-inference.modelscope.net/"},"assistant":{"command":"python","args":["./assistant_server.py"],"env":{"LOG_LEVEL":"INFO"}}}}
-MCP_DEFAULT_TIMEOUT_SECONDS=10
+文件：`backend/app/agent/tools/mcp/servers/amap.json`
+
+```json
+{
+  "url": "https://mcp.amap.com/mcp?key=your_amap_key",
+  "route_tool_name": "maps_direction_walking"
+}
 ```
 
-也可以把同样内容写到一个 JSON 文件里，再通过：
+文件名会作为 server name，因此这里会注册成 `amap`。
+
+或者：
+
+文件：`backend/app/agent/tools/mcp/servers/fetch.json`
+
+```json
+{
+  "transport": "sse",
+  "url": "https://mcp.api-inference.modelscope.net/"
+}
+```
+
+如果你不想用默认目录，也可以通过：
 
 ```dotenv
-MCP_SERVERS_PATH=./config/mcp.json
+MCP_SERVERS_DIR=./config/mcp
+MCP_DEFAULT_TIMEOUT_SECONDS=10
 ```
 
 ### 4. 启动后端 API
@@ -167,7 +179,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --access-log
 - 自动或手动选中的 route tool
 - 最近一次错误信息
 
-如果高德 MCP 接通但没有成功选中路线工具，先看 `/health` 里的 `mcp.amap.available_tools`，再把正确的名字写回 `MCP_AMAP_ROUTE_TOOL_NAME`。
+如果高德 MCP 接通但没有成功选中路线工具，先看 `/health` 里的 `mcp.amap.available_tools`，再把正确的名字写回 `backend/app/agent/tools/mcp/servers/amap.json` 的 `route_tool_name` 字段。
 
 ### 5. 启动前端
 
@@ -267,5 +279,5 @@ npm run build
 ## 当前限制
 
 - 机厅查询目前使用本地 JSONL 读模型，不是数据库在线查询。
-- 高德 MCP tool 的自动识别依赖启动时 discovery；如果第三方 tool 命名发生变化，可能需要手动设置 `MCP_AMAP_ROUTE_TOOL_NAME`。
-- 在没有 `AMAP_API_KEY`，且也没有单独提供 `MCP_AMAP_API_KEY` 的情况下，路线规划会退化为离线估算。
+- 高德 MCP tool 的自动识别依赖启动时 discovery；如果第三方 tool 命名发生变化，可能需要在 `amap.json` 里手动设置 `route_tool_name`。
+- 在没有 `AMAP_API_KEY` 的情况下，路线规划会退化为离线估算。

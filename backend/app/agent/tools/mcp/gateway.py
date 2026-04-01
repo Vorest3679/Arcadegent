@@ -6,7 +6,6 @@ from __future__ import annotations
 # 总得来说属于一个工具网关，负责发现 MCP 工具并通过 FastMCP 客户端执行它们。
 # 是本模块下的核心类，提供了工具发现、工具定义构建、工具执行等功能。
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +19,6 @@ from app.agent.tools.mcp.discovery import (
     pick_route_tool,
     short,
     utc_now_iso,
-    with_query_param,
 )
 from app.agent.tools.mcp.dispatcher import (
     MCPDispatcher,
@@ -33,6 +31,7 @@ from app.agent.tools.mcp.models import (
     MCPServerState,
     MCPToolDescriptor,
 )
+from app.agent.tools.schemas import load_json_schema
 from app.infra.observability.logger import get_logger
 from app.protocol.messages import Location, RouteSummaryDto
 
@@ -85,20 +84,69 @@ def _extract_timeout_seconds(
     return timeout_ms / 1000.0
 
 
-def _extract_server_configs(raw_config: dict[str, Any]) -> dict[str, Any]:
-    """Extract server configurations from the raw MCP config, supporting both an explicit 'mcpServers' object and a root-level server mapping for backward compatibility.
-    从原始 MCP 配置中提取服务器配置，支持显式的 'mcpServers' 对象和根级服务器映射以保持向后兼容。"""
+def _is_server_payload(value: Any) -> bool:
+    return isinstance(value, dict) and ("command" in value or "url" in value)
+
+
+def _extract_server_configs(
+    raw_config: dict[str, Any],
+    *,
+    default_server_name: str | None = None,
+) -> dict[str, Any]:
+    """Extract server configurations from raw MCP config objects.
+    从原始 MCP 配置对象中提取服务器配置。"""
     mcp_servers = raw_config.get("mcpServers")
     if isinstance(mcp_servers, dict):
         return mcp_servers
 
-    has_root_server_mapping = any(
-        isinstance(value, dict) and ("command" in value or "url" in value)
-        for value in raw_config.values()
-    )
+    if default_server_name is not None and _is_server_payload(raw_config):
+        return {default_server_name: raw_config}
+
+    has_root_server_mapping = any(_is_server_payload(value) for value in raw_config.values())
     if has_root_server_mapping:
         return raw_config
-    raise ValueError("mcp config must contain an 'mcpServers' object or a root-level server mapping")
+    raise ValueError(
+        "mcp config must contain an 'mcpServers' object, a root-level server mapping, "
+        "or a single-server object"
+    )
+
+
+def _merge_server_configs(
+    *,
+    merged: dict[str, Any],
+    incoming: dict[str, Any],
+    source_label: str,
+) -> None:
+    for server_name, payload in incoming.items():
+        normalized_name = str(server_name).strip()
+        if not normalized_name:
+            raise ValueError(f"mcp server name must not be empty in {source_label}")
+        if normalized_name in merged:
+            raise ValueError(f"duplicate_mcp_server:{normalized_name}:{source_label}")
+        merged[normalized_name] = payload
+
+
+def _load_server_configs_from_directory(config_dir: Path) -> dict[str, Any]:
+    if not config_dir.exists():
+        raise ValueError(f"mcp config directory does not exist: {config_dir}")
+    if not config_dir.is_dir():
+        raise ValueError(f"mcp config directory is not a directory: {config_dir}")
+
+    merged: dict[str, Any] = {}
+    for path in sorted(config_dir.glob("*.json")):
+        if not path.is_file():
+            continue
+        payload = load_json_schema(path)
+        server_configs = _extract_server_configs(
+            payload,
+            default_server_name=path.stem.strip() or None,
+        )
+        _merge_server_configs(
+            merged=merged,
+            incoming=server_configs,
+            source_label=str(path),
+        )
+    return merged
 
 
 def _normalize_server_payload(server_name: str, raw_payload: Any) -> dict[str, Any]:
@@ -118,22 +166,21 @@ def _normalize_server_payload(server_name: str, raw_payload: Any) -> dict[str, A
 def build_mcp_server_configs(
     *,
     raw_config: dict[str, Any] | None = None,
-    config_json: str = "",
-    config_path: str | Path | None = None,
+    config_dir: str | Path | None = None,
     default_timeout_seconds: float = 10.0,
 ) -> list[MCPServerConfig]:
-    """Build runtime server configs from a standard MCP JSON object/string/file."""
+    """Build runtime server configs from standard MCP JSON objects or directories."""
     if raw_config is None:
-        if config_json.strip():
-            raw_config = json.loads(config_json)
-        elif config_path is not None:
-            path = Path(config_path)
-            content = path.read_text(encoding="utf-8").strip()
-            if not content:
-                raise ValueError(f"mcp config file is empty: {path}")
-            raw_config = json.loads(content)
-        else:
+        merged_server_configs: dict[str, Any] = {}
+        if config_dir is not None:
+            _merge_server_configs(
+                merged=merged_server_configs,
+                incoming=_load_server_configs_from_directory(Path(config_dir)),
+                source_label=str(config_dir),
+            )
+        if not merged_server_configs:
             return []
+        raw_config = {"mcpServers": merged_server_configs}
 
     if not isinstance(raw_config, dict):
         raise ValueError("mcp config must be a JSON object")
@@ -398,38 +445,3 @@ class MCPToolGateway:
                 for name, state in sorted(self._states.items())
             },
         }
-
-
-def build_amap_mcp_server_config(
-    *,
-    enabled: bool,
-    base_url: str,
-    api_key: str,
-    timeout_seconds: float,
-    route_tool_name: str | None,
-) -> MCPServerConfig:
-    """Build an AMap MCP config using HTTP or a local FastMCP server script."""
-    raw_base = base_url.strip()
-    if raw_base.endswith(".py") and Path(raw_base).exists():
-        return MCPServerConfig(
-            name="amap",
-            enabled=enabled,
-            source=raw_base,
-            url=raw_base,
-            timeout_seconds=timeout_seconds,
-            route_tool_name=route_tool_name,
-            source_type="script",
-        )
-
-    url = raw_base or "https://mcp.amap.com/mcp"
-    if api_key.strip():
-        url = with_query_param(url, key="key", value=api_key.strip())
-    return MCPServerConfig(
-        name="amap",
-        enabled=enabled,
-        source=url,
-        url=url,
-        timeout_seconds=timeout_seconds,
-        route_tool_name=route_tool_name,
-        source_type="http",
-    )

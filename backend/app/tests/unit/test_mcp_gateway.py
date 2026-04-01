@@ -1,9 +1,11 @@
-"""Focused tests for FastMCP HTTP discovery and AMap MCP config building."""
+"""Focused tests for FastMCP MCP config loading and tool discovery."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
+import sys
 
 from fastmcp import FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
@@ -13,7 +15,6 @@ import httpx
 from app.agent.tools.mcp import (
     MCPServerConfig,
     MCPToolGateway,
-    build_amap_mcp_server_config,
     build_mcp_server_configs,
 )
 
@@ -40,38 +41,6 @@ def _build_http_transport(app: object, *, path: str = "/mcp") -> StreamableHttpT
         url=f"http://testserver{path}",
         httpx_client_factory=_factory,
     )
-
-
-def test_build_amap_mcp_server_config_uses_http_url() -> None:
-    config = build_amap_mcp_server_config(
-        enabled=True,
-        base_url="https://mcp.amap.com/mcp",
-        api_key="secret-key",
-        timeout_seconds=9,
-        route_tool_name="maps_direction_walking",
-    )
-
-    assert config.source == "https://mcp.amap.com/mcp?key=secret-key"
-    assert config.url == "https://mcp.amap.com/mcp?key=secret-key"
-    assert config.source_type == "http"
-    assert config.route_tool_name == "maps_direction_walking"
-
-
-def test_build_amap_mcp_server_config_accepts_local_script(tmp_path: Path) -> None:
-    script_path = tmp_path / "mock_server.py"
-    script_path.write_text("print('placeholder')\n", encoding="utf-8")
-
-    config = build_amap_mcp_server_config(
-        enabled=True,
-        base_url=str(script_path),
-        api_key="",
-        timeout_seconds=9,
-        route_tool_name=None,
-    )
-
-    assert config.source == str(script_path)
-    assert config.url == str(script_path)
-    assert config.source_type == "script"
 
 
 def test_build_mcp_server_configs_accepts_standard_remote_json() -> None:
@@ -125,6 +94,81 @@ def test_build_mcp_server_configs_accepts_standard_stdio_json() -> None:
     assert config.source["mcpServers"]["assistant"]["command"] == "python"
     assert config.source["mcpServers"]["assistant"]["args"] == ["./assistant_server.py"]
     assert config.source["mcpServers"]["assistant"]["env"] == {"LOG_LEVEL": "INFO"}
+
+
+def test_build_mcp_server_configs_reads_json_directory(tmp_path: Path) -> None:
+    config_dir = tmp_path / "mcp_servers"
+    config_dir.mkdir()
+    (config_dir / "fetch.json").write_text(
+        json.dumps(
+            {
+                "transport": "sse",
+                "url": "https://mcp.api-inference.modelscope.net/",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (config_dir / "assistant.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "assistant": {
+                        "command": "python",
+                        "args": ["./assistant_server.py"],
+                        "env": {"LOG_LEVEL": "INFO"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    configs = build_mcp_server_configs(
+        config_dir=config_dir,
+        default_timeout_seconds=8,
+    )
+
+    configs_by_name = {item.name: item for item in configs}
+    assert set(configs_by_name) == {"fetch", "assistant"}
+    assert configs_by_name["fetch"].source["mcpServers"]["fetch"]["transport"] == "sse"
+    assert configs_by_name["assistant"].source["mcpServers"]["assistant"]["command"] == "python"
+
+
+def test_mcp_gateway_discovers_and_executes_tools_from_json_directory(tmp_path: Path) -> None:
+    fixture_server = Path(__file__).resolve().parents[1] / "fixtures" / "mock_amap_mcp_server.py"
+    config_dir = tmp_path / "mcp_servers"
+    config_dir.mkdir()
+    (config_dir / "amap.json").write_text(
+        json.dumps(
+            {
+                "command": sys.executable,
+                "args": [str(fixture_server)],
+                "route_tool_name": "maps_direction_walking",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    gateway = MCPToolGateway(
+        servers=build_mcp_server_configs(
+            config_dir=config_dir,
+            default_timeout_seconds=3,
+        )
+    )
+
+    asyncio.run(gateway.refresh())
+    result = asyncio.run(
+        gateway.execute(
+            tool_name="mcp__amap__maps_direction_walking",
+            raw_arguments={"origin": "116.3,39.9", "destination": "116.4,39.91"},
+        )
+    )
+
+    assert result.status == "completed"
+    assert result.output["server"] == "amap"
+    assert result.output["tool"] == "maps_direction_walking"
+    assert result.output["route"]["distance_m"] == 1350
+    assert gateway.health()["servers"]["amap"]["discovered"] is True
 
 
 def test_mcp_gateway_discovers_and_executes_http_tools() -> None:

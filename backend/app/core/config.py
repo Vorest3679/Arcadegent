@@ -88,13 +88,7 @@ class Settings:
     agent_provider_profiles_file: Path = Path("app/agent/nodes/profiles/provider_profiles.yaml")
     agent_provider_profile: str = "default"
     mcp_default_timeout_seconds: float = 10.0
-    mcp_servers_json: str = ""
-    mcp_servers_path: Path | None = None
-    mcp_amap_enabled: bool = False
-    mcp_amap_base_url: str = "https://mcp.amap.com/mcp"
-    mcp_amap_api_key: str = ""
-    mcp_amap_timeout_seconds: float = 10.0
-    mcp_amap_route_tool_name: str = ""
+    mcp_servers_dir: Path = Path("backend/app/agent/tools/mcp/servers")
     amap_api_key: str = ""
     amap_base_url: str = "https://restapi.amap.com"
     amap_timeout_seconds: float = 8.0
@@ -169,32 +163,8 @@ class Settings:
             mcp_default_timeout_seconds=float(
                 os.getenv("MCP_DEFAULT_TIMEOUT_SECONDS", str(cls.mcp_default_timeout_seconds))
             ),
-            mcp_servers_json=os.getenv(
-                "MCP_SERVERS_JSON",
-                os.getenv("MCP_CONFIG_JSON", cls.mcp_servers_json),
-            ),
-            mcp_servers_path=(
-                _resolve_path(raw_path)
-                if (
-                    raw_path := os.getenv(
-                        "MCP_SERVERS_PATH",
-                        os.getenv("MCP_CONFIG_PATH", ""),
-                    ).strip()
-                )
-                else None
-            ),
-            mcp_amap_enabled=_env_bool("MCP_AMAP_ENABLED", cls.mcp_amap_enabled),
-            mcp_amap_base_url=os.getenv("MCP_AMAP_BASE_URL", cls.mcp_amap_base_url),
-            mcp_amap_api_key=os.getenv(
-                "MCP_AMAP_API_KEY",
-                os.getenv("AMAP_API_KEY", cls.mcp_amap_api_key),
-            ),
-            mcp_amap_timeout_seconds=float(
-                os.getenv("MCP_AMAP_TIMEOUT_SECONDS", str(cls.mcp_amap_timeout_seconds))
-            ),
-            mcp_amap_route_tool_name=os.getenv(
-                "MCP_AMAP_ROUTE_TOOL_NAME",
-                cls.mcp_amap_route_tool_name,
+            mcp_servers_dir=_resolve_path(
+                os.getenv("MCP_SERVERS_DIR", str(cls.mcp_servers_dir))
             ),
             amap_api_key=os.getenv("AMAP_API_KEY", cls.amap_api_key),
             amap_base_url=os.getenv("AMAP_BASE_URL", cls.amap_base_url),

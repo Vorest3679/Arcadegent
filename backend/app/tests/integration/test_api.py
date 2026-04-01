@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -37,12 +38,27 @@ def _seed_data(path: Path) -> None:
             handle.write("\n")
 
 
-def _build_client(tmp_path: Path, *, session_store_path: Path | None = None) -> TestClient:
+def _clear_mcp_env() -> None:
+    for name in (
+        "MCP_SERVERS_DIR",
+        "MCP_DEFAULT_TIMEOUT_SECONDS",
+    ):
+        os.environ.pop(name, None)
+
+
+def _build_client(
+    tmp_path: Path,
+    *,
+    session_store_path: Path | None = None,
+    mcp_servers_dir: Path | None = None,
+) -> TestClient:
     data_path = tmp_path / "shops.jsonl"
     _seed_data(data_path)
     os.environ["ARCADE_DATA_JSONL"] = str(data_path)
     os.environ["CHAT_SESSION_STORE_PATH"] = str(session_store_path or (tmp_path / "chat_sessions.json"))
-    os.environ["MCP_AMAP_ENABLED"] = "false"
+    _clear_mcp_env()
+    if mcp_servers_dir is not None:
+        os.environ["MCP_SERVERS_DIR"] = str(mcp_servers_dir)
 
     from app.main import create_app
 
@@ -64,7 +80,7 @@ def _build_client_with_rows(
             handle.write("\n")
     os.environ["ARCADE_DATA_JSONL"] = str(data_path)
     os.environ["CHAT_SESSION_STORE_PATH"] = str(session_store_path or (tmp_path / "chat_sessions.json"))
-    os.environ["MCP_AMAP_ENABLED"] = "false"
+    _clear_mcp_env()
 
     from app.main import create_app
 
@@ -113,6 +129,33 @@ def test_health_arcades_and_chat(tmp_path: Path) -> None:
     chat_resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
     assert chat_resp.status_code == 200
     assert chat_resp.json()["intent"] in {"search", "search_nearby"}
+
+
+def test_health_reports_mcp_tools_loaded_from_config_directory(tmp_path: Path) -> None:
+    mcp_dir = tmp_path / "mcp_servers"
+    mcp_dir.mkdir()
+    fixture_server = Path(__file__).resolve().parents[1] / "fixtures" / "mock_amap_mcp_server.py"
+    (mcp_dir / "amap.json").write_text(
+        json.dumps(
+            {
+                "command": sys.executable,
+                "args": [str(fixture_server)],
+                "route_tool_name": "maps_direction_walking",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    client = _build_client(tmp_path, mcp_servers_dir=mcp_dir)
+
+    health = client.get("/health")
+    assert health.status_code == 200
+    payload = health.json()
+    assert payload["mcp"]["enabled"] is True
+    assert payload["mcp"]["discovered_tool_count"] == 1
+    assert payload["mcp"]["servers"]["amap"]["discovered"] is True
+    assert payload["mcp"]["servers"]["amap"]["selected_route_tool"] == "mcp__amap__maps_direction_walking"
+    assert payload["mcp"]["servers"]["amap"]["available_tools"] == ["mcp__amap__maps_direction_walking"]
 
 
 def test_chat_reuses_session_context(tmp_path: Path) -> None:

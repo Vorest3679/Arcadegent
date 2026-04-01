@@ -8,7 +8,6 @@ from app.agent.tools.mcp import (
     MCPToolGateway,
     MCP_TOOL_PREFIX,
     MCP_TOOL_WILDCARD,
-    build_amap_mcp_server_config,
     build_mcp_server_configs,
 )
 
@@ -20,6 +19,5 @@ __all__ = [
     "MCPToolGateway",
     "MCP_TOOL_PREFIX",
     "MCP_TOOL_WILDCARD",
-    "build_amap_mcp_server_config",
     "build_mcp_server_configs",
 ]

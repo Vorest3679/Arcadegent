@@ -1,4 +1,4 @@
-"""Unit tests for environment-driven settings, including LLM/AMap config."""
+"""Unit tests for environment-driven settings."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from app.core.config import Settings
 
 
-def test_settings_reads_llm_and_amap_env(monkeypatch) -> None:
+def test_settings_reads_llm_and_mcp_dir_env(monkeypatch) -> None:
     monkeypatch.setenv("LLM_API_KEY", "test-key")
     monkeypatch.setenv("LLM_BASE_URL", "https://api.example.com/v1")
     monkeypatch.setenv("LLM_MODEL", "gpt-test")
@@ -22,16 +22,7 @@ def test_settings_reads_llm_and_amap_env(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_PROVIDER_PROFILES_FILE", "custom/provider_profiles.yaml")
     monkeypatch.setenv("AGENT_PROVIDER_PROFILE", "rule_based")
     monkeypatch.setenv("MCP_DEFAULT_TIMEOUT_SECONDS", "15")
-    monkeypatch.setenv(
-        "MCP_SERVERS_JSON",
-        '{"mcpServers":{"fetch":{"type":"sse","url":"https://mcp.example.com"}}}',
-    )
-    monkeypatch.setenv("MCP_SERVERS_PATH", "custom/mcp.json")
-    monkeypatch.setenv("MCP_AMAP_ENABLED", "true")
-    monkeypatch.setenv("MCP_AMAP_BASE_URL", "https://mcp.amap.com/mcp")
-    monkeypatch.setenv("MCP_AMAP_API_KEY", "mcp-key")
-    monkeypatch.setenv("MCP_AMAP_TIMEOUT_SECONDS", "12")
-    monkeypatch.setenv("MCP_AMAP_ROUTE_TOOL_NAME", "maps_direction_walking")
+    monkeypatch.setenv("MCP_SERVERS_DIR", "custom/mcp-servers")
     monkeypatch.setenv("AMAP_API_KEY", "amap-key")
     monkeypatch.setenv("AMAP_BASE_URL", "https://restapi.amap.com")
     monkeypatch.setenv("AMAP_TIMEOUT_SECONDS", "6")
@@ -52,13 +43,7 @@ def test_settings_reads_llm_and_amap_env(monkeypatch) -> None:
     assert settings.agent_provider_profiles_file == Path("custom/provider_profiles.yaml")
     assert settings.agent_provider_profile == "rule_based"
     assert settings.mcp_default_timeout_seconds == 15
-    assert settings.mcp_servers_json == '{"mcpServers":{"fetch":{"type":"sse","url":"https://mcp.example.com"}}}'
-    assert settings.mcp_servers_path == Path("custom/mcp.json")
-    assert settings.mcp_amap_enabled is True
-    assert settings.mcp_amap_base_url == "https://mcp.amap.com/mcp"
-    assert settings.mcp_amap_api_key == "mcp-key"
-    assert settings.mcp_amap_timeout_seconds == 12
-    assert settings.mcp_amap_route_tool_name == "maps_direction_walking"
+    assert settings.mcp_servers_dir == Path("custom/mcp-servers")
     assert settings.amap_api_key == "amap-key"
     assert settings.amap_base_url == "https://restapi.amap.com"
     assert settings.amap_timeout_seconds == 6
