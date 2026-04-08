@@ -78,6 +78,9 @@ class ContextBuilder:
             "memory_summary": {
                 "has_shops": bool(session_state.working_memory.get("shops")),
                 "has_route": bool(session_state.working_memory.get("route")),
+                "resolved_locations": self._compact_value(
+                    session_state.working_memory.get("resolved_locations")
+                ),
                 "last_mcp_result": self._compact_value(
                     session_state.working_memory.get("last_mcp_result")
                 ),

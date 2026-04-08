@@ -19,11 +19,11 @@ def _adapter(*, base_url: str = "https://api.example.com/v1", model: str = "test
     )
 
 
-def test_chat_message_normalization_drops_tool_role_messages() -> None:
+def test_chat_message_normalization_preserves_tool_observations_as_assistant_notes() -> None:
     adapter = _adapter()
     messages = [
         {"role": "user", "content": "hello"},
-        {"role": "tool", "content": '{"shops": []}', "tool_call_id": "call_1"},
+        {"role": "tool", "name": "mcp__amap__maps_geo", "content": '{"shops": []}', "tool_call_id": "call_1"},
         {"role": "assistant", "content": "done"},
     ]
 
@@ -31,6 +31,7 @@ def test_chat_message_normalization_drops_tool_role_messages() -> None:
 
     assert normalized == [
         {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": '[Tool result: mcp__amap__maps_geo] {"shops":[]}'} ,
         {"role": "assistant", "content": "done"},
     ]
 

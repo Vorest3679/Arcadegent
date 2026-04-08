@@ -449,6 +449,11 @@ class ToolActionObserver:
             if isinstance(route, dict):
                 state.working_memory["route"] = route
                 state.intent = "navigate"
+            data = result.output.get("data")
+            if isinstance(data, dict):
+                locations = data.get("locations")
+                if isinstance(locations, list) and locations:
+                    state.working_memory["resolved_locations"] = locations
             state.working_memory["last_mcp_result"] = result.output
             return
 
@@ -475,6 +480,11 @@ class ToolActionObserver:
             distance = route.get("distance_m")
             duration = route.get("duration_s")
             return f"route(distance_m={distance},duration_s={duration})"
+        data = output.get("data")
+        if isinstance(data, dict):
+            locations = data.get("locations")
+            if isinstance(locations, list):
+                return f"locations={len(locations)}"
         provider = output.get("provider")
         if isinstance(provider, str):
             return f"provider={provider}"

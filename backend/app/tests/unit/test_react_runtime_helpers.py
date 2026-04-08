@@ -184,3 +184,29 @@ def test_execute_tool_calls_runs_async_tools_in_parallel() -> None:
     assert terminal is False
     assert elapsed < 0.28
     assert [turn.name for turn in state.turns] == ["custom_tool_a", "custom_tool_b"]
+
+
+def test_apply_tool_memory_keeps_mcp_resolved_locations() -> None:
+    observer = _observer()
+    state = AgentSessionState(session_id="s_mcp_geo")
+
+    observer._apply_tool_memory(
+        state=state,
+        result=ToolExecutionResult(
+            call_id="call_geo",
+            tool_name="mcp__amap__maps_geo",
+            status="completed",
+            output={
+                "server": "amap",
+                "tool": "maps_geo",
+                "data": {
+                    "locations": [
+                        {"name": "鲁迅公园", "lng": 121.48819, "lat": 31.27687},
+                    ]
+                },
+            },
+        ),
+    )
+
+    assert state.working_memory["resolved_locations"][0]["name"] == "鲁迅公园"
+    assert state.working_memory["last_mcp_result"]["tool"] == "maps_geo"

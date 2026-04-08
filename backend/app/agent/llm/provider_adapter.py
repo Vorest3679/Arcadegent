@@ -15,6 +15,26 @@ from app.infra.observability.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _compact_tool_content(raw: Any, *, limit: int = 1200) -> str:
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return ""
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            compact = " ".join(text.split())
+        else:
+            compact = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+    elif isinstance(raw, dict):
+        compact = json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
+    else:
+        compact = str(raw).strip()
+    if len(compact) <= limit:
+        return compact
+    return compact[: max(1, limit - 3)].rstrip() + "..."
+
+
 def _safe_json_loads(raw: str | bytes | None) -> dict[str, Any]:
     if raw is None:
         return {}
@@ -396,7 +416,8 @@ class ProviderAdapter:
         Some providers (e.g. DeepSeek) strictly require every `tool` role message
         to be preceded by an assistant message containing matching `tool_calls`.
         Since this runtime stores tool execution in separate turns without raw
-        assistant tool_call payload, we drop historical tool messages for this path.
+        assistant tool_call payload, we convert historical tool observations into
+        assistant-readable text notes instead of dropping them outright.
         """
         normalized: list[dict[str, Any]] = []
         for item in messages:
@@ -404,6 +425,15 @@ class ProviderAdapter:
                 continue
             role = item.get("role")
             if role == "tool":
+                tool_name = str(item.get("name") or "tool").strip() or "tool"
+                compact = _compact_tool_content(item.get("content"))
+                if compact:
+                    normalized.append(
+                        {
+                            "role": "assistant",
+                            "content": f"[Tool result: {tool_name}] {compact}",
+                        }
+                    )
                 continue
             if role not in {"user", "assistant", "system"}:
                 continue
