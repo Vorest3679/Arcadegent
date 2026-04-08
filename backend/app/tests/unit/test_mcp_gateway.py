@@ -134,6 +134,28 @@ def test_build_mcp_server_configs_reads_json_directory(tmp_path: Path) -> None:
     assert configs_by_name["assistant"].source["mcpServers"]["assistant"]["command"] == "python"
 
 
+def test_build_mcp_server_configs_expands_env_placeholders(monkeypatch) -> None:
+    monkeypatch.setenv("AMAP_API_KEY", "amap-key")
+
+    configs = build_mcp_server_configs(
+        raw_config={
+            "mcpServers": {
+                "amap": {
+                    "transport": "streamable-http",
+                    "url": "https://mcp.amap.com/mcp?key=${AMAP_API_KEY}",
+                }
+            }
+        },
+        default_timeout_seconds=8,
+    )
+
+    assert len(configs) == 1
+    config = configs[0]
+    assert config.name == "amap"
+    assert config.url == "https://mcp.amap.com/mcp?key=amap-key"
+    assert config.source["mcpServers"]["amap"]["url"] == "https://mcp.amap.com/mcp?key=amap-key"
+
+
 def test_mcp_gateway_discovers_and_executes_tools_from_json_directory(tmp_path: Path) -> None:
     fixture_server = Path(__file__).resolve().parents[1] / "fixtures" / "mock_amap_mcp_server.py"
     config_dir = tmp_path / "mcp_servers"

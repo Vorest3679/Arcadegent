@@ -6,7 +6,9 @@ from __future__ import annotations
 # 总得来说属于一个工具网关，负责发现 MCP 工具并通过 FastMCP 客户端执行它们。
 # 是本模块下的核心类，提供了工具发现、工具定义构建、工具执行等功能。
 
+import os
 from pathlib import Path
+import re
 from typing import Any
 
 from app.agent.tools.base import ToolDescriptor
@@ -36,6 +38,8 @@ from app.infra.observability.logger import get_logger
 from app.protocol.messages import Location, RouteSummaryDto
 
 logger = get_logger(__name__)
+
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 def _coerce_bool(value: Any, *, default: bool) -> bool:
@@ -86,6 +90,16 @@ def _extract_timeout_seconds(
 
 def _is_server_payload(value: Any) -> bool:
     return isinstance(value, dict) and ("command" in value or "url" in value)
+
+
+def _expand_env_placeholders(value: Any) -> Any:
+    if isinstance(value, str):
+        return _ENV_VAR_PATTERN.sub(lambda match: os.getenv(match.group(1), ""), value)
+    if isinstance(value, list):
+        return [_expand_env_placeholders(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _expand_env_placeholders(item) for key, item in value.items()}
+    return value
 
 
 def _extract_server_configs(
@@ -191,7 +205,7 @@ def build_mcp_server_configs(
         if not name:
             raise ValueError("mcp server name must not be empty")
 
-        payload = _normalize_server_payload(name, raw_payload)
+        payload = _normalize_server_payload(name, _expand_env_placeholders(raw_payload))
         enabled = _coerce_bool(payload.pop("enabled", True), default=True)
         if "disabled" in payload:
             enabled = not _coerce_bool(payload.pop("disabled"), default=False)
