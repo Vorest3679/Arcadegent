@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef } from "react";
 import { formatSubagentLabel, formatTimeLabel, type StreamProgressItem } from "../lib/chatStream";
 import type { ChatHistoryTurn } from "../types";
+import { MarkdownMessage } from "./MarkdownMessage";
 
 const QUICK_PROMPTS = [
   "帮我找北京适合下班后去的机厅",
@@ -144,7 +145,11 @@ export function ChatPanel({
                 style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
               >
                 <div className="chat-bubble">
-                  <p>{turn.content}</p>
+                  {turn.role === "assistant" ? (
+                    <MarkdownMessage content={turn.content} />
+                  ) : (
+                    <p className="chat-plain-text">{turn.content}</p>
+                  )}
                   <small>{formatTimeLabel(turn.created_at)}</small>
                 </div>
               </li>
@@ -171,10 +176,14 @@ export function ChatPanel({
                 style={{ animationDelay: `${Math.min(turnsForRender.length, 8) * 45}ms` }}
               >
                 <div className="chat-bubble">
-                  <p className={!streamReply.trim() ? "chat-stream-placeholder" : undefined}>
-                    {streamReply.trim() ? streamReply : "正在生成回复..."}
-                    {streamReplyActive ? <span className="chat-stream-caret" aria-hidden="true" /> : null}
-                  </p>
+                  {streamReply.trim() ? (
+                    <MarkdownMessage content={streamReply} className={streamReplyActive ? "is-streaming" : undefined} />
+                  ) : (
+                    <p className="chat-stream-placeholder">
+                      正在生成回复...
+                      {streamReplyActive ? <span className="chat-stream-caret" aria-hidden="true" /> : null}
+                    </p>
+                  )}
                   <small>{streamReplyActive ? "生成中..." : "已生成"}</small>
                 </div>
               </li>

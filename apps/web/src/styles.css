@@ -350,10 +350,123 @@ body {
   background: linear-gradient(130deg, #e6f6f1, #d5eee7);
 }
 
-.chat-bubble p {
+.chat-bubble > p,
+.chat-plain-text {
   margin: 0;
   line-height: 1.55;
   white-space: pre-wrap;
+}
+
+.chat-markdown {
+  color: inherit;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol,
+.chat-markdown pre,
+.chat-markdown blockquote,
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6,
+.chat-markdown hr {
+  margin: 0 0 0.75rem;
+}
+
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  color: #16352e;
+  line-height: 1.35;
+}
+
+.chat-markdown h1 {
+  font-size: 1.15rem;
+}
+
+.chat-markdown h2 {
+  font-size: 1.05rem;
+}
+
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  font-size: 0.98rem;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  padding-left: 1.25rem;
+}
+
+.chat-markdown li + li {
+  margin-top: 0.2rem;
+}
+
+.chat-markdown a {
+  color: #0d6b58;
+  text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+}
+
+.chat-markdown code {
+  border-radius: 6px;
+  background: #eef6f3;
+  padding: 0.1rem 0.35rem;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.92em;
+}
+
+.chat-markdown pre {
+  overflow-x: auto;
+  border-radius: 10px;
+  background: #12342f;
+  padding: 0.75rem 0.85rem;
+  color: #eff9f6;
+}
+
+.chat-markdown pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.chat-markdown blockquote {
+  border-left: 3px solid #8bbeb2;
+  padding-left: 0.85rem;
+  color: #42635a;
+}
+
+.chat-markdown hr {
+  border: 0;
+  border-top: 1px solid #d7e6e1;
+}
+
+.chat-markdown.is-streaming::after {
+  content: "";
+  display: inline-block;
+  width: 0.5ch;
+  margin-left: 2px;
+  border-right: 2px solid #237965;
+  animation: caret-blink 1s steps(1, end) infinite;
+  vertical-align: text-bottom;
 }
 
 .chat-stream-placeholder {
