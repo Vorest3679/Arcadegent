@@ -1,14 +1,14 @@
 id: query
 status: active
-subagent_name: search_agent
-prompt_file: search_agent.md
-description: Query node for DB search/list/detail retrieval.
+subagent_name: search_worker
+prompt_file: search_worker.md
+description: Search worker for DB search/list/detail retrieval.
 provider: local
 model_pointer: task
 allowed_tools_mode: replace
 allowed_tools:
   - db_query_tool
-  - select_next_subagent
+  - mcp__*
 skill_files:
   - search_result_reading.md
 output_schema:

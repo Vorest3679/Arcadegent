@@ -159,6 +159,7 @@ worker 返回给主 agent 的内容建议结构化，例如：
 
 ## 关联文档
 
-- [subagent 结束信号与 pointer 解耦](./2026-03-19-subagent-pointer-decoupling.md)
-- [会话执行异步化与 SSE 预备改造](./2026-03-19-chat-async-and-sse-readiness.md)
-- [Markdown 渲染与地图视图 renderer 子智能体](./2026-03-19-markdown-map-view-renderer.md)
+- [subagent 结束信号与 pointer 解耦](./subagent-pointer-decoupling.md)
+- [会话执行异步化与 SSE 预备改造](./chat-async-and-sse-readiness.md)
+- [Markdown 渲染与地图视图 renderer 子智能体](./markdown-map-view-renderer.md)
+- [主 agent / worker 二级多智能体改造方案（讨论稿）](./main-agent-worker-migration-plan.md)

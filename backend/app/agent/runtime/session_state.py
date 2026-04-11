@@ -12,6 +12,7 @@ from threading import Lock
 from typing import Any, Literal
 
 TurnRole = Literal["user", "assistant", "tool"]
+TurnScope = Literal["conversation", "worker"]
 SessionStatus = Literal["idle", "running", "completed", "failed"]
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,11 @@ class AgentTurn:
 
     role: TurnRole
     content: str
+    agent: str | None = None
     name: str | None = None
     call_id: str | None = None
+    worker_run_id: str | None = None
+    scope: TurnScope = "conversation"
     payload: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=_utc_now_iso)
 
@@ -39,7 +43,7 @@ class AgentSessionState:
 
     session_id: str
     turn_index: int = 0
-    active_subagent: str = "intent_router"
+    active_subagent: str = "main_agent"
     intent: str = "search"
     status: SessionStatus = "idle"
     last_error: str | None = None
@@ -48,6 +52,43 @@ class AgentSessionState:
     previous_response_id: str | None = None
     created_at: str = field(default_factory=_utc_now_iso)
     updated_at: str = field(default_factory=_utc_now_iso)
+
+
+def ensure_working_memory_shape(memory: dict[str, Any] | None) -> dict[str, Any]:
+    """Normalize working memory into the phase-1 hub layout. 
+    This allows flexible schema evolution while ensuring the expected sub-keys exist for easier access."""
+    normalized = memory if isinstance(memory, dict) else {}
+    artifacts = normalized.get("artifacts")
+    if not isinstance(artifacts, dict):
+        artifacts = {}
+    normalized["artifacts"] = artifacts
+
+    worker_runs = normalized.get("worker_runs")
+    if not isinstance(worker_runs, list):
+        worker_runs = []
+    normalized["worker_runs"] = [item for item in worker_runs if isinstance(item, dict)]
+    return normalized
+
+
+def get_working_memory_artifact(memory: dict[str, Any] | None, key: str) -> Any:
+    normalized = ensure_working_memory_shape(memory)
+    artifacts = normalized["artifacts"]
+    if key in artifacts:
+        return artifacts.get(key)
+    return normalized.get(key)
+
+
+def set_working_memory_artifact(memory: dict[str, Any] | None, key: str, value: Any) -> None:
+    normalized = ensure_working_memory_shape(memory)
+    normalized["artifacts"][key] = deepcopy(value)
+
+
+def append_worker_run(memory: dict[str, Any] | None, run: dict[str, Any], *, max_entries: int = 20) -> None:
+    normalized = ensure_working_memory_shape(memory)
+    worker_runs = normalized["worker_runs"]
+    worker_runs.append(deepcopy(run))
+    if len(worker_runs) > max_entries:
+        del worker_runs[:-max_entries]
 
 
 class SessionStateStore:
@@ -147,14 +188,17 @@ def _state_to_dict(state: AgentSessionState) -> dict[str, Any]:
             {
                 "role": turn.role,
                 "content": turn.content,
+                "agent": turn.agent,
                 "name": turn.name,
                 "call_id": turn.call_id,
+                "worker_run_id": turn.worker_run_id,
+                "scope": turn.scope,
                 "payload": turn.payload,
                 "created_at": turn.created_at,
             }
             for turn in state.turns
         ],
-        "working_memory": state.working_memory,
+        "working_memory": ensure_working_memory_shape(state.working_memory),
         "previous_response_id": state.previous_response_id,
         "created_at": state.created_at,
         "updated_at": state.updated_at,
@@ -174,16 +218,16 @@ def _state_from_dict(raw: object) -> AgentSessionState | None:
             turn = _turn_from_dict(item)
             if turn is not None:
                 turns.append(turn)
-    working_memory = raw.get("working_memory")
+    working_memory = ensure_working_memory_shape(raw.get("working_memory"))
     return AgentSessionState(
         session_id=session_id,
         turn_index=_coerce_int(raw.get("turn_index"), default=0),
-        active_subagent=_coerce_str(raw.get("active_subagent"), default="intent_router"),
+        active_subagent=_coerce_active_agent(raw.get("active_subagent"), default="main_agent"),
         intent=_coerce_str(raw.get("intent"), default="search"),
         status=_coerce_status(raw.get("status"), default="completed" if turns else "idle"),
         last_error=raw.get("last_error") if isinstance(raw.get("last_error"), str) else None,
         turns=turns,
-        working_memory=working_memory if isinstance(working_memory, dict) else {},
+        working_memory=working_memory,
         previous_response_id=raw.get("previous_response_id")
         if isinstance(raw.get("previous_response_id"), str)
         else None,
@@ -203,8 +247,11 @@ def _turn_from_dict(raw: object) -> AgentTurn | None:
     return AgentTurn(
         role=role,
         content=content,
+        agent=raw.get("agent") if isinstance(raw.get("agent"), str) else None,
         name=raw.get("name") if isinstance(raw.get("name"), str) else None,
         call_id=raw.get("call_id") if isinstance(raw.get("call_id"), str) else None,
+        worker_run_id=raw.get("worker_run_id") if isinstance(raw.get("worker_run_id"), str) else None,
+        scope=raw.get("scope") if raw.get("scope") in {"conversation", "worker"} else "conversation",
         payload=payload if isinstance(payload, dict) else {},
         created_at=_coerce_str(raw.get("created_at"), default=_utc_now_iso()),
     )
@@ -233,3 +280,15 @@ def _coerce_status(raw: object, *, default: SessionStatus) -> SessionStatus:
     if raw in {"idle", "running", "completed", "failed"}:
         return raw
     return default
+
+
+def _coerce_active_agent(raw: object, *, default: str) -> str:
+    if not isinstance(raw, str) or not raw:
+        return default
+    mapping = {
+        "intent_router": "main_agent",
+        "summary_agent": "main_agent",
+        "search_agent": "search_worker",
+        "navigation_agent": "navigation_worker",
+    }
+    return mapping.get(raw, raw)

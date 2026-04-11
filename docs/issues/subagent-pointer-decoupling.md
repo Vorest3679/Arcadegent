@@ -107,5 +107,6 @@
 
 ## 关联文档
 
-- [链式 subagent 改为主 agent hub](./2026-03-19-main-agent-hub-architecture.md)
-- [工具注册表从静态注入改为动态装配](./2026-03-19-dynamic-tool-registry.md)
+- [链式 subagent 改为主 agent hub](./main-agent-hub-architecture.md)
+- [工具注册表从静态注入改为动态装配](./dynamic-tool-registry.md)
+- [主 agent / worker 二级多智能体改造方案（讨论稿）](./main-agent-worker-migration-plan.md)

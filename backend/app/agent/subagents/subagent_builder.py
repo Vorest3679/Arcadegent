@@ -10,7 +10,7 @@ import yaml
 
 from app.protocol.messages import IntentType
 
-SubAgentName = Literal["intent_router", "search_agent", "navigation_agent", "summary_agent"]
+SubAgentName = Literal["main_agent", "search_worker", "navigation_worker"]
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class SubAgentProfile:
 
 
 class SubAgentBuilder:
-    """Resolve subagent profiles by name and routing hints."""
+    """Resolve hub/worker agent profiles by name and routing hints."""
 
     def __init__(
         self,
@@ -33,58 +33,53 @@ class SubAgentBuilder:
         enable_yaml_overlay: bool = True,
     ) -> None:
         self._profiles: dict[str, SubAgentProfile] = {
-            "intent_router": SubAgentProfile(
-                name="intent_router",
-                prompt_file="intent_router.md",
-                allowed_tools=["select_next_subagent"],
+            "main_agent": SubAgentProfile(
+                name="main_agent",
+                prompt_file="main_agent.md",
+                allowed_tools=[
+                    "invoke_worker",
+                    "db_query_tool",
+                    "geo_resolve_tool",
+                    "route_plan_tool",
+                    "summary_tool",
+                    "mcp__*",
+                ],
                 skill_files=[],
             ),
-            "search_agent": SubAgentProfile(
-                name="search_agent",
-                prompt_file="search_agent.md",
-                allowed_tools=["db_query_tool", "select_next_subagent"],
+            "search_worker": SubAgentProfile(
+                name="search_worker",
+                prompt_file="search_worker.md",
+                allowed_tools=["db_query_tool", "mcp__*"],
                 skill_files=["search_result_reading.md"],
             ),
-            "navigation_agent": SubAgentProfile(
-                name="navigation_agent",
-                prompt_file="navigation_agent.md",
+            "navigation_worker": SubAgentProfile(
+                name="navigation_worker",
+                prompt_file="navigation_worker.md",
                 allowed_tools=[
                     "db_query_tool",
                     "geo_resolve_tool",
                     "route_plan_tool",
                     "mcp__*",
-                    "select_next_subagent",
                 ],
                 skill_files=["search_result_reading.md", "navigation_result_reading.md"],
-            ),
-            "summary_agent": SubAgentProfile(
-                name="summary_agent",
-                prompt_file="summary_agent.md",
-                allowed_tools=[],
-                skill_files=[
-                    "response_composition.md",
-                    "search_result_reading.md",
-                    "navigation_result_reading.md",
-                ],
             ),
         }
         if enable_yaml_overlay and definitions_dir is not None:
             self._apply_yaml_overlay(definitions_dir)
 
     def get(self, name: str) -> SubAgentProfile:
-        return self._profiles.get(name, self._profiles["intent_router"])
+        return self._profiles.get(name, self._profiles["main_agent"])
 
     def resolve_initial(self, intent: IntentType | None) -> SubAgentName:
-        if intent == "navigate":
-            return "navigation_agent"
-        return "search_agent"
+        _ = intent
+        return "main_agent"
 
     def _apply_yaml_overlay(self, definitions_dir: Path) -> None:
         mapping: dict[str, SubAgentName] = {
-            "intent": "intent_router",
-            "query": "search_agent",
-            "navigation": "navigation_agent",
-            "summary": "summary_agent",
+            "intent": "main_agent",
+            "query": "search_worker",
+            "navigation": "navigation_worker",
+            "summary": "main_agent",
         }
         if not definitions_dir.exists():
             return

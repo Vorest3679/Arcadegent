@@ -68,6 +68,11 @@
 
 关键点不是一定要换成复杂队列，而是先把“启动”和“等待完成”解耦。
 
+如果与主 agent / worker hub 架构合并考虑，建议尽早引入 `worker_run` 的内部异步队列抽象：
+
+- Phase 1 可以先是进程内、串行消费的轻量队列
+- Phase 2 再逐步扩展到多 worker 并发、取消、恢复与优先级调度
+
 ### 3. 前端改为 SSE 优先，HTTP 最终结果只做兜底或补拉
 
 前端状态机建议改成：
@@ -121,3 +126,4 @@
 
 - [Issue: SSE 已接通，但 Agent 仍非 Provider 实时 Token 输出（低优先级）](../others/2026-03-04-sse-token-streaming-status-issue.md)
 - [流式渲染改造 Handoff（2026-03-04）](../handoffs/streaming-provider-handoff-2026-03-04.md)
+- [主 agent / worker 二级多智能体改造方案（讨论稿）](./main-agent-worker-migration-plan.md)

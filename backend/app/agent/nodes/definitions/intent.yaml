@@ -1,13 +1,18 @@
 id: intent
 status: active
-subagent_name: intent_router
-prompt_file: intent_router.md
-description: Intent classifier node for search and navigation tasks.
+subagent_name: main_agent
+prompt_file: main_agent.md
+description: Main hub agent for intent recognition, worker dispatch, and final response.
 provider: rule_based
 model_pointer: main
 allowed_tools_mode: replace
 allowed_tools:
-  - select_next_subagent
+  - invoke_worker
+  - db_query_tool
+  - geo_resolve_tool
+  - route_plan_tool
+  - summary_tool
+  - mcp__*
 output_schema:
   intent: [search, search_nearby, navigate]
   confidence: float

@@ -1,11 +1,11 @@
 id: summary
 status: active
-subagent_name: summary_agent
-prompt_file: summary_agent.md
-description: Summary node for natural-language response generation.
+subagent_name: main_agent
+prompt_file: main_agent.md
+description: Main hub agent final response overlay.
 provider: llm
 model_pointer: task
-allowed_tools_mode: replace
+allowed_tools_mode: merge
 allowed_tools: []
 skill_files:
   - response_composition.md

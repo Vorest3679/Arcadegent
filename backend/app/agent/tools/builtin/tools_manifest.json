@@ -35,16 +35,13 @@
     },
     "summary_tool": {
       "factory": "app.agent.tools.builtin.summary_tool:SummaryTool"
-    },
-    "select_next_subagent_tool": {
-      "factory": "app.agent.tools.builtin.select_next_subagent_tool:SelectNextSubagentTool"
     }
   },
   "tools": [
+    "schemas/invoke_worker.json",
     "schemas/db_query_tool.json",
     "schemas/geo_resolve_tool.json",
     "schemas/route_plan_tool.json",
-    "schemas/summary_tool.json",
-    "schemas/select_next_subagent.json"
+    "schemas/summary_tool.json"
   ]
 }

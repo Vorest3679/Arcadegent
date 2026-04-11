@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.agent.runtime.orchestrator import SessionAlreadyRunningError
-from app.agent.runtime.session_state import AgentSessionState, AgentTurn
+from app.agent.runtime.session_state import AgentSessionState, AgentTurn, get_working_memory_artifact
 from app.api.deps import get_container
 from app.core.container import AppContainer
 from app.infra.observability.logger import get_logger
@@ -114,10 +114,10 @@ def _to_shop(raw: dict) -> ArcadeShopSummaryDto:
 
 def _state_shops(state: AgentSessionState) -> list[ArcadeShopSummaryDto]:
     shops_raw: list[dict] = []
-    memory_shops = state.working_memory.get("shops")
+    memory_shops = get_working_memory_artifact(state.working_memory, "shops")
     if isinstance(memory_shops, list):
         shops_raw.extend(item for item in memory_shops if isinstance(item, dict))
-    memory_shop = state.working_memory.get("shop")
+    memory_shop = get_working_memory_artifact(state.working_memory, "shop")
     if isinstance(memory_shop, dict):
         source_id = memory_shop.get("source_id")
         exists = any(item.get("source_id") == source_id for item in shops_raw)
@@ -127,7 +127,7 @@ def _state_shops(state: AgentSessionState) -> list[ArcadeShopSummaryDto]:
 
 
 def _state_route(state: AgentSessionState) -> RouteSummaryDto | None:
-    memory_route = state.working_memory.get("route")
+    memory_route = get_working_memory_artifact(state.working_memory, "route")
     if not isinstance(memory_route, dict):
         return None
     try:

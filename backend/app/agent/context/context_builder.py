@@ -22,7 +22,7 @@ from app.agent.context.context_payload import (
     ShopDetailContextDto,
     ShopTransportContextDto,
 )
-from app.agent.runtime.session_state import AgentSessionState, AgentTurn
+from app.agent.runtime.session_state import AgentSessionState, AgentTurn, get_working_memory_artifact
 from app.agent.subagents.subagent_builder import SubAgentProfile
 from app.protocol.messages import ChatRequest
 
@@ -68,6 +68,12 @@ class ContextBuilder:
             request=request,
             subagent=subagent,
         )
+        turn_scope = "worker" if subagent.name.endswith("_worker") else "conversation"
+        recent_tool_turns = (
+            session_state.turns
+            if turn_scope == "conversation"
+            else [turn for turn in session_state.turns if turn.scope == turn_scope]
+        )
         runtime_hint = {
             "session_id": session_state.session_id,
             "turn_index": session_state.turn_index,
@@ -76,10 +82,10 @@ class ContextBuilder:
             "request": request.model_dump(mode="json"),
             "client_location": self._compact_value(client_location),
             "memory_summary": {
-                "has_shops": bool(session_state.working_memory.get("shops")),
-                "has_route": bool(session_state.working_memory.get("route")),
+                "has_shops": bool(self._memory_value(session_state.working_memory, "shops")),
+                "has_route": bool(self._memory_value(session_state.working_memory, "route")),
                 "resolved_locations": self._compact_value(
-                    session_state.working_memory.get("resolved_locations")
+                    self._memory_value(session_state.working_memory, "resolved_locations")
                 ),
                 "last_mcp_result": self._compact_value(
                     session_state.working_memory.get("last_mcp_result")
@@ -88,10 +94,11 @@ class ContextBuilder:
                     session_state.working_memory.get("last_error")
                 ),
             },
+            "worker_runs": self._build_worker_run_summaries(session_state.working_memory),
             "context_payload": self._compact_value(
                 context_payload.model_dump(mode="json", exclude_none=True)
             ),
-            "recent_tool_results": self._build_recent_tool_results(session_state.turns),
+            "recent_tool_results": self._build_recent_tool_results(recent_tool_turns),
         }
 
         instruction_parts = [base_prompt]
@@ -223,7 +230,10 @@ class ContextBuilder:
         其中，tool角色的消息会额外包含工具调用的结果摘要（如果有），
         以便模型参考最近的工具输出进行决策。用户和助手消息则直接反映对话内容。
         """
-        messages = [self._to_model_message(turn) for turn in self._tail_turns(session_state.turns)]
+        messages = [
+            self._to_model_message(turn)
+            for turn in self._tail_turns(session_state.turns, scope=turn_scope)
+        ]
         return BuiltContext(instructions=instructions, messages=messages)
 
     def _client_location_payload(
@@ -236,7 +246,7 @@ class ContextBuilder:
             payload = request.location.model_dump(mode="json", exclude_none=True)
             compact = self._compact_value(payload)
             return compact if isinstance(compact, dict) and compact else None
-        memory_location = session_state.working_memory.get("client_location")
+        memory_location = self._memory_value(session_state.working_memory, "client_location")
         if isinstance(memory_location, dict):
             compact = self._compact_value(memory_location)
             return compact if isinstance(compact, dict) and compact else None
@@ -275,10 +285,11 @@ class ContextBuilder:
         )
         return "\n".join(lines)
 
-    def _tail_turns(self, turns: list[AgentTurn]) -> list[AgentTurn]:
-        if len(turns) <= self._history_turn_limit:
-            return turns
-        return turns[-self._history_turn_limit :]
+    def _tail_turns(self, turns: list[AgentTurn], *, scope: str) -> list[AgentTurn]:
+        scoped_turns = [turn for turn in turns if turn.scope == scope]
+        if len(scoped_turns) <= self._history_turn_limit:
+            return scoped_turns
+        return scoped_turns[-self._history_turn_limit :]
 
     def _to_model_message(self, turn: AgentTurn) -> dict[str, Any]:
         if turn.role == "tool":
@@ -426,13 +437,21 @@ class ContextBuilder:
         results: list[dict[str, Any]] = []
         for turn in recent:
             item: dict[str, Any] = {}
+            if isinstance(turn.agent, str) and turn.agent:
+                item["agent"] = turn.agent
             if isinstance(turn.name, str) and turn.name:
                 item["tool"] = turn.name
             if isinstance(turn.call_id, str) and turn.call_id:
                 item["call_id"] = turn.call_id
+            if isinstance(turn.worker_run_id, str) and turn.worker_run_id:
+                item["worker_run_id"] = turn.worker_run_id
             status = turn.payload.get("status") if isinstance(turn.payload, dict) else None
             if isinstance(status, str) and status:
                 item["status"] = status
+            arguments = turn.payload.get("arguments") if isinstance(turn.payload, dict) else None
+            compact_arguments = self._compact_value(self._prune_tool_result(arguments))
+            if compact_arguments not in (None, "", [], {}):
+                item["arguments"] = compact_arguments
             result_payload = self._tool_turn_result(turn)
             compact_result = self._compact_value(self._prune_tool_result(result_payload))
             if compact_result not in (None, "", [], {}):
@@ -440,6 +459,24 @@ class ContextBuilder:
             if item:
                 results.append(item)
         return results
+
+    def _build_worker_run_summaries(self, memory: dict[str, Any]) -> list[dict[str, Any]]:
+        worker_runs = memory.get("worker_runs")
+        if not isinstance(worker_runs, list):
+            return []
+        summaries: list[dict[str, Any]] = []
+        for item in worker_runs[-4:]:
+            if not isinstance(item, dict):
+                continue
+            summary: dict[str, Any] = {}
+            for key in ("worker", "run_id", "status", "summary", "missing_fields", "error", "task_preview"):
+                value = item.get(key)
+                compact = self._compact_value(value)
+                if compact not in (None, "", [], {}):
+                    summary[key] = compact
+            if summary:
+                summaries.append(summary)
+        return summaries
 
     def _tool_turn_result(self, turn: AgentTurn) -> Any:
         payload_result = turn.payload.get("result") if isinstance(turn.payload, dict) else None
@@ -550,7 +587,7 @@ class ContextBuilder:
         session_state: AgentSessionState,
     ) -> SearchCatalogContextDto | None:
         memory = session_state.working_memory
-        total = self._int_or_none(memory.get("total"))
+        total = self._int_or_none(self._memory_value(memory, "total"))
         rows = self._shop_rows_from_memory(memory)
         if total is None and not rows:
             return None
@@ -606,7 +643,7 @@ class ContextBuilder:
         session_state: AgentSessionState,
     ) -> RouteContextDto | None:
         memory = session_state.working_memory
-        route = memory.get("route")
+        route = self._memory_value(memory, "route")
         if not isinstance(route, dict):
             return None
         destination = self._primary_destination(memory)
@@ -667,7 +704,9 @@ class ContextBuilder:
     def _shop_rows_from_memory(self, memory: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         seen_keys: set[tuple[str, str]] = set()
-        for raw in [memory.get("shop"), *(memory.get("shops") or [])]:
+        shops = self._memory_value(memory, "shops")
+        shop = self._memory_value(memory, "shop")
+        for raw in [shop, *(shops or [])]:
             if not isinstance(raw, dict):
                 continue
             source_id = raw.get("source_id")
@@ -741,6 +780,9 @@ class ContextBuilder:
             compact_list = [self._compact_value(item) for item in value]
             return [item for item in compact_list if item not in (None, "", [], {})]
         return value
+
+    def _memory_value(self, memory: dict[str, Any], key: str) -> Any:
+        return get_working_memory_artifact(memory, key)
 
     def _load_prompt(self, filename: str) -> str:
         return self._load_markdown(

@@ -9,7 +9,6 @@ from app.agent.context.context_builder import ContextBuilder
 from app.agent.events.replay_buffer import ReplayBuffer
 from app.agent.llm.llm_config import resolve_llm_config
 from app.agent.llm.provider_adapter import ProviderAdapter
-from app.agent.orchestration.transition_policy import TransitionPolicy
 from app.agent.runtime.react_runtime import ReactRuntime
 from app.agent.runtime.session_state import SessionStateStore
 from app.agent.subagents.subagent_builder import SubAgentBuilder
@@ -87,7 +86,6 @@ def build_container(settings: Settings) -> AppContainer:
         tool_registry=tool_registry,
         provider_adapter=provider_adapter,
         session_store=session_store,
-        transition_policy=TransitionPolicy(),
         replay_buffer=replay_buffer,
         max_steps=settings.agent_max_steps,
     )

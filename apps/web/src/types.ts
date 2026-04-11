@@ -159,6 +159,9 @@ export type ChatSessionDetail = {
 export type ChatStreamEventName =
   | "session.started"
   | "subagent.changed"
+  | "worker.started"
+  | "worker.completed"
+  | "worker.failed"
   | "assistant.token"
   | "tool.started"
   | "tool.progress"

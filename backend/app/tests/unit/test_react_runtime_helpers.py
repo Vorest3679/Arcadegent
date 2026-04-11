@@ -1,37 +1,30 @@
-﻿"""Unit tests for ReactRuntime helper behaviors."""
+"""Unit tests for ReactRuntime helper behaviors."""
 
 from __future__ import annotations
 
-import asyncio
-import time
-
-from app.agent.events.replay_buffer import ReplayBuffer
-from app.agent.llm.provider_adapter import ModelToolCall
-from app.agent.orchestration.transition_policy import TransitionPolicy
-from app.agent.runtime.react_runtime import _chunk_stream_text
-from app.agent.runtime.session_state import AgentSessionState, SessionStateStore
-from app.agent.runtime.tool_action_observer import ToolActionObserver
+from app.agent.runtime.react_runtime import ReactRuntime, _chunk_stream_text
+from app.agent.runtime.session_state import (
+    AgentTurn,
+    AgentSessionState,
+    get_working_memory_artifact,
+    set_working_memory_artifact,
+)
 from app.agent.tools.registry import ToolExecutionResult
 
 
-def _observer() -> ToolActionObserver:
-    # Helper methods below do not depend on initialized collaborators.
-    return object.__new__(ToolActionObserver)
+def _runtime() -> ReactRuntime:
+    return object.__new__(ReactRuntime)
 
 
 def test_prepare_tool_arguments_hydrates_search_summary_from_memory() -> None:
-    observer = _observer()
+    runtime = _runtime()
     state = AgentSessionState(session_id="s1")
-    state.working_memory.update(
-        {
-            "total": 5,
-            "shops": [{"name": "A"}, {"name": "B"}],
-            "keyword": "shanghai huangpu",
-        }
-    )
+    set_working_memory_artifact(state.working_memory, "total", 5)
+    set_working_memory_artifact(state.working_memory, "shops", [{"name": "A"}, {"name": "B"}])
+    state.working_memory["keyword"] = "shanghai huangpu"
 
-    args, hydrated = observer._prepare_tool_arguments(
-        state=state,
+    args, hydrated = runtime._prepare_tool_arguments(
+        memory=state.working_memory,
         tool_name="summary_tool",
         raw_arguments={"topic": "search"},
     )
@@ -44,17 +37,13 @@ def test_prepare_tool_arguments_hydrates_search_summary_from_memory() -> None:
 
 
 def test_prepare_tool_arguments_hydrates_navigation_summary_from_memory() -> None:
-    observer = _observer()
+    runtime = _runtime()
     state = AgentSessionState(session_id="s2")
-    state.working_memory.update(
-        {
-            "route": {"provider": "amap", "mode": "walking"},
-            "shops": [{"name": "Foo Arcade"}],
-        }
-    )
+    set_working_memory_artifact(state.working_memory, "route", {"provider": "amap", "mode": "walking"})
+    set_working_memory_artifact(state.working_memory, "shops", [{"name": "Foo Arcade"}])
 
-    args, hydrated = observer._prepare_tool_arguments(
-        state=state,
+    args, hydrated = runtime._prepare_tool_arguments(
+        memory=state.working_memory,
         tool_name="summary_tool",
         raw_arguments={"topic": "navigation"},
     )
@@ -66,11 +55,11 @@ def test_prepare_tool_arguments_hydrates_navigation_summary_from_memory() -> Non
 
 
 def test_prepare_tool_arguments_keeps_non_summary_tools_unchanged() -> None:
-    observer = _observer()
+    runtime = _runtime()
     state = AgentSessionState(session_id="s3")
 
-    args, hydrated = observer._prepare_tool_arguments(
-        state=state,
+    args, hydrated = runtime._prepare_tool_arguments(
+        memory=state.working_memory,
         tool_name="db_query_tool",
         raw_arguments={"page": 1},
     )
@@ -80,23 +69,19 @@ def test_prepare_tool_arguments_keeps_non_summary_tools_unchanged() -> None:
 
 
 def test_prepare_tool_arguments_hydrates_sort_fields_from_last_db_query() -> None:
-    observer = _observer()
+    runtime = _runtime()
     state = AgentSessionState(session_id="s4")
-    state.working_memory.update(
-        {
-            "total": 8,
-            "shops": [{"name": "A"}],
-            "keyword": "maimai",
-            "last_db_query": {
-                "sort_by": "title_quantity",
-                "sort_order": "desc",
-                "sort_title_name": "maimai",
-            },
-        }
-    )
+    set_working_memory_artifact(state.working_memory, "total", 8)
+    set_working_memory_artifact(state.working_memory, "shops", [{"name": "A"}])
+    state.working_memory["keyword"] = "maimai"
+    state.working_memory["last_db_query"] = {
+        "sort_by": "title_quantity",
+        "sort_order": "desc",
+        "sort_title_name": "maimai",
+    }
 
-    args, hydrated = observer._prepare_tool_arguments(
-        state=state,
+    args, hydrated = runtime._prepare_tool_arguments(
+        memory=state.working_memory,
         tool_name="summary_tool",
         raw_arguments={"topic": "search"},
     )
@@ -110,22 +95,18 @@ def test_prepare_tool_arguments_hydrates_sort_fields_from_last_db_query() -> Non
 
 
 def test_prepare_tool_arguments_overrides_default_sort_with_title_quantity_context() -> None:
-    observer = _observer()
+    runtime = _runtime()
     state = AgentSessionState(session_id="s5")
-    state.working_memory.update(
-        {
-            "total": 6,
-            "shops": [{"name": "A"}],
-            "last_db_query": {
-                "sort_by": "title_quantity",
-                "sort_order": "desc",
-                "sort_title_name": "maimai",
-            },
-        }
-    )
+    set_working_memory_artifact(state.working_memory, "total", 6)
+    set_working_memory_artifact(state.working_memory, "shops", [{"name": "A"}])
+    state.working_memory["last_db_query"] = {
+        "sort_by": "title_quantity",
+        "sort_order": "desc",
+        "sort_title_name": "maimai",
+    }
 
-    args, hydrated = observer._prepare_tool_arguments(
-        state=state,
+    args, hydrated = runtime._prepare_tool_arguments(
+        memory=state.working_memory,
         tool_name="summary_tool",
         raw_arguments={"topic": "search", "sort_by": "default"},
     )
@@ -146,51 +127,40 @@ def test_chunk_stream_text_keeps_order_and_sentence_boundary() -> None:
     assert any(item.endswith("!") for item in chunks)
 
 
-def test_execute_tool_calls_runs_async_tools_in_parallel() -> None:
-    class FakeToolRegistry:
-        async def execute(self, *, call_id: str, tool_name: str, raw_arguments: dict, allowed_tools: list[str]):
-            await asyncio.sleep(0.15)
-            return ToolExecutionResult(
-                call_id=call_id,
-                tool_name=tool_name,
-                status="completed",
-                output={"echo": raw_arguments, "allowed_tools": allowed_tools},
-            )
+def test_build_worker_memory_snapshot_copies_promotable_artifacts() -> None:
+    runtime = _runtime()
+    state = AgentSessionState(session_id="s_snapshot")
+    set_working_memory_artifact(state.working_memory, "shops", [{"name": "Alpha"}])
+    set_working_memory_artifact(state.working_memory, "route", {"provider": "amap", "mode": "walking"})
+    state.working_memory["keyword"] = "maimai"
+    state.working_memory["last_db_query"] = {"keyword": "maimai"}
 
-    observer = ToolActionObserver(
-        tool_registry=FakeToolRegistry(),  # type: ignore[arg-type]
-        transition_policy=TransitionPolicy(),
-        replay_buffer=ReplayBuffer(),
-        session_store=SessionStateStore(),
-    )
-    state = AgentSessionState(session_id="s_parallel")
-    state.active_subagent = "search_agent"
-    tool_calls = [
-        ModelToolCall(call_id="call_1", name="custom_tool_a", arguments={"value": 1}),
-        ModelToolCall(call_id="call_2", name="custom_tool_b", arguments={"value": 2}),
-    ]
+    worker_memory = runtime._build_worker_memory_snapshot(state.working_memory)
 
-    started_at = time.perf_counter()
-    terminal = asyncio.run(
-        observer.execute_tool_calls(
-            session_id="s_parallel",
-            state=state,
-            tool_calls=tool_calls,
-            allowed_tools=["custom_tool_a", "custom_tool_b"],
-        )
-    )
-    elapsed = time.perf_counter() - started_at
+    assert get_working_memory_artifact(worker_memory, "shops")[0]["name"] == "Alpha"
+    assert get_working_memory_artifact(worker_memory, "route")["mode"] == "walking"
+    assert worker_memory["keyword"] == "maimai"
+    assert worker_memory["last_db_query"]["keyword"] == "maimai"
 
-    assert terminal is False
-    assert elapsed < 0.28
-    assert [turn.name for turn in state.turns] == ["custom_tool_a", "custom_tool_b"]
+
+def test_prepare_turn_memory_clears_stale_reply() -> None:
+    runtime = _runtime()
+    memory = {
+        "reply": "old reply",
+        "assistant_token_emitted": True,
+    }
+
+    prepared = runtime._prepare_turn_memory(memory)
+
+    assert "reply" not in prepared
+    assert prepared["assistant_token_emitted"] is False
 
 
 def test_apply_tool_memory_keeps_mcp_resolved_locations() -> None:
-    observer = _observer()
+    runtime = _runtime()
     state = AgentSessionState(session_id="s_mcp_geo")
 
-    observer._apply_tool_memory(
+    runtime._apply_tool_memory(
         state=state,
         result=ToolExecutionResult(
             call_id="call_geo",
@@ -208,5 +178,60 @@ def test_apply_tool_memory_keeps_mcp_resolved_locations() -> None:
         ),
     )
 
-    assert state.working_memory["resolved_locations"][0]["name"] == "鲁迅公园"
+    assert get_working_memory_artifact(state.working_memory, "resolved_locations")[0]["name"] == "鲁迅公园"
     assert state.working_memory["last_mcp_result"]["tool"] == "maps_geo"
+
+
+def test_promote_worker_artifacts_keeps_last_mcp_result() -> None:
+    runtime = _runtime()
+    parent_state = AgentSessionState(session_id="s_parent")
+    worker_state = AgentSessionState(session_id="s_worker")
+    worker_state.working_memory["last_mcp_result"] = {
+        "server": "amap",
+        "tool": "maps_geo",
+        "data": {
+            "locations": [
+                {"name": "虹口足球场", "lng": 121.48, "lat": 31.27},
+            ]
+        },
+    }
+
+    runtime._promote_worker_artifacts(
+        parent_memory=parent_state.working_memory,
+        worker_memory=worker_state.working_memory,
+    )
+
+    assert parent_state.working_memory["last_mcp_result"]["tool"] == "maps_geo"
+
+
+def test_persist_worker_tool_turns_copies_tool_payload_arguments() -> None:
+    runtime = _runtime()
+    parent_state = AgentSessionState(session_id="s_parent")
+    worker_state = AgentSessionState(
+        session_id="s_worker",
+        turns=[
+            AgentTurn(
+                role="tool",
+                content='{"ok":true}',
+                agent="search_worker",
+                name="db_query_tool",
+                call_id="call_1",
+                worker_run_id="wrk_1",
+                scope="worker",
+                payload={
+                    "status": "completed",
+                    "arguments": {"city_name": "上海"},
+                    "result": {"ok": True},
+                },
+            )
+        ],
+    )
+
+    runtime._persist_worker_tool_turns(
+        parent_state=parent_state,
+        worker_state=worker_state,
+    )
+
+    assert len(parent_state.turns) == 1
+    assert parent_state.turns[0].name == "db_query_tool"
+    assert parent_state.turns[0].payload["arguments"]["city_name"] == "上海"

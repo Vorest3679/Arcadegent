@@ -522,10 +522,7 @@ class ProviderAdapter:
     ) -> str:
         if not tools:
             return "none"
-        active_subagent = str((runtime_hints or {}).get("active_subagent") or "").strip()
-        # Intent routing remains tool-contract first for stability.
-        if active_subagent == "intent_router":
-            return "required"
+        _ = runtime_hints
         choice = self._config.tool_choice.strip().lower()
         if choice not in {"auto", "required", "none"}:
             return "auto"

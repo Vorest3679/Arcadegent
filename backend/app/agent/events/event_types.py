@@ -11,6 +11,9 @@ from pydantic import BaseModel, Field
 EventName = Literal[
     "session.started",
     "subagent.changed",
+    "worker.started",
+    "worker.completed",
+    "worker.failed",
     "assistant.token",
     "tool.started",
     "tool.progress",

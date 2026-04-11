@@ -70,10 +70,10 @@ def test_deepseek_prefers_chat_completions() -> None:
     assert adapter._prefer_chat_completions() is True
 
 
-def test_intent_router_stage_forces_required_tool_choice() -> None:
+def test_runtime_hints_no_longer_force_special_tool_choice() -> None:
     adapter = _adapter()
     choice = adapter._resolve_tool_choice(
         tools=[{"type": "function", "function": {"name": "summary_tool"}}],
         runtime_hints={"active_subagent": "intent_router"},
     )
-    assert choice == "required"
+    assert choice == "auto"

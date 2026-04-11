@@ -1,0 +1,28 @@
+{
+  "name": "invoke_worker",
+  "kind": "function",
+  "description": "Dispatch a focused task brief to a worker and return its structured result envelope.",
+  "executor": "app.agent.tools.builtin.executors.invoke_worker:execute",
+  "capabilities": ["builtin", "read_only", "orchestration"],
+  "metadata": {
+    "tool_function": "app.agent.tools.builtin.executors.invoke_worker:execute"
+  },
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "worker": {
+        "enum": ["search_worker", "navigation_worker"],
+        "title": "Worker",
+        "type": "string"
+      },
+      "task": {
+        "minLength": 1,
+        "title": "Task",
+        "type": "string"
+      }
+    },
+    "required": ["worker", "task"],
+    "title": "InvokeWorkerArgs",
+    "type": "object"
+  }
+}

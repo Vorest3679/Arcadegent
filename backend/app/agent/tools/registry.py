@@ -183,7 +183,6 @@ class ToolRegistry:
                 "geo_resolve_tool",
                 "route_plan_tool",
                 "summary_tool",
-                "select_next_subagent_tool",
             )
             if key in legacy
         }

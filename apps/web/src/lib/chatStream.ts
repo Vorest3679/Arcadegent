@@ -3,6 +3,9 @@ import type { ChatHistoryTurn, ChatStreamEnvelope, ChatStreamEventName } from ".
 export const STREAM_EVENT_NAMES: ChatStreamEventName[] = [
   "session.started",
   "subagent.changed",
+  "worker.started",
+  "worker.completed",
+  "worker.failed",
   "assistant.token",
   "tool.started",
   "tool.progress",
@@ -15,17 +18,20 @@ export const STREAM_EVENT_NAMES: ChatStreamEventName[] = [
 
 const SUBAGENT_LABEL: Record<string, string> = {
   intent_router: "意图路由",
+  main_agent: "主控阶段",
   search_agent: "检索阶段",
+  search_worker: "检索执行",
   navigation_agent: "导航阶段",
+  navigation_worker: "导航执行",
   summary_agent: "总结阶段"
 };
 
 const TOOL_LABEL: Record<string, string> = {
+  invoke_worker: "派发任务",
   db_query_tool: "数据检索",
   geo_resolve_tool: "位置解析",
   route_plan_tool: "路线规划",
-  summary_tool: "结果总结",
-  select_next_subagent: "阶段选择"
+  summary_tool: "结果总结"
 };
 
 export type StreamProgressItem = {
@@ -110,6 +116,18 @@ export function toProgressText(envelope: ChatStreamEnvelope): string {
     const nextRaw = envelope.data.to_subagent ?? envelope.data.active_subagent;
     const next = typeof nextRaw === "string" ? nextRaw : null;
     return `切换到 ${formatSubagentLabel(next)}`;
+  }
+  if (envelope.event === "worker.started") {
+    const worker = typeof envelope.data.worker === "string" ? envelope.data.worker : null;
+    return `${formatSubagentLabel(worker)} 已启动`;
+  }
+  if (envelope.event === "worker.completed") {
+    const worker = typeof envelope.data.worker === "string" ? envelope.data.worker : null;
+    return `${formatSubagentLabel(worker)} 已完成`;
+  }
+  if (envelope.event === "worker.failed") {
+    const worker = typeof envelope.data.worker === "string" ? envelope.data.worker : null;
+    return `${formatSubagentLabel(worker)} 失败`;
   }
   if (envelope.event === "assistant.token") {
     const preview = getAssistantTokenPreview(envelope.data);

@@ -1,6 +1,9 @@
 # read_only: whether this tool may mutate external state.
 # concurrency_safe: whether this tool can run safely in parallel with peers.
 tool_policies:
+  invoke_worker:
+    read_only: true
+    concurrency_safe: true
   db_query_tool:
     read_only: true
     concurrency_safe: true
@@ -11,9 +14,6 @@ tool_policies:
     read_only: true
     concurrency_safe: true
   summary_tool:
-    read_only: true
-    concurrency_safe: true
-  select_next_subagent:
     read_only: true
     concurrency_safe: true
 
