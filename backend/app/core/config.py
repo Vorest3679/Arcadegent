@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 
+_WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _is_absolute_path_like(path_like: str) -> bool:
+    if _WINDOWS_ABS_PATH_RE.match(path_like):
+        return True
+    return Path(path_like).is_absolute()
+
+
 def _resolve_path(path_like: str) -> Path:
     candidate = Path(path_like)
-    if candidate.is_absolute():
+    if _is_absolute_path_like(path_like):
         return candidate
     if candidate.exists():
         return candidate
@@ -22,7 +32,7 @@ def _resolve_path(path_like: str) -> Path:
 
 def _resolve_project_path(path_like: str) -> Path:
     candidate = Path(path_like)
-    if candidate.is_absolute():
+    if _is_absolute_path_like(path_like):
         return candidate
     project_root = Path(__file__).resolve().parents[3]
     return project_root / candidate
@@ -92,6 +102,10 @@ class Settings:
     amap_api_key: str = ""
     amap_base_url: str = "https://restapi.amap.com"
     amap_timeout_seconds: float = 8.0
+    arcade_geo_cache_path: Path = Path("data/runtime/arcade_geo_cache.json")
+    arcade_geo_sync_limit: int = 8
+    arcade_geo_max_workers: int = 4
+    arcade_geo_request_timeout_seconds: float = 1.2
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -170,5 +184,20 @@ class Settings:
             amap_base_url=os.getenv("AMAP_BASE_URL", cls.amap_base_url),
             amap_timeout_seconds=float(
                 os.getenv("AMAP_TIMEOUT_SECONDS", str(cls.amap_timeout_seconds))
+            ),
+            arcade_geo_cache_path=_resolve_project_path(
+                os.getenv("ARCADE_GEO_CACHE_PATH", str(cls.arcade_geo_cache_path))
+            ),
+            arcade_geo_sync_limit=int(
+                os.getenv("ARCADE_GEO_SYNC_LIMIT", str(cls.arcade_geo_sync_limit))
+            ),
+            arcade_geo_max_workers=int(
+                os.getenv("ARCADE_GEO_MAX_WORKERS", str(cls.arcade_geo_max_workers))
+            ),
+            arcade_geo_request_timeout_seconds=float(
+                os.getenv(
+                    "ARCADE_GEO_REQUEST_TIMEOUT_SECONDS",
+                    str(cls.arcade_geo_request_timeout_seconds),
+                )
             ),
         )

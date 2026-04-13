@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 IntentType = Literal["search_nearby", "navigate", "search"]
 ChatRoleType = Literal["user", "assistant", "tool"]
 ProviderType = Literal["amap", "google", "none"]
 ChatSessionStatusType = Literal["idle", "running", "completed", "failed"]
+CoordSystemType = Literal["gcj02", "wgs84"]
+GeoSourceType = Literal["catalog", "geocode", "client", "route"]
+GeoPrecisionType = Literal["exact", "approx"]
 
 
 class Location(BaseModel):
@@ -18,6 +21,38 @@ class Location(BaseModel):
 
     lng: float = Field(..., description="Longitude in WGS84.")
     lat: float = Field(..., description="Latitude in WGS84.")
+
+
+class GeoPoint(BaseModel):
+    """Public geo payload with explicit coordinate-system semantics."""
+
+    lng: float
+    lat: float
+    coord_system: CoordSystemType = "gcj02"
+    source: GeoSourceType = "route"
+    precision: GeoPrecisionType = "approx"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_mapping(cls, raw: object) -> object:
+        if not isinstance(raw, dict):
+            return raw
+        if raw.get("lng") is None or raw.get("lat") is None:
+            return raw
+        payload = dict(raw)
+        payload.setdefault("coord_system", "gcj02")
+        payload.setdefault("source", "route")
+        payload.setdefault("precision", "approx")
+        return payload
+
+
+class ArcadeGeoDto(BaseModel):
+    """Per-shop geo payload with GCJ02 and optional WGS84 coordinates."""
+
+    gcj02: GeoPoint | None = None
+    wgs84: GeoPoint | None = None
+    source: GeoSourceType
+    precision: GeoPrecisionType
 
 
 class ClientLocationContext(BaseModel):
@@ -89,6 +124,7 @@ class ArcadeShopSummaryDto(BaseModel):
     fav_count: int | None = None
     updated_at: str | None = None
     arcade_count: int = 0
+    geo: ArcadeGeoDto | None = None
 
 
 class ArcadeShopDetailDto(ArcadeShopSummaryDto):
@@ -127,8 +163,24 @@ class RouteSummaryDto(BaseModel):
     mode: str
     distance_m: int | None = None
     duration_s: int | None = None
-    polyline: list[Location] = Field(default_factory=list)
+    origin: GeoPoint | None = None
+    destination: GeoPoint | None = None
+    polyline: list[GeoPoint] = Field(default_factory=list)
     hint: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_route(cls, raw: object) -> object:
+        if not isinstance(raw, dict):
+            return raw
+        payload = dict(raw)
+        polyline = payload.get("polyline")
+        if isinstance(polyline, list) and polyline:
+            first = polyline[0]
+            last = polyline[-1]
+            payload.setdefault("origin", first)
+            payload.setdefault("destination", last)
+        return payload
 
 
 class ChatRequest(BaseModel):
@@ -197,6 +249,9 @@ class ChatSessionDetailDto(BaseModel):
     reply: str | None = None
     shops: list[ArcadeShopSummaryDto] = Field(default_factory=list)
     route: RouteSummaryDto | None = None
+    client_location: ClientLocationContext | None = None
+    destination: ArcadeShopSummaryDto | None = None
+    view_payload: dict[str, Any] | None = None
     turn_count: int
     created_at: str
     updated_at: str

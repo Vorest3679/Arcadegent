@@ -27,12 +27,35 @@ function buildUrl(path: string, query?: Record<string, string | number | boolean
   return url.toString();
 }
 
+async function parseJsonResponse<T>(resp: Response, requestLabel: string): Promise<T> {
+  const contentType = resp.headers.get("content-type")?.toLowerCase() ?? "";
+  const text = await resp.text();
+
+  if (!resp.ok) {
+    const detail = text.trim().slice(0, 180);
+    throw new Error(`HTTP ${resp.status}: ${requestLabel}${detail ? ` - ${detail}` : ""}`);
+  }
+
+  if (!contentType.includes("application/json")) {
+    const preview = text.trim().slice(0, 120);
+    throw new Error(
+      `Expected JSON from ${requestLabel}, got ${contentType || "unknown content type"}${preview ? ` - ${preview}` : ""}`
+    );
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch (error) {
+    const preview = text.trim().slice(0, 120);
+    throw new Error(
+      `Invalid JSON from ${requestLabel}${preview ? ` - ${preview}` : ""}${error instanceof Error ? ` (${error.message})` : ""}`
+    );
+  }
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const resp = await fetch(url);
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}: ${url}`);
-  }
-  return (await resp.json()) as T;
+  return parseJsonResponse<T>(resp, url);
 }
 
 async function postJson<T>(path: string, payload: unknown): Promise<T> {
@@ -43,10 +66,7 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
     },
     body: JSON.stringify(payload)
   });
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status}: ${path}`);
-  }
-  return (await resp.json()) as T;
+  return parseJsonResponse<T>(resp, path);
 }
 
 async function deleteJson(path: string): Promise<void> {

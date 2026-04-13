@@ -9,7 +9,7 @@ from urllib import parse
 
 import httpx
 
-from app.protocol.messages import Location, ProviderType, RouteSummaryDto
+from app.protocol.messages import GeoPoint, Location, ProviderType, RouteSummaryDto
 
 
 def _haversine_meters(a: Location, b: Location) -> float:
@@ -32,9 +32,19 @@ class AMapConfig:
     base_url: str
     timeout_seconds: float
 
-def _parse_polyline(polyline: str) -> list[Location]:
+def _route_point_from_location(location: Location, *, source: str) -> GeoPoint:
+    return GeoPoint(
+        lng=location.lng,
+        lat=location.lat,
+        coord_system="gcj02",
+        source=source,  # type: ignore[arg-type]
+        precision="approx",
+    )
+
+
+def _parse_polyline(polyline: str) -> list[GeoPoint]:
     """解析高德地图API返回的polyline字符串为坐标列表。"""
-    result: list[Location] = []
+    result: list[GeoPoint] = []
     if not polyline:
         return result
     for point in polyline.split(";"):
@@ -49,7 +59,15 @@ def _parse_polyline(polyline: str) -> list[Location]:
             lat = float(parts[1])
         except ValueError:
             continue
-        result.append(Location(lng=lng, lat=lat))
+        result.append(
+            GeoPoint(
+                lng=lng,
+                lat=lat,
+                coord_system="gcj02",
+                source="route",
+                precision="approx",
+            )
+        )
     return result
 
 
@@ -103,7 +121,7 @@ class RoutePlanTool:
         except (TypeError, ValueError):
             return None
 
-        points: list[Location] = []
+        points: list[GeoPoint] = []
         steps = first.get("steps")
         if isinstance(steps, list):
             for step in steps:
@@ -120,6 +138,8 @@ class RoutePlanTool:
             mode=mode,
             distance_m=distance_m,
             duration_s=duration_s,
+            origin=_route_point_from_location(origin, source="client"),
+            destination=_route_point_from_location(destination, source="route"),
             polyline=points,
             hint=None,
         )
@@ -152,6 +172,23 @@ class RoutePlanTool:
             mode=mode,
             distance_m=distance_m,
             duration_s=duration_s,
-            polyline=[origin, destination],
+            origin=GeoPoint(
+                lng=origin.lng,
+                lat=origin.lat,
+                coord_system="wgs84",
+                source="client",
+                precision="approx",
+            ),
+            destination=_route_point_from_location(destination, source="route"),
+            polyline=[
+                GeoPoint(
+                    lng=origin.lng,
+                    lat=origin.lat,
+                    coord_system="wgs84",
+                    source="client",
+                    precision="approx",
+                ),
+                _route_point_from_location(destination, source="route"),
+            ],
             hint=hint,
         )

@@ -5,6 +5,24 @@ export type RegionItem = {
 
 export type ArcadeSortBy = "default" | "updated_at" | "source_id" | "arcade_count" | "title_quantity";
 export type SortOrder = "asc" | "desc";
+export type CoordSystem = "gcj02" | "wgs84";
+export type GeoSource = "catalog" | "geocode" | "client" | "route";
+export type GeoPrecision = "exact" | "approx";
+
+export type GeoPoint = {
+  lng: number;
+  lat: number;
+  coord_system: CoordSystem;
+  source: GeoSource;
+  precision: GeoPrecision;
+};
+
+export type ArcadeGeo = {
+  gcj02?: GeoPoint | null;
+  wgs84?: GeoPoint | null;
+  source: GeoSource;
+  precision: GeoPrecision;
+};
 
 export type ArcadeSummary = {
   source: string;
@@ -31,6 +49,7 @@ export type ArcadeSummary = {
   fav_count?: number | null;
   updated_at?: string | null;
   arcade_count: number;
+  geo?: ArcadeGeo | null;
 };
 
 export type ArcadeTitle = {
@@ -105,7 +124,9 @@ export type RouteSummary = {
   mode: string;
   distance_m?: number | null;
   duration_s?: number | null;
-  polyline: Array<{ lng: number; lat: number }>;
+  origin?: GeoPoint | null;
+  destination?: GeoPoint | null;
+  polyline: GeoPoint[];
   hint?: string | null;
 };
 
@@ -150,6 +171,9 @@ export type ChatSessionDetail = {
   reply?: string | null;
   shops: ArcadeSummary[];
   route?: RouteSummary | null;
+  client_location?: ClientLocationContext | null;
+  destination?: ArcadeSummary | null;
+  view_payload?: Record<string, unknown> | null;
   turn_count: number;
   created_at: string;
   updated_at: string;

@@ -12,6 +12,7 @@ __pycache__/
 # Frontend
 apps/web/node_modules/
 apps/web/dist/
+apps/web/.env.local
 
 # Runtime outputs
 data/
@@ -34,4 +35,6 @@ g:/
 output
 .DS_Store
 
-tests
+tests/
+uv.lock
+test-results/

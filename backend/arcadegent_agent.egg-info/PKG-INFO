@@ -4,10 +4,12 @@ Version: 0.1.0
 Summary: Arcadegent FastAPI backend for arcade search and orchestration.
 Requires-Python: >=3.11
 Requires-Dist: fastapi<1.0.0,>=0.116.0
+Requires-Dist: fastmcp<4.0.0,>=3.0.0
+Requires-Dist: httpx<1.0.0,>=0.28.0
+Requires-Dist: jsonschema<5.0.0,>=4.0.0
 Requires-Dist: uvicorn[standard]<1.0.0,>=0.35.0
 Requires-Dist: pydantic<3.0.0,>=2.10.0
 Requires-Dist: python-dotenv<2.0.0,>=1.1.0
 Requires-Dist: pyyaml<7.0.0,>=6.0.2
 Provides-Extra: dev
 Requires-Dist: pytest<9.0.0,>=8.3.0; extra == "dev"
-Requires-Dist: httpx<1.0.0,>=0.28.0; extra == "dev"

@@ -10,15 +10,14 @@ from app.api.deps import get_container
 from app.core.container import AppContainer
 from app.infra.observability.logger import get_logger
 from app.protocol.messages import (
-    ArcadeShopSummaryDto,
     ChatHistoryTurnDto,
     ChatRequest,
     ChatResponse,
     ChatSessionDispatchDto,
     ChatSessionDetailDto,
     ChatSessionSummaryDto,
+    ClientLocationContext,
     IntentType,
-    RouteSummaryDto,
 )
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -83,36 +82,7 @@ def _to_summary(state: AgentSessionState) -> ChatSessionSummaryDto:
     )
 
 
-def _to_shop(raw: dict) -> ArcadeShopSummaryDto:
-    return ArcadeShopSummaryDto(
-        source=str(raw.get("source") or ""),
-        source_id=int(raw.get("source_id") or 0),
-        source_url=str(raw.get("source_url") or ""),
-        name=str(raw.get("name") or "unknown arcade"),
-        name_pinyin=raw.get("name_pinyin"),
-        address=raw.get("address"),
-        transport=raw.get("transport"),
-        province_code=raw.get("province_code"),
-        province_name=raw.get("province_name"),
-        city_code=raw.get("city_code"),
-        city_name=raw.get("city_name"),
-        county_code=raw.get("county_code"),
-        county_name=raw.get("county_name"),
-        status=raw.get("status"),
-        type=raw.get("type"),
-        pay_type=raw.get("pay_type"),
-        locked=raw.get("locked"),
-        ea_status=raw.get("ea_status"),
-        price=raw.get("price"),
-        start_time=raw.get("start_time"),
-        end_time=raw.get("end_time"),
-        fav_count=raw.get("fav_count"),
-        updated_at=raw.get("updated_at"),
-        arcade_count=int(raw.get("arcade_count") or 0),
-    )
-
-
-def _state_shops(state: AgentSessionState) -> list[ArcadeShopSummaryDto]:
+def _state_shop_rows(state: AgentSessionState) -> list[dict]:
     shops_raw: list[dict] = []
     memory_shops = get_working_memory_artifact(state.working_memory, "shops")
     if isinstance(memory_shops, list):
@@ -123,20 +93,33 @@ def _state_shops(state: AgentSessionState) -> list[ArcadeShopSummaryDto]:
         exists = any(item.get("source_id") == source_id for item in shops_raw)
         if not exists:
             shops_raw.append(memory_shop)
-    return [_to_shop(row) for row in shops_raw[:20]]
+    return shops_raw[:20]
 
 
-def _state_route(state: AgentSessionState) -> RouteSummaryDto | None:
-    memory_route = get_working_memory_artifact(state.working_memory, "route")
-    if not isinstance(memory_route, dict):
+def _state_client_location(state: AgentSessionState) -> ClientLocationContext | None:
+    memory_location = get_working_memory_artifact(state.working_memory, "client_location")
+    if not isinstance(memory_location, dict):
         return None
     try:
-        return RouteSummaryDto.model_validate(memory_route)
+        return ClientLocationContext.model_validate(memory_location)
     except Exception:
         return None
 
 
-def _to_detail(state: AgentSessionState) -> ChatSessionDetailDto:
+def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSessionDetailDto:
+    raw_shops = _state_shop_rows(state)
+    shops = container.arcade_payload_mapper.summaries_from_rows(raw_shops)
+    route = container.arcade_payload_mapper.route_from_payload(
+        get_working_memory_artifact(state.working_memory, "route")
+    )
+    destination_raw = get_working_memory_artifact(state.working_memory, "destination")
+    if not isinstance(destination_raw, dict) and route is not None:
+        destination_raw = raw_shops[0] if raw_shops else None
+    destination = (
+        container.arcade_payload_mapper.summary_from_row(destination_raw)
+        if isinstance(destination_raw, dict)
+        else None
+    )
     return ChatSessionDetailDto(
         session_id=state.session_id,
         intent=_normalize_intent(state.intent),
@@ -144,8 +127,13 @@ def _to_detail(state: AgentSessionState) -> ChatSessionDetailDto:
         status=state.status,
         last_error=state.last_error,
         reply=state.working_memory.get("reply") if isinstance(state.working_memory.get("reply"), str) else None,
-        shops=_state_shops(state),
-        route=_state_route(state),
+        shops=shops,
+        route=route,
+        client_location=_state_client_location(state),
+        destination=destination,
+        view_payload=get_working_memory_artifact(state.working_memory, "view_payload")
+        if isinstance(get_working_memory_artifact(state.working_memory, "view_payload"), dict)
+        else None,
         turn_count=len(state.turns),
         created_at=state.created_at,
         updated_at=state.updated_at,
@@ -218,7 +206,7 @@ def get_chat_session(
     session = container.session_store.snapshot(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
-    return _to_detail(session)
+    return _to_detail(session, container=container)
 
 
 @router.delete("/v1/chat/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

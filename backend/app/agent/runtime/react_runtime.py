@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from copy import deepcopy
@@ -26,12 +27,11 @@ from app.agent.subagents.subagent_builder import SubAgentBuilder, SubAgentProfil
 from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
 from app.infra.observability.logger import get_logger
 from app.protocol.messages import (
-    ArcadeShopSummaryDto,
     ChatRequest,
     ChatResponse,
     IntentType,
-    RouteSummaryDto,
 )
+from app.services.arcade_payload_mapper import ArcadePayloadMapper
 
 logger = get_logger(__name__)
 
@@ -110,36 +110,6 @@ def _chunk_stream_text(text: str, *, max_chars: int = 18) -> list[str]:
     return chunks
 
 
-def _summary_row(raw: dict) -> ArcadeShopSummaryDto:
-    """Map internal shop payload to API summary DTO."""
-    return ArcadeShopSummaryDto(
-        source=str(raw.get("source") or ""),
-        source_id=int(raw.get("source_id") or 0),
-        source_url=str(raw.get("source_url") or ""),
-        name=str(raw.get("name") or "unknown arcade"),
-        name_pinyin=raw.get("name_pinyin"),
-        address=raw.get("address"),
-        transport=raw.get("transport"),
-        province_code=raw.get("province_code"),
-        province_name=raw.get("province_name"),
-        city_code=raw.get("city_code"),
-        city_name=raw.get("city_name"),
-        county_code=raw.get("county_code"),
-        county_name=raw.get("county_name"),
-        status=raw.get("status"),
-        type=raw.get("type"),
-        pay_type=raw.get("pay_type"),
-        locked=raw.get("locked"),
-        ea_status=raw.get("ea_status"),
-        price=raw.get("price"),
-        start_time=raw.get("start_time"),
-        end_time=raw.get("end_time"),
-        fav_count=raw.get("fav_count"),
-        updated_at=raw.get("updated_at"),
-        arcade_count=int(raw.get("arcade_count") or 0),
-    )
-
-
 class ReactRuntime:
     """Main-agent hub runtime with synchronous worker execution."""
 
@@ -152,6 +122,7 @@ class ReactRuntime:
         provider_adapter: ProviderAdapter,
         session_store: SessionStateStore,
         replay_buffer: ReplayBuffer,
+        arcade_payload_mapper: ArcadePayloadMapper,
         max_steps: int,
     ) -> None:
         self._context_builder = context_builder
@@ -160,6 +131,7 @@ class ReactRuntime:
         self._provider_adapter = provider_adapter
         self._session_store = session_store
         self._replay_buffer = replay_buffer
+        self._arcade_payload_mapper = arcade_payload_mapper
         self._max_steps = max(2, max_steps)
 
     def prepare_session(self, session_id: str) -> None:
@@ -321,7 +293,7 @@ class ReactRuntime:
             len(self._memory_shops(state.working_memory)),
             _short(final_text, limit=160),
         )
-        return self._build_response(session_id=session_id, state=state, final_text=final_text)
+        return await self._build_response(session_id=session_id, state=state, final_text=final_text)
 
     async def _run_main_agent(
         self,
@@ -840,6 +812,17 @@ class ReactRuntime:
             envelope = result.output if isinstance(result.output, dict) else {}
             if envelope.get("status") == "failed":
                 memory["last_error"] = {"message": envelope.get("error") or "worker failed"}
+            result_payload = envelope.get("result")
+            if isinstance(result_payload, dict):
+                destination = result_payload.get("destination")
+                if isinstance(destination, dict):
+                    set_working_memory_artifact(memory, "destination", destination)
+                route = result_payload.get("route")
+                if isinstance(route, dict):
+                    set_working_memory_artifact(memory, "route", route)
+                view_payload = result_payload.get("view_payload")
+                if isinstance(view_payload, dict):
+                    set_working_memory_artifact(memory, "view_payload", view_payload)
             return
 
         if result.tool_name == "db_query_tool":
@@ -880,6 +863,9 @@ class ReactRuntime:
             route = result.output.get("route")
             if isinstance(route, dict):
                 set_working_memory_artifact(memory, "route", route)
+                destination = get_working_memory_artifact(memory, "shop")
+                if isinstance(destination, dict):
+                    set_working_memory_artifact(memory, "destination", destination)
                 state.intent = "navigate"
             return
 
@@ -887,6 +873,9 @@ class ReactRuntime:
             route = result.output.get("route")
             if isinstance(route, dict):
                 set_working_memory_artifact(memory, "route", route)
+                destination = get_working_memory_artifact(memory, "shop")
+                if isinstance(destination, dict):
+                    set_working_memory_artifact(memory, "destination", destination)
                 state.intent = "navigate"
             data = result.output.get("data")
             if isinstance(data, dict):
@@ -908,7 +897,7 @@ class ReactRuntime:
         for key in ("last_request", "last_shop_id", "keyword", "last_db_query", "provider"):
             if key in parent_memory:
                 memory[key] = deepcopy(parent_memory[key])
-        for key in ("shop", "shops", "total", "route", "resolved_locations", "client_location"):
+        for key in ("shop", "shops", "total", "route", "resolved_locations", "client_location", "destination", "view_payload"):
             value = get_working_memory_artifact(parent_memory, key)
             if value is not None:
                 set_working_memory_artifact(memory, key, value)
@@ -921,7 +910,7 @@ class ReactRuntime:
         worker_memory: dict[str, Any],
     ) -> dict[str, Any]:
         promoted: dict[str, Any] = {}
-        for key in ("shop", "shops", "total", "route", "resolved_locations", "client_location"):
+        for key in ("shop", "shops", "total", "route", "resolved_locations", "client_location", "destination", "view_payload"):
             value = get_working_memory_artifact(worker_memory, key)
             if value is None:
                 continue
@@ -1123,17 +1112,13 @@ class ReactRuntime:
             return f"已收到请求，但暂时没有找到和“{keyword}”相关的结果，可以换个关键词试试。"
         return "已收到请求，但暂时没有足够结果，可以换个关键词或区域再试试。"
 
-    def _build_response(self, *, session_id: str, state: AgentSessionState, final_text: str) -> ChatResponse:
+    async def _build_response(self, *, session_id: str, state: AgentSessionState, final_text: str) -> ChatResponse:
         """Build API response from memory-level shop and route payloads."""
-        shops = [_summary_row(row) for row in self._memory_shops(state.working_memory)[:20]]
-
-        route_obj: RouteSummaryDto | None = None
-        memory_route = get_working_memory_artifact(state.working_memory, "route")
-        if isinstance(memory_route, dict):
-            try:
-                route_obj = RouteSummaryDto.model_validate(memory_route)
-            except Exception:
-                route_obj = None
+        raw_shops = self._memory_shops(state.working_memory)[:20]
+        shops = await asyncio.to_thread(self._arcade_payload_mapper.summaries_from_rows, raw_shops)
+        route_obj = self._arcade_payload_mapper.route_from_payload(
+            get_working_memory_artifact(state.working_memory, "route")
+        )
 
         intent = _normalize_intent(state.intent)
         if route_obj is not None:

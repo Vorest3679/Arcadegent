@@ -1,4 +1,7 @@
 fastapi<1.0.0,>=0.116.0
+fastmcp<4.0.0,>=3.0.0
+httpx<1.0.0,>=0.28.0
+jsonschema<5.0.0,>=4.0.0
 uvicorn[standard]<1.0.0,>=0.35.0
 pydantic<3.0.0,>=2.10.0
 python-dotenv<2.0.0,>=1.1.0
@@ -6,4 +9,3 @@ pyyaml<7.0.0,>=6.0.2
 
 [dev]
 pytest<9.0.0,>=8.3.0
-httpx<1.0.0,>=0.28.0

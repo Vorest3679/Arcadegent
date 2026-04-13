@@ -23,6 +23,35 @@ import type {
 
 type ViewMode = "chat" | "arcades";
 
+function normalizeViewMode(raw: string | null): ViewMode {
+  return raw === "arcades" ? "arcades" : "chat";
+}
+
+function readInitialViewMode(): ViewMode {
+  if (typeof window === "undefined") {
+    return "chat";
+  }
+  return normalizeViewMode(new URLSearchParams(window.location.search).get("view"));
+}
+
+// 同步 viewMode 到 URL，保持在刷新页面时能够恢复到之前的视图模式，同时也方便用户在不同视图模式之间切换时能够通过浏览器的前进后退按钮进行导航。
+function syncViewModeInUrl(viewMode: ViewMode) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const url = new URL(window.location.href);
+  if (viewMode === "chat") {
+    url.searchParams.delete("view");
+  } else {
+    url.searchParams.set("view", viewMode);
+  }
+  const nextHref = `${url.pathname}${url.search}${url.hash}`;
+  const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (nextHref !== currentHref) {
+    window.history.replaceState({}, "", nextHref);
+  }
+}
+
 function makeSessionId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `s_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -31,7 +60,7 @@ function makeSessionId(): string {
 }
 
 export function App() {
-  const [viewMode, setViewMode] = useState<ViewMode>("chat");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => readInitialViewMode());
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
@@ -389,6 +418,10 @@ export function App() {
     void loadSessionList();
     void warmupClientLocationCache();
   }, []);
+
+  useEffect(() => {
+    syncViewModeInUrl(viewMode);
+  }, [viewMode]);
 
   useEffect(() => {
     return () => {

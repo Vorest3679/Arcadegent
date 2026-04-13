@@ -139,5 +139,6 @@
 
 ## 关联文档
 
+- [Markdown / 地图视图 / AMap JS API 实施方案](../plans/2026-04-12-markdown-map-view-renderer-implementation-plan.md)
 - [链式 subagent 改为主 agent hub](./2026-03-19-main-agent-hub-architecture.md)
 - [会话执行异步化与 SSE 预备改造](./2026-03-19-chat-async-and-sse-readiness.md)

@@ -19,6 +19,8 @@ from app.agent.tools.mcp_gateway import MCPToolGateway, build_mcp_server_configs
 from app.agent.tools.registry import ToolRegistry
 from app.core.config import Settings
 from app.infra.db.local_store import LocalArcadeStore
+from app.services.arcade_geo_resolver import ArcadeGeoResolver, ArcadeGeoResolverConfig
+from app.services.arcade_payload_mapper import ArcadePayloadMapper
 from app.services.amap_reverse_geocoder import AMapReverseGeocoder, AMapReverseGeocoderConfig
 
 
@@ -31,6 +33,8 @@ class AppContainer:
     replay_buffer: ReplayBuffer
     session_store: SessionStateStore
     reverse_geocoder: AMapReverseGeocoder
+    arcade_geo_resolver: ArcadeGeoResolver
+    arcade_payload_mapper: ArcadePayloadMapper
     tool_registry: ToolRegistry
     react_runtime: ReactRuntime
     orchestrator: Orchestrator
@@ -48,6 +52,17 @@ def build_container(settings: Settings) -> AppContainer:
             timeout_seconds=settings.amap_timeout_seconds,
         )
     )
+    arcade_geo_resolver = ArcadeGeoResolver(
+        config=ArcadeGeoResolverConfig(
+            api_key=settings.amap_api_key,
+            base_url=settings.amap_base_url,
+            cache_path=settings.arcade_geo_cache_path,
+            request_timeout_seconds=settings.arcade_geo_request_timeout_seconds,
+            sync_limit=settings.arcade_geo_sync_limit,
+            max_workers=settings.arcade_geo_max_workers,
+        )
+    )
+    arcade_payload_mapper = ArcadePayloadMapper(geo_resolver=arcade_geo_resolver)
     project_root = Path(__file__).resolve().parents[1]
     context_builder = ContextBuilder(
         prompt_root=project_root / "agent" / "context" / "prompts",
@@ -87,6 +102,7 @@ def build_container(settings: Settings) -> AppContainer:
         provider_adapter=provider_adapter,
         session_store=session_store,
         replay_buffer=replay_buffer,
+        arcade_payload_mapper=arcade_payload_mapper,
         max_steps=settings.agent_max_steps,
     )
     orchestrator = Orchestrator(
@@ -98,6 +114,8 @@ def build_container(settings: Settings) -> AppContainer:
         replay_buffer=replay_buffer,
         session_store=session_store,
         reverse_geocoder=reverse_geocoder,
+        arcade_geo_resolver=arcade_geo_resolver,
+        arcade_payload_mapper=arcade_payload_mapper,
         tool_registry=tool_registry,
         react_runtime=react_runtime,
         orchestrator=orchestrator,

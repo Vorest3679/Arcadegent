@@ -9,39 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import get_container
 from app.core.container import AppContainer
-from app.protocol.messages import ArcadeShopDetailDto, ArcadeShopSummaryDto, PagedArcadeResponse
+from app.protocol.messages import ArcadeShopDetailDto, PagedArcadeResponse
 
 router = APIRouter(prefix="/api/v1/arcades", tags=["arcades"])
-
-
-def _summary_dto(raw: dict) -> ArcadeShopSummaryDto:
-    return ArcadeShopSummaryDto(
-        source=raw["source"],
-        source_id=raw["source_id"],
-        source_url=raw["source_url"],
-        name=raw["name"],
-        name_pinyin=raw.get("name_pinyin"),
-        address=raw.get("address"),
-        transport=raw.get("transport"),
-        province_code=raw.get("province_code"),
-        province_name=raw.get("province_name"),
-        city_code=raw.get("city_code"),
-        city_name=raw.get("city_name"),
-        county_code=raw.get("county_code"),
-        county_name=raw.get("county_name"),
-        status=raw.get("status"),
-        type=raw.get("type"),
-        pay_type=raw.get("pay_type"),
-        locked=raw.get("locked"),
-        ea_status=raw.get("ea_status"),
-        price=raw.get("price"),
-        start_time=raw.get("start_time"),
-        end_time=raw.get("end_time"),
-        fav_count=raw.get("fav_count"),
-        updated_at=raw.get("updated_at"),
-        arcade_count=int(raw.get("arcade_count") or 0),
-    )
-
 
 @router.get("", response_model=PagedArcadeResponse)
 def list_arcades(
@@ -71,7 +41,11 @@ def list_arcades(
         sort_order=sort_order,
         sort_title_name=sort_title_name,
     )
-    items = [_summary_dto(row) for row in rows]
+    items = container.arcade_payload_mapper.summaries_from_rows(
+        rows,
+        sync_limit=container.settings.arcade_geo_sync_limit,
+        max_workers=container.settings.arcade_geo_max_workers,
+    )
     total_pages = ceil(total / page_size) if total > 0 else 0
     return PagedArcadeResponse(
         items=items,
@@ -90,36 +64,4 @@ def get_arcade_detail(
     row = container.store.get_shop(source_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"arcade source_id={source_id} not found")
-    return ArcadeShopDetailDto(
-        source=row["source"],
-        source_id=row["source_id"],
-        source_url=row["source_url"],
-        name=row["name"],
-        name_pinyin=row.get("name_pinyin"),
-        address=row.get("address"),
-        transport=row.get("transport"),
-        comment=row.get("comment"),
-        url=row.get("url"),
-        province_code=row.get("province_code"),
-        province_name=row.get("province_name"),
-        city_code=row.get("city_code"),
-        city_name=row.get("city_name"),
-        county_code=row.get("county_code"),
-        county_name=row.get("county_name"),
-        status=row.get("status"),
-        type=row.get("type"),
-        pay_type=row.get("pay_type"),
-        locked=row.get("locked"),
-        ea_status=row.get("ea_status"),
-        price=row.get("price"),
-        start_time=row.get("start_time"),
-        end_time=row.get("end_time"),
-        fav_count=row.get("fav_count"),
-        updated_at=row.get("updated_at"),
-        arcade_count=int(row.get("arcade_count") or 0),
-        image_thumb=row.get("image_thumb"),
-        events=row.get("events") or [],
-        arcades=row.get("arcades") or [],
-        collab=row.get("collab"),
-        raw=row.get("raw"),
-    )
+    return container.arcade_payload_mapper.detail_from_row(row)

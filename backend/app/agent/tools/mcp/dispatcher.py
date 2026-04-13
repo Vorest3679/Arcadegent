@@ -9,7 +9,8 @@ from __future__ import annotations
 # - `_serialize_json_safe()`: 尝试将值序列化为 JSON，如果失败则返回字符串表示。
 # - `_serialize_content_block()`: 将工具执行结果中的内容块序列化为字典格式。
 # - `_extract_text_from_content()`: 从工具执行结果的内容中提取文本信息。
-# - `_parse_polyline()`: 将字符串格式的路径信息解析为 Location 对象列表。
+# - `_coerce_geo_point()`: 根据提供的经纬度和坐标系信息构造 GeoPoint 对象。
+# - `_parse_polyline()`: 将字符串格式的路径信息解析为 GeoPoint 对象列表。
 # - `_normalize_polyline()`: 将不同格式的路径信息规范化为 Location 对象列表。
 # - `_infer_mode()`: 根据工具的远程名称和输入参数推断出路径规划的模式。
 # - `_fallback_polyline()`: 从输入参数中提取路径信息作为备选方案。
@@ -24,7 +25,7 @@ from typing import Any
 from app.agent.tools.mcp.client_manager import MCPClientManager
 from app.agent.tools.mcp.discovery import coerce_str
 from app.agent.tools.mcp.models import MCPExecutionResult, MCPServerConfig, MCPToolDescriptor
-from app.protocol.messages import Location, RouteSummaryDto
+from app.protocol.messages import GeoPoint, Location, RouteSummaryDto
 
 
 def _coerce_int(value: Any) -> int | None:
@@ -76,8 +77,25 @@ def _extract_text_from_content(content: list[dict[str, Any]]) -> str | None:
     return merged or None
 
 
-def _parse_polyline(polyline: str) -> list[Location]:
-    points: list[Location] = []
+def _coerce_geo_point(
+    *,
+    lng: float,
+    lat: float,
+    coord_system: str,
+    source: str,
+    precision: str = "approx",
+) -> GeoPoint:
+    return GeoPoint(
+        lng=lng,
+        lat=lat,
+        coord_system=coord_system,  # type: ignore[arg-type]
+        source=source,  # type: ignore[arg-type]
+        precision=precision,  # type: ignore[arg-type]
+    )
+
+
+def _parse_polyline(polyline: str) -> list[GeoPoint]:
+    points: list[GeoPoint] = []
     for point in polyline.split(";"):
         raw = point.strip()
         if not raw:
@@ -90,16 +108,23 @@ def _parse_polyline(polyline: str) -> list[Location]:
             lat = float(lng_lat[1])
         except ValueError:
             continue
-        points.append(Location(lng=lng, lat=lat))
+        points.append(
+            _coerce_geo_point(
+                lng=lng,
+                lat=lat,
+                coord_system="gcj02",
+                source="route",
+            )
+        )
     return points
 
 
-def _normalize_polyline(value: Any) -> list[Location]:
+def _normalize_polyline(value: Any) -> list[GeoPoint]:
     if isinstance(value, str):
         return _parse_polyline(value)
     if not isinstance(value, list):
         return []
-    points: list[Location] = []
+    points: list[GeoPoint] = []
     for item in value:
         if isinstance(item, dict):
             lng = item.get("lng", item.get("lon", item.get("longitude")))
@@ -107,7 +132,15 @@ def _normalize_polyline(value: Any) -> list[Location]:
             try:
                 if lng is None or lat is None:
                     continue
-                points.append(Location(lng=float(lng), lat=float(lat)))
+                points.append(
+                    _coerce_geo_point(
+                        lng=float(lng),
+                        lat=float(lat),
+                        coord_system=str(item.get("coord_system") or "gcj02"),
+                        source=str(item.get("source") or "route"),
+                        precision=str(item.get("precision") or "approx"),
+                    )
+                )
             except (TypeError, ValueError):
                 continue
     return points
@@ -125,20 +158,38 @@ def _infer_mode(*, remote_name: str, arguments: dict[str, Any]) -> str:
     return "walking"
 
 
-def _fallback_polyline(arguments: dict[str, Any]) -> list[Location]:
-    points: list[Location] = []
+def _fallback_point(arguments: dict[str, Any], key: str) -> GeoPoint | None:
+    raw = arguments.get(key)
+    if not isinstance(raw, dict):
+        return None
+    lng = raw.get("lng")
+    lat = raw.get("lat")
+    try:
+        if lng is None or lat is None:
+            return None
+        if key == "origin":
+            return _coerce_geo_point(
+                lng=float(lng),
+                lat=float(lat),
+                coord_system=str(raw.get("coord_system") or "wgs84"),
+                source=str(raw.get("source") or "client"),
+            )
+        return _coerce_geo_point(
+            lng=float(lng),
+            lat=float(lat),
+            coord_system=str(raw.get("coord_system") or "gcj02"),
+            source=str(raw.get("source") or "route"),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _fallback_polyline(arguments: dict[str, Any]) -> list[GeoPoint]:
+    points: list[GeoPoint] = []
     for key in ("origin", "destination"):
-        raw = arguments.get(key)
-        if not isinstance(raw, dict):
-            continue
-        lng = raw.get("lng")
-        lat = raw.get("lat")
-        try:
-            if lng is None or lat is None:
-                continue
-            points.append(Location(lng=float(lng), lat=float(lat)))
-        except (TypeError, ValueError):
-            continue
+        point = _fallback_point(arguments, key)
+        if point is not None:
+            points.append(point)
     return points
 
 """
@@ -174,6 +225,8 @@ def _extract_route_from_mapping(
             mode=mode,
             distance_m=distance_m,
             duration_s=duration_s,
+            origin=_fallback_point(raw_arguments, "origin"),
+            destination=_fallback_point(raw_arguments, "destination"),
             polyline=polyline or _fallback_polyline(raw_arguments),
             hint=hint,
         )
@@ -195,7 +248,7 @@ def _extract_route_from_mapping(
         if isinstance(first, dict):
             distance_m = _coerce_int(first.get("distance"))
             duration_s = _coerce_int(first.get("duration"))
-            points: list[Location] = []
+            points: list[GeoPoint] = []
             steps = first.get("steps")
             if isinstance(steps, list):
                 for step in steps:
@@ -209,6 +262,8 @@ def _extract_route_from_mapping(
                 mode=mode,
                 distance_m=distance_m,
                 duration_s=duration_s,
+                origin=_fallback_point(raw_arguments, "origin"),
+                destination=_fallback_point(raw_arguments, "destination"),
                 polyline=points or _fallback_polyline(raw_arguments),
                 hint=hint,
             )

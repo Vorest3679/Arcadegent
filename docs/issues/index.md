@@ -1,6 +1,6 @@
 # Issue 索引
 
-更新时间：2026-04-08
+更新时间：2026-04-12
 
 本目录用于沉淀可追踪的问题文档。当前先覆盖两类来源：
 
@@ -31,6 +31,7 @@
 ## 补充讨论文档
 
 - [主 agent / worker 二级多智能体改造方案（讨论稿）](./main-agent-worker-migration-plan.md)
+- [Markdown / 地图视图 / AMap JS API 实施方案](../plans/2026-04-12-markdown-map-view-renderer-implementation-plan.md)
 
 ## 维护规则
 

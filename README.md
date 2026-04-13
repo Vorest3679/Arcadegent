@@ -186,8 +186,13 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --access-log
 推荐在 `apps/web/.env.local` 里写：
 
 ```dotenv
-VITE_API_BASE=http://localhost:8000
+VITE_API_BASE=http://127.0.0.1:8000
+VITE_AMAP_WEB_KEY=
+VITE_AMAP_SECURITY_JS_CODE=
+VITE_AMAP_URI_SRC=arcadegent_web
 ```
+
+这里的 `VITE_AMAP_WEB_KEY` 要用高德 Web JS API 的浏览器 key；如果把仅用于 REST/MCP 的 key 直接填进来，页面会报 `USERKEY_PLAT_NOMATCH` 或类似鉴权错误。
 
 也可以直接用命令行临时设置：
 
@@ -195,14 +200,14 @@ macOS / Linux:
 
 ```bash
 cd apps/web
-VITE_API_BASE=http://localhost:8000 npm run dev
+VITE_API_BASE=http://127.0.0.1:8000 npm run dev
 ```
 
 Windows PowerShell:
 
 ```powershell
 cd apps/web
-$env:VITE_API_BASE = "http://localhost:8000"
+$env:VITE_API_BASE = "http://127.0.0.1:8000"
 npm run dev
 ```
 

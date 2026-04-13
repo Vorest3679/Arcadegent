@@ -46,19 +46,37 @@ def _clear_mcp_env() -> None:
         os.environ.pop(name, None)
 
 
+def _clear_llm_env() -> None:
+    for name in (
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+        "LLM_TIMEOUT_SECONDS",
+    ):
+        os.environ.pop(name, None)
+
+
 def _build_client(
     tmp_path: Path,
     *,
     session_store_path: Path | None = None,
     mcp_servers_dir: Path | None = None,
+    cache_path: Path | None = None,
 ) -> TestClient:
     data_path = tmp_path / "shops.jsonl"
+    empty_mcp_dir = tmp_path / "mcp_empty"
+    empty_mcp_dir.mkdir(exist_ok=True)
     _seed_data(data_path)
+    _clear_mcp_env()
+    _clear_llm_env()
     os.environ["ARCADE_DATA_JSONL"] = str(data_path)
     os.environ["CHAT_SESSION_STORE_PATH"] = str(session_store_path or (tmp_path / "chat_sessions.json"))
-    _clear_mcp_env()
-    if mcp_servers_dir is not None:
-        os.environ["MCP_SERVERS_DIR"] = str(mcp_servers_dir)
+    os.environ["ARCADE_GEO_CACHE_PATH"] = str(cache_path or (tmp_path / "arcade_geo_cache.json"))
+    os.environ["LLM_API_KEY"] = ""
+    os.environ["LLM_BASE_URL"] = "https://api.example.invalid/v1"
+    os.environ["LLM_MODEL"] = "test-model"
+    os.environ["AMAP_API_KEY"] = "test-amap-key"
+    os.environ["MCP_SERVERS_DIR"] = str(mcp_servers_dir or empty_mcp_dir)
 
     from app.main import create_app
 
@@ -72,15 +90,25 @@ def _build_client_with_rows(
     rows: list[dict[str, object]],
     *,
     session_store_path: Path | None = None,
+    cache_path: Path | None = None,
 ) -> TestClient:
     data_path = tmp_path / "shops_custom.jsonl"
+    empty_mcp_dir = tmp_path / "mcp_empty"
+    empty_mcp_dir.mkdir(exist_ok=True)
     with data_path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False))
             handle.write("\n")
+    _clear_mcp_env()
+    _clear_llm_env()
     os.environ["ARCADE_DATA_JSONL"] = str(data_path)
     os.environ["CHAT_SESSION_STORE_PATH"] = str(session_store_path or (tmp_path / "chat_sessions.json"))
-    _clear_mcp_env()
+    os.environ["ARCADE_GEO_CACHE_PATH"] = str(cache_path or (tmp_path / "arcade_geo_cache.json"))
+    os.environ["LLM_API_KEY"] = ""
+    os.environ["LLM_BASE_URL"] = "https://api.example.invalid/v1"
+    os.environ["LLM_MODEL"] = "test-model"
+    os.environ["AMAP_API_KEY"] = "test-amap-key"
+    os.environ["MCP_SERVERS_DIR"] = str(empty_mcp_dir)
 
     from app.main import create_app
 
@@ -129,6 +157,150 @@ def test_health_arcades_and_chat(tmp_path: Path) -> None:
     chat_resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
     assert chat_resp.status_code == 200
     assert chat_resp.json()["intent"] in {"search", "search_nearby"}
+
+
+def test_arcade_list_enriches_geo_and_writes_cache(tmp_path: Path) -> None:
+    cache_path = tmp_path / "arcade_geo_cache.json"
+    row = {
+        "source": "bemanicn",
+        "source_id": 21,
+        "source_url": "https://map.bemanicn.com/s/21",
+        "name": "Geo Arcade",
+        "address": "Nanjing Road",
+        "province_code": "310000000000",
+        "province_name": "Shanghai",
+        "city_code": "310100000000",
+        "city_name": "Shanghai",
+        "county_code": "310101000000",
+        "county_name": "Huangpu",
+        "updated_at": "2026-04-13T00:00:00Z",
+        "arcades": [{"title_name": "maimai", "quantity": 2}],
+    }
+    client = _build_client_with_rows(tmp_path, [row], cache_path=cache_path)
+    client.app.state.container.arcade_geo_resolver._request_geocode = lambda **_: {  # type: ignore[method-assign]
+        "status": "1",
+        "geocodes": [{"location": "121.475,31.228"}],
+    }
+
+    resp = client.get("/api/v1/arcades")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["items"][0]["geo"]["gcj02"]["lng"] == 121.475
+    assert cache_path.exists()
+
+
+def test_arcade_detail_returns_geo(tmp_path: Path) -> None:
+    row = {
+        "source": "bemanicn",
+        "source_id": 22,
+        "source_url": "https://map.bemanicn.com/s/22",
+        "name": "Detail Geo Arcade",
+        "address": "Xidan",
+        "province_code": "110000000000",
+        "province_name": "Beijing",
+        "city_code": "110100000000",
+        "city_name": "Beijing",
+        "county_code": "110102000000",
+        "county_name": "Xicheng",
+        "updated_at": "2026-04-13T00:00:00Z",
+        "arcades": [{"title_name": "CHUNITHM", "quantity": 1}],
+    }
+    client = _build_client_with_rows(tmp_path, [row])
+    client.app.state.container.arcade_geo_resolver._request_geocode = lambda **_: {  # type: ignore[method-assign]
+        "status": "1",
+        "geocodes": [{"location": "116.3974,39.9087"}],
+    }
+
+    resp = client.get("/api/v1/arcades/22")
+
+    assert resp.status_code == 200
+    assert resp.json()["geo"]["gcj02"]["lat"] == 39.9087
+
+
+def test_chat_session_detail_supports_legacy_route_payload(tmp_path: Path) -> None:
+    session_store_path = tmp_path / "legacy_chat_sessions.json"
+    session_store_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "sessions": [
+                    {
+                        "session_id": "legacy-session",
+                        "turn_index": 1,
+                        "active_subagent": "main_agent",
+                        "intent": "navigate",
+                        "status": "completed",
+                        "last_error": None,
+                        "turns": [
+                            {
+                                "role": "user",
+                                "content": "how to go",
+                                "payload": {},
+                                "created_at": "2026-04-13T00:00:00Z",
+                            },
+                            {
+                                "role": "assistant",
+                                "content": "route ready",
+                                "payload": {"final": True},
+                                "created_at": "2026-04-13T00:00:10Z",
+                            },
+                        ],
+                        "working_memory": {
+                            "artifacts": {
+                                "shops": [
+                                    {
+                                        "source": "bemanicn",
+                                        "source_id": 10,
+                                        "source_url": "https://map.bemanicn.com/s/10",
+                                        "name": "Gamma Arcade",
+                                        "address": "Test Address",
+                                        "province_code": "110000000000",
+                                        "province_name": "Beijing",
+                                        "city_code": "110100000000",
+                                        "city_name": "Beijing",
+                                        "county_code": "110101000000",
+                                        "county_name": "Dongcheng",
+                                        "updated_at": "2026-02-20T00:00:00Z",
+                                        "longitude_wgs84": 116.397428,
+                                        "latitude_wgs84": 39.90923,
+                                        "arcades": [{"title_name": "CHUNITHM", "quantity": 2}],
+                                        "arcade_count": 1,
+                                    }
+                                ],
+                                "route": {
+                                    "provider": "amap",
+                                    "mode": "walking",
+                                    "distance_m": 1200,
+                                    "duration_s": 900,
+                                    "polyline": [
+                                        {"lng": 116.397428, "lat": 39.90923},
+                                        {"lng": 116.407428, "lat": 39.91923},
+                                    ],
+                                },
+                            },
+                            "reply": "route ready",
+                        },
+                        "previous_response_id": None,
+                        "created_at": "2026-04-13T00:00:00Z",
+                        "updated_at": "2026-04-13T00:00:10Z",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    client = _build_client(tmp_path, session_store_path=session_store_path)
+
+    resp = client.get("/api/v1/chat/sessions/legacy-session")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["route"]["origin"]["lng"] == 116.397428
+    assert body["destination"]["source_id"] == 10
+    assert "client_location" in body
+    assert "view_payload" in body
 
 
 def test_health_reports_mcp_tools_loaded_from_config_directory(tmp_path: Path) -> None:
