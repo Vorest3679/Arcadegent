@@ -1,6 +1,6 @@
 import { Fragment, FormEvent, useEffect, useMemo, useRef } from "react";
-import { formatSubagentLabel, formatTimeLabel, type StreamProgressItem } from "../lib/chatStream";
-import type { ChatHistoryTurn, ChatMapArtifacts } from "../types";
+import { formatSubagentLabel, formatTimeLabel } from "../lib/chatStream";
+import { useAppStore } from "../stores/appStore";
 import { MarkdownMessage } from "./MarkdownMessage";
 import { AgentMapCard } from "./map/AgentMapCard";
 
@@ -11,42 +11,31 @@ const QUICK_PROMPTS = [
 ];
 
 type ChatPanelProps = {
-  turns: ChatHistoryTurn[];
-  loading: boolean;
-  sending: boolean;
-  inputValue: string;
-  onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent) => Promise<void>;
   onQuickAsk: (prompt: string) => void;
-  error: string;
-  streamConnected: boolean;
-  activeSubagent: string | null;
-  streamItems: StreamProgressItem[];
   streamReplyTarget: string;
   streamReply: string;
   streamReplyActive: boolean;
-  awaitingAssistant: boolean;
-  mapArtifacts: ChatMapArtifacts | null;
 };
 
 export function ChatPanel({
-  turns,
-  loading,
-  sending,
-  inputValue,
-  onInputChange,
   onSubmit,
   onQuickAsk,
-  error,
-  streamConnected,
-  activeSubagent,
-  streamItems,
   streamReplyTarget,
   streamReply,
-  streamReplyActive,
-  awaitingAssistant,
-  mapArtifacts
+  streamReplyActive
 }: ChatPanelProps) {
+  const turns = useAppStore((state) => state.turns);
+  const loading = useAppStore((state) => state.turnsLoading);
+  const sending = useAppStore((state) => state.sending);
+  const inputValue = useAppStore((state) => state.inputValue);
+  const setInputValue = useAppStore((state) => state.setInputValue);
+  const error = useAppStore((state) => state.chatError);
+  const streamConnected = useAppStore((state) => state.streamConnected);
+  const activeSubagent = useAppStore((state) => state.activeSubagent);
+  const streamItems = useAppStore((state) => state.streamItems);
+  const awaitingAssistant = useAppStore((state) => state.awaitingAssistant);
+  const mapArtifacts = useAppStore((state) => state.activeMapArtifacts);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const turnsForRender = useMemo(() => {
@@ -123,7 +112,7 @@ export function ChatPanel({
 
   const lastAssistantIndex = useMemo(() => {
     for (let idx = turnsForRender.length - 1; idx >= 0; idx -= 1) {
-      if (turnsForRender[idx].role === "assistant") {// Find the last assistant turn to determine where to insert the map card
+      if (turnsForRender[idx].role === "assistant") {
         return idx;
       }
     }
@@ -240,7 +229,7 @@ export function ChatPanel({
       <form className="chat-composer" onSubmit={(event) => void onSubmit(event)}>
         <input
           value={inputValue}
-          onChange={(event) => onInputChange(event.target.value)}
+          onChange={(event) => setInputValue(event.target.value)}
           placeholder="尽管问，带图也行"
           disabled={composerBusy}
         />

@@ -1,4 +1,5 @@
 import { formatTimeLabel } from "../lib/chatStream";
+import { useAppStore } from "../stores/appStore";
 import type { ChatSessionSummary } from "../types";
 
 type SidebarSessionItemProps = {
@@ -26,12 +27,6 @@ function SidebarSessionItem({ item, active, deleting, onClick, onDelete }: Sideb
 }
 
 type AppSidebarProps = {
-  sidebarOpen: boolean;
-  viewMode: "chat" | "arcades";
-  sessions: ChatSessionSummary[];
-  activeSessionId: string | null;
-  sessionsLoading: boolean;
-  deletingSessionId: string | null;
   onStartNewSession: () => void;
   onOpenChatView: () => void;
   onOpenArcadesView: () => void;
@@ -41,12 +36,6 @@ type AppSidebarProps = {
 };
 
 export function AppSidebar({
-  sidebarOpen,
-  viewMode,
-  sessions,
-  activeSessionId,
-  sessionsLoading,
-  deletingSessionId,
   onStartNewSession,
   onOpenChatView,
   onOpenArcadesView,
@@ -54,6 +43,13 @@ export function AppSidebar({
   onSelectSession,
   onDeleteSession
 }: AppSidebarProps) {
+  const sidebarOpen = useAppStore((state) => state.sidebarOpen);
+  const viewMode = useAppStore((state) => state.viewMode);
+  const sessions = useAppStore((state) => state.sessions);
+  const activeSessionId = useAppStore((state) => state.activeSessionId);
+  const sessionsLoading = useAppStore((state) => state.sessionsLoading);
+  const deletingSessionId = useAppStore((state) => state.deletingSessionId);
+
   return (
     <aside className={`app-sidebar ${sidebarOpen ? "is-open" : ""}`}>
       <div className="sidebar-top">

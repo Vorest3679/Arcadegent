@@ -1,0 +1,44 @@
+:root {
+  --bg-top: #f6f2e6;
+  --bg-bottom: #e8f2ec;
+  --ink: #1f2f2b;
+  --muted: #5b6f68;
+  --panel: rgba(255, 255, 255, 0.9);
+  --panel-strong: #ffffff;
+  --line: #d9e3de;
+  --brand: #206d5e;
+  --brand-soft: #d8ece7;
+  --accent: #dc9b2d;
+  --danger: #a94534;
+  font-family: "Space Grotesk", "Noto Sans SC", "PingFang SC", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 0% 0%, #f4d8a9 0%, transparent 22%),
+    radial-gradient(circle at 88% 12%, #c7eadf 0%, transparent 25%),
+    linear-gradient(145deg, var(--bg-top), var(--bg-bottom));
+  animation: app-fade-in 360ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -3,6 +3,8 @@ export type RegionItem = {
   name: string;
 };
 
+export type ViewMode = "chat" | "arcades";
+
 export type ArcadeSortBy = "default" | "updated_at" | "source_id" | "arcade_count" | "title_quantity";
 export type SortOrder = "asc" | "desc";
 export type CoordSystem = "gcj02" | "wgs84";

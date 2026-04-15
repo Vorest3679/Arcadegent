@@ -1,15 +1,17 @@
 import { formatTimeLabel } from "../lib/chatStream";
+import { useAppStore } from "../stores/appStore";
 
-type AppTopbarProps = {
-  viewMode: "chat" | "arcades";
-  activeSessionUpdatedAt: string | null;
-  onToggleSidebar: () => void;
-};
+export function AppTopbar() {
+  const viewMode = useAppStore((state) => state.viewMode);
+  const sessions = useAppStore((state) => state.sessions);
+  const activeSessionId = useAppStore((state) => state.activeSessionId);
+  const toggleSidebar = useAppStore((state) => state.toggleSidebar);
+  const activeSessionUpdatedAt =
+    sessions.find((session) => session.session_id === activeSessionId)?.updated_at ?? null;
 
-export function AppTopbar({ viewMode, activeSessionUpdatedAt, onToggleSidebar }: AppTopbarProps) {
   return (
     <header className="topbar">
-      <button type="button" className="menu-btn" onClick={onToggleSidebar}>
+      <button type="button" className="menu-btn" onClick={toggleSidebar}>
         ☰
       </button>
       <div>
