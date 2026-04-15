@@ -604,8 +604,10 @@ export function ArcadeBrowser() {
             />
             <AmapShopMarkers
               runtime={mapRuntime}
+              shops={paged.items}
               shop={selectedArcade}
               point={selectedPoint}
+              selectedSourceId={selectedSourceId}
               onSelectShop={handleMarkerSelect}
             />
             <AmapRouteOverlay runtime={mapRuntime} route={null} />

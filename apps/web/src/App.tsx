@@ -15,10 +15,12 @@ import { resolveClientLocationForSessionStart, warmupClientLocationCache } from 
 import { STREAM_EVENT_NAMES, toProgressText, toVisibleTurns, type StreamProgressItem } from "./lib/chatStream";
 import type {
   ChatHistoryTurn,
+  ChatMapArtifacts,
   ChatSessionDetail,
   ChatSessionStatus,
   ChatSessionSummary,
-  ChatStreamEnvelope
+  ChatStreamEnvelope,
+  RouteSummary
 } from "./types";
 
 type ViewMode = "chat" | "arcades";
@@ -59,6 +61,46 @@ function makeSessionId(): string {
   return `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function hasSessionMapArtifacts(artifacts: ChatMapArtifacts): boolean {
+  return Boolean(artifacts.route || artifacts.destination || artifacts.shops.length || artifacts.view_payload);
+}
+
+function mapArtifactsFromSession(detail: ChatSessionDetail): ChatMapArtifacts | null {
+  const artifacts: ChatMapArtifacts = {
+    shops: detail.shops,
+    route: detail.route ?? null,
+    client_location: detail.client_location ?? null,
+    destination: detail.destination ?? null,
+    view_payload: detail.view_payload ?? null,
+    route_pending: false
+  };
+  return hasSessionMapArtifacts(artifacts) ? artifacts : null;
+}
+
+function coerceStreamRoute(data: Record<string, unknown>): RouteSummary | null {
+  const provider = data.provider;
+  const mode = data.mode;
+  if (provider !== "amap" && provider !== "google" && provider !== "none") {
+    return null;
+  }
+  if (typeof mode !== "string" || !mode.trim()) {
+    return null;
+  }
+  return {
+    provider,
+    mode,
+    distance_m: typeof data.distance_m === "number" ? data.distance_m : null,
+    duration_s: typeof data.duration_s === "number" ? data.duration_s : null,
+    origin: typeof data.origin === "object" && data.origin !== null ? data.origin as RouteSummary["origin"] : null,
+    destination:
+      typeof data.destination === "object" && data.destination !== null
+        ? data.destination as RouteSummary["destination"]
+        : null,
+    polyline: Array.isArray(data.polyline) ? data.polyline as RouteSummary["polyline"] : [],
+    hint: typeof data.hint === "string" ? data.hint : null
+  };
+}
+
 export function App() {
   const [viewMode, setViewMode] = useState<ViewMode>(() => readInitialViewMode());
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -77,6 +119,7 @@ export function App() {
   const [activeSubagent, setActiveSubagent] = useState<string | null>(null);
   const [streamItems, setStreamItems] = useState<StreamProgressItem[]>([]);
   const [awaitingAssistant, setAwaitingAssistant] = useState(false);
+  const [activeMapArtifacts, setActiveMapArtifacts] = useState<ChatMapArtifacts | null>(null);
 
   const {
     applyStreamToken,
@@ -232,6 +275,20 @@ export function App() {
           applyStreamToken(envelope.data);
         }
 
+        if (envelope.event === "navigation.route_ready") {
+          const route = coerceStreamRoute(envelope.data);
+          if (route) {
+            setActiveMapArtifacts((previous) => ({
+              shops: previous?.shops ?? [],
+              route,
+              client_location: previous?.client_location ?? null,
+              destination: previous?.destination ?? null,
+              view_payload: previous?.view_payload ?? { version: 1, scene: "agent_route" },
+              route_pending: true
+            }));
+          }
+        }
+
         if (envelope.event === "assistant.completed") {
           setActiveSessionStatus("completed");
           const reply = envelope.data.reply;
@@ -312,6 +369,7 @@ export function App() {
       setTurns(toVisibleTurns(detail.turns));
       setActiveSubagent(detail.active_subagent || null);
       setActiveSessionStatus(detail.status);
+      setActiveMapArtifacts(mapArtifactsFromSession(detail));
 
       if (!preserveStreamState) {
         setStreamItems([]);
@@ -364,6 +422,7 @@ export function App() {
         setActiveSessionStatus(null);
         setTurns([]);
         setActiveSubagent(null);
+        setActiveMapArtifacts(null);
         if (!preserveStreamState) {
           stopStream();
           setStreamItems([]);
@@ -451,6 +510,7 @@ export function App() {
     setSidebarOpen(false);
     setActiveSubagent(null);
     setStreamItems([]);
+    setActiveMapArtifacts(null);
     resetStreamReply();
     setAwaitingAssistant(false);
   }
@@ -477,6 +537,7 @@ export function App() {
       setInputValue("");
       setActiveSessionId(sessionId);
       setActiveSessionStatus("running");
+      setActiveMapArtifacts(null);
       setAwaitingAssistant(true);
       setTurns((previous) => [...previous, { role: "user", content: message, created_at: optimisticCreatedAt }]);
 
@@ -505,6 +566,7 @@ export function App() {
       });
       setStreamItems([]);
       setActiveSubagent(null);
+      setActiveMapArtifacts(null);
       resetStreamReply();
       setAwaitingAssistant(false);
       stopStream();
@@ -542,6 +604,7 @@ export function App() {
         setTurns([]);
         setActiveSubagent(null);
         setStreamItems([]);
+        setActiveMapArtifacts(null);
         resetStreamReply();
         setAwaitingAssistant(false);
       }
@@ -612,6 +675,7 @@ export function App() {
               streamReplyDisplay.length < streamReplyTarget.length
             }
             awaitingAssistant={awaitingAssistant}
+            mapArtifacts={activeMapArtifacts}
           />
         ) : (
           <ArcadeBrowser />

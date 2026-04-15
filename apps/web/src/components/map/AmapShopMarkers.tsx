@@ -1,29 +1,46 @@
 /*
 AmapShopMarkers 组件负责在高德地图上渲染机厅位置的标记，
-只为当前选中的机厅生成一个 Marker 覆盖物，并添加到地图上。
-组件会监听选中机厅、坐标和地图实例的变化，在数据更新时重新渲染标记，
-并在组件卸载时清除标记，确保地图上不会混入当前页其它机厅的点位。
+可以为候选列表或当前选中的单个机厅生成 Marker 覆盖物，并添加到地图上。
+组件会监听机厅列表、选中态、坐标和地图实例的变化，在数据更新时重新渲染标记，
+并在组件卸载时清除标记，确保地图上不会混入过期点位。
 */
 import { useEffect, useRef } from "react";
 import type { ArcadeSummary, GeoPoint } from "../../types";
-import { toLngLatTuple } from "../../lib/amapCoords";
+import { getArcadeGcjPoint, toLngLatTuple } from "../../lib/amapCoords";
 import type { AmapRuntime } from "./AmapMapCanvas";
 
 type AmapShopMarkersProps = {
   runtime: AmapRuntime | null;
+  shops?: ArcadeSummary[];
   shop?: ArcadeSummary | null;
   point?: GeoPoint | null;
+  selectedSourceId?: number | null;
   onSelectShop?: (shop: ArcadeSummary) => void;
 };
 
-function markerHtml(shop: ArcadeSummary): string {
+type MarkerEntry = {
+  shop: ArcadeSummary;
+  point: GeoPoint;
+  selected: boolean;
+};
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function markerHtml(shop: ArcadeSummary, selected: boolean): string {
   return `
     <button
       type="button"
-      class="amap-shop-marker"
+      class="amap-shop-marker${selected ? " is-selected" : ""}"
       data-testid="map-marker-${shop.source_id}"
       data-source-id="${shop.source_id}"
-      aria-label="${shop.name}"
+      aria-label="${escapeHtml(shop.name)}"
     ></button>
   `;
 }
@@ -60,8 +77,10 @@ function detachMarkers(map: any, markers: any[]): void {
 
 export function AmapShopMarkers({
   runtime,
+  shops,
   shop,
   point,
+  selectedSourceId,
   onSelectShop
 }: AmapShopMarkersProps) {
   const markersRef = useRef<any[]>([]);
@@ -76,25 +95,47 @@ export function AmapShopMarkers({
     }
     markersRef.current = [];
 
-    const tuple = toLngLatTuple(point);
-    if (!shop || !tuple) {
+    const entries: MarkerEntry[] = [];
+    const source = shops?.length ? shops : shop ? [shop] : [];
+    source.forEach((item) => {
+      const itemPoint = shops?.length ? getArcadeGcjPoint(item) : point;
+      if (!itemPoint) {
+        return;
+      }
+      entries.push({
+        shop: item,
+        point: itemPoint,
+        selected: item.source_id === selectedSourceId || (!shops?.length && item.source_id === shop?.source_id)
+      });
+    });
+
+    if (!entries.length) {
       return;
     }
 
-    const marker = new runtime.AMap.Marker({
-      position: tuple,
-      content: markerHtml(shop),
-      extData: { shop },
-      anchor: "bottom-center"
+    const markers = entries.map((entry) => {
+      const marker = new runtime.AMap.Marker({
+        position: toLngLatTuple(entry.point),
+        content: markerHtml(entry.shop, entry.selected),
+        extData: { shop: entry.shop },
+        anchor: "bottom-center",
+        zIndex: entry.selected ? 120 : 100
+      });
+      if (typeof marker.on === "function") {
+        marker.on("click", () => onSelectShop?.(entry.shop));
+      }
+      return marker;
     });
-    if (typeof marker.on === "function") {
-      marker.on("click", () => onSelectShop?.(shop));
-    }
-    markersRef.current = [marker];
 
-    attachMarker(runtime.map, marker);
-    if (typeof runtime.map.setCenter === "function") {
-      runtime.map.setCenter(tuple);
+    markersRef.current = markers;
+    markers.forEach((marker) => attachMarker(runtime.map, marker));
+
+    const selectedEntry = entries.find((entry) => entry.selected);
+    const selectedTuple = toLngLatTuple(selectedEntry?.point);
+    if (selectedTuple && typeof runtime.map.setCenter === "function") {
+      runtime.map.setCenter(selectedTuple);
+    } else if (markers.length > 1 && typeof runtime.map.setFitView === "function") {
+      runtime.map.setFitView(markers);
     }
 
     return () => {
@@ -103,7 +144,7 @@ export function AmapShopMarkers({
       }
       markersRef.current = [];
     };
-  }, [onSelectShop, point, runtime, shop]);
+  }, [onSelectShop, point, runtime, selectedSourceId, shop, shops]);
 
   return null;
 }

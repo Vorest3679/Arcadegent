@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useMemo, useRef } from "react";
+import { Fragment, FormEvent, useEffect, useMemo, useRef } from "react";
 import { formatSubagentLabel, formatTimeLabel, type StreamProgressItem } from "../lib/chatStream";
-import type { ChatHistoryTurn } from "../types";
+import type { ChatHistoryTurn, ChatMapArtifacts } from "../types";
 import { MarkdownMessage } from "./MarkdownMessage";
+import { AgentMapCard } from "./map/AgentMapCard";
 
 const QUICK_PROMPTS = [
   "帮我找北京适合下班后去的机厅",
@@ -25,6 +26,7 @@ type ChatPanelProps = {
   streamReply: string;
   streamReplyActive: boolean;
   awaitingAssistant: boolean;
+  mapArtifacts: ChatMapArtifacts | null;
 };
 
 export function ChatPanel({
@@ -42,7 +44,8 @@ export function ChatPanel({
   streamReplyTarget,
   streamReply,
   streamReplyActive,
-  awaitingAssistant
+  awaitingAssistant,
+  mapArtifacts
 }: ChatPanelProps) {
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -97,7 +100,10 @@ export function ChatPanel({
     (streamReplyActive || !lastAssistantReply || !lastAssistantReply.startsWith(streamReply));
   const showStreamStage = streamItems.length > 0 || sending || streamConnected || streamReplyActive || awaitingAssistant;
   const showStreamingBubble = showStreamReply || awaitingAssistant;
-  const showEmptyState = turns.length === 0 && !showStreamingBubble && !showStreamStage;
+  const showMapCard = Boolean(
+    mapArtifacts && (mapArtifacts.route || mapArtifacts.shops.length > 0 || mapArtifacts.view_payload)
+  );
+  const showEmptyState = turns.length === 0 && !showStreamingBubble && !showStreamStage && !showMapCard;
   const latestStreamItem = streamItems.length ? streamItems[streamItems.length - 1] : null;
   const composerBusy = sending || awaitingAssistant;
   const stageStatusText =
@@ -113,7 +119,33 @@ export function ChatPanel({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turnsForRender, loading, sending, streamItems, streamReply, awaitingAssistant, showStreamStage]);
+  }, [turnsForRender, loading, sending, streamItems, streamReply, awaitingAssistant, showStreamStage, showMapCard]);
+
+  const lastAssistantIndex = useMemo(() => {
+    for (let idx = turnsForRender.length - 1; idx >= 0; idx -= 1) {
+      if (turnsForRender[idx].role === "assistant") {// Find the last assistant turn to determine where to insert the map card
+        return idx;
+      }
+    }
+    return -1;
+  }, [turnsForRender]);
+
+  const renderMapCard = (key: string, animationIndex: number) => {
+    if (!showMapCard || !mapArtifacts) {
+      return null;
+    }
+    return (
+      <li
+        key={key}
+        className="chat-message assistant"
+        style={{ animationDelay: `${Math.min(animationIndex, 8) * 45}ms` }}
+      >
+        <div className="chat-map-card-item">
+          <AgentMapCard artifacts={mapArtifacts} />
+        </div>
+      </li>
+    );
+  };
 
   return (
     <div className="chat-view">
@@ -139,20 +171,24 @@ export function ChatPanel({
         ) : (
           <ul className="chat-message-list">
             {turnsForRender.map((turn, index) => (
-              <li
-                key={`${turn.created_at}-${index}`}
-                className={`chat-message ${turn.role}`}
-                style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
-              >
-                <div className="chat-bubble">
-                  {turn.role === "assistant" ? (
-                    <MarkdownMessage content={turn.content} />
-                  ) : (
-                    <p className="chat-plain-text">{turn.content}</p>
-                  )}
-                  <small>{formatTimeLabel(turn.created_at)}</small>
-                </div>
-              </li>
+              <Fragment key={`${turn.created_at}-${index}`}>
+                <li
+                  className={`chat-message ${turn.role}`}
+                  style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
+                >
+                  <div className="chat-bubble">
+                    {turn.role === "assistant" ? (
+                      <MarkdownMessage content={turn.content} />
+                    ) : (
+                      <p className="chat-plain-text">{turn.content}</p>
+                    )}
+                    <small>{formatTimeLabel(turn.created_at)}</small>
+                  </div>
+                </li>
+                {!showStreamingBubble && index === lastAssistantIndex
+                  ? renderMapCard("agent-map-card-history", index + 1)
+                  : null}
+              </Fragment>
             ))}
 
             {showStreamStage ? (
@@ -188,6 +224,10 @@ export function ChatPanel({
                 </div>
               </li>
             ) : null}
+
+            {showStreamingBubble || lastAssistantIndex < 0
+              ? renderMapCard("agent-map-card-streaming", turnsForRender.length + 1)
+              : null}
           </ul>
         )}
 

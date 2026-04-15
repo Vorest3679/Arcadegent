@@ -130,6 +130,17 @@ export type RouteSummary = {
   hint?: string | null;
 };
 
+export type AgentMapScene = "agent_candidates" | "agent_route";
+
+export type ChatMapArtifacts = {
+  shops: ArcadeSummary[];
+  route?: RouteSummary | null;
+  client_location?: ClientLocationContext | null;
+  destination?: ArcadeSummary | null;
+  view_payload?: Record<string, unknown> | null;
+  route_pending?: boolean;
+};
+
 export type ChatResponse = {
   session_id: string;
   intent: IntentType;

@@ -24,13 +24,50 @@ export function toLngLatTuple(point?: Pick<GeoPoint, "lng" | "lat"> | null): [nu
   return [point.lng, point.lat];
 }
 
+export function normalizePointToGcj02(point?: GeoPoint | null): GeoPoint | null {
+  if (!point) {
+    return null;
+  }
+  if (point.coord_system === "gcj02") {
+    return point;
+  }
+  const converted = approximateWgs84ToGcj02(point);
+  return {
+    ...converted,
+    source: point.source,
+    precision: point.precision
+  };
+}
+
 export function normalizeRoutePolyline(route?: RouteSummary | null): Array<[number, number]> {
-  if (!route?.polyline?.length) {
+  const polyline = route?.polyline?.length
+    ? route.polyline
+    : [route?.origin, route?.destination].filter(Boolean);
+  if (!polyline.length) {
     return [];
   }
-  return route.polyline
-    .filter((point) => point.coord_system === "gcj02")
+  return polyline
+    .map((point) => normalizePointToGcj02(point))
+    .filter((point): point is GeoPoint => Boolean(point))
     .map((point) => [point.lng, point.lat] as [number, number]);
+}
+
+export function normalizeRouteToGcj02(route?: RouteSummary | null): RouteSummary | null {
+  if (!route) {
+    return null;
+  }
+  const origin = normalizePointToGcj02(route.origin);
+  const destination = normalizePointToGcj02(route.destination);
+  const normalizedPolyline = route.polyline
+    .map((point) => normalizePointToGcj02(point))
+    .filter((point): point is GeoPoint => Boolean(point));
+
+  return {
+    ...route,
+    origin,
+    destination,
+    polyline: normalizedPolyline.length ? normalizedPolyline : [origin, destination].filter(Boolean) as GeoPoint[]
+  };
 }
 
 function parseAmapLngLat(raw: any): [number, number] | null {
