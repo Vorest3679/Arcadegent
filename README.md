@@ -122,7 +122,12 @@ HOST=0.0.0.0
 PORT=8000
 CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 
+ARCADE_DATA_SOURCE=jsonl
 ARCADE_DATA_JSONL=data/raw/bemanicn/shops_detail.jsonl
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_TIMEOUT_SECONDS=8
 CHAT_SESSION_STORE_PATH=data/runtime/chat_sessions.json
 
 LLM_API_KEY=
@@ -150,7 +155,10 @@ ARCADE_GEO_REQUEST_TIMEOUT_SECONDS=1.2
 
 说明：
 
-- `ARCADE_DATA_JSONL` 是后端实际读取的机厅数据源，默认指向 `data/raw/bemanicn/shops_detail.jsonl`。
+- `ARCADE_DATA_SOURCE` 可选 `jsonl` 或 `supabase`，默认 `jsonl`。
+- `ARCADE_DATA_JSONL` 是 JSONL 模式读取的机厅数据源，默认指向 `data/raw/bemanicn/shops_detail.jsonl`。
+- `ARCADE_DATA_SOURCE=supabase` 时必须配置 `SUPABASE_URL`，以及 `SUPABASE_ANON_KEY` 或 `SUPABASE_SERVICE_ROLE_KEY`。缺少配置会启动失败，不会静默回退 JSONL。
+- `SUPABASE_SERVICE_ROLE_KEY` 仅用于后端或导入脚本，不要暴露给浏览器端。
 - `LLM_API_KEY` 为空时服务可以启动，机厅列表接口也可使用，但 Agent 对话不会产生有意义的模型编排结果。
 - `CHAT_SESSION_STORE_PATH`、`ARCADE_GEO_CACHE_PATH` 会写入 `data/runtime/`，目录不存在时会自动创建。
 - `AMAP_API_KEY` 用于高德 REST 路线、逆地理编码和后端地理缓存；高德 Web JS API 的浏览器 key 需要单独配在前端。
@@ -325,6 +333,21 @@ python scripts/etl/ingest_arcades.py \
 - `data/processed/arcadegent.db`
 
 当前 API 默认直接读取 `ARCADE_DATA_JSONL` 指向的 JSONL。ETL 的主要价值是规范化、质量校验、SQLite 中间产物和后续数据库迁移准备。
+
+如需同步 ETL 产物到 Supabase，先执行 `supabase/migrations/` 下的 migration，然后运行：
+
+```bash
+python scripts/etl/sync_supabase.py --dry-run
+python scripts/etl/sync_supabase.py
+```
+
+同步脚本默认读取：
+
+- `data/processed/bemanicn/arcade_shops.jsonl`
+- `data/processed/bemanicn/arcade_titles.jsonl`
+- `data/processed/bemanicn/ingest_run.json`
+
+脚本使用 `SUPABASE_SERVICE_ROLE_KEY` 写入数据；后端运行时优先使用 `SUPABASE_ANON_KEY` 读取 Supabase RPC。同步脚本会额外读取 `data/runtime/arcade_geo_cache.json`，把运行时高德 geocode 缓存过的稳定坐标回填到 `arcade_shops` 的经纬度列；如需跳过，可加 `--skip-geo-cache`。
 
 ## 常用开发命令
 

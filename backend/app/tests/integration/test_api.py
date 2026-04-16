@@ -70,6 +70,7 @@ def _build_client(
     _clear_mcp_env()
     _clear_llm_env()
     os.environ["ARCADE_DATA_JSONL"] = str(data_path)
+    os.environ["ARCADE_DATA_SOURCE"] = "jsonl"
     os.environ["CHAT_SESSION_STORE_PATH"] = str(session_store_path or (tmp_path / "chat_sessions.json"))
     os.environ["ARCADE_GEO_CACHE_PATH"] = str(cache_path or (tmp_path / "arcade_geo_cache.json"))
     os.environ["LLM_API_KEY"] = ""
@@ -102,6 +103,7 @@ def _build_client_with_rows(
     _clear_mcp_env()
     _clear_llm_env()
     os.environ["ARCADE_DATA_JSONL"] = str(data_path)
+    os.environ["ARCADE_DATA_SOURCE"] = "jsonl"
     os.environ["CHAT_SESSION_STORE_PATH"] = str(session_store_path or (tmp_path / "chat_sessions.json"))
     os.environ["ARCADE_GEO_CACHE_PATH"] = str(cache_path or (tmp_path / "arcade_geo_cache.json"))
     os.environ["LLM_API_KEY"] = ""

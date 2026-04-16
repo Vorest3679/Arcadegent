@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 _WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
@@ -78,7 +79,12 @@ class Settings:
     host: str = "0.0.0.0"
     port: int = 8000
     cors_allow_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    arcade_data_source: Literal["jsonl", "supabase"] = "jsonl"
     data_jsonl_path: Path = Path("data/raw/bemanicn/shops_detail.jsonl")
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_service_role_key: str = ""
+    supabase_timeout_seconds: float = 8.0
     chat_session_store_path: Path = Path("data/runtime/chat_sessions.json")
     replay_buffer_size: int = 200
     sse_keepalive_seconds: float = 1.0
@@ -111,6 +117,9 @@ class Settings:
     def from_env(cls) -> "Settings":
         """Create settings from process env with deterministic defaults."""
         _load_dotenv_if_exists()
+        arcade_data_source = os.getenv("ARCADE_DATA_SOURCE", cls.arcade_data_source).strip().lower()
+        if arcade_data_source not in {"jsonl", "supabase"}:
+            raise ValueError(f"invalid_arcade_data_source:{arcade_data_source}")
         return cls(
             app_name=os.getenv("APP_NAME", cls.app_name),
             app_version=os.getenv("APP_VERSION", cls.app_version),
@@ -119,7 +128,16 @@ class Settings:
             host=os.getenv("HOST", cls.host),
             port=int(os.getenv("PORT", str(cls.port))),
             cors_allow_origins=os.getenv("CORS_ALLOW_ORIGINS", cls.cors_allow_origins),
+            arcade_data_source=arcade_data_source,  # type: ignore[arg-type]
             data_jsonl_path=_resolve_path(os.getenv("ARCADE_DATA_JSONL", str(cls.data_jsonl_path))),
+            supabase_url=os.getenv("SUPABASE_URL", cls.supabase_url).strip(),
+            supabase_anon_key=os.getenv("SUPABASE_ANON_KEY", cls.supabase_anon_key).strip(),
+            supabase_service_role_key=os.getenv(
+                "SUPABASE_SERVICE_ROLE_KEY", cls.supabase_service_role_key
+            ).strip(),
+            supabase_timeout_seconds=float(
+                os.getenv("SUPABASE_TIMEOUT_SECONDS", str(cls.supabase_timeout_seconds))
+            ),
             chat_session_store_path=_resolve_project_path(
                 os.getenv("CHAT_SESSION_STORE_PATH", str(cls.chat_session_store_path))
             ),

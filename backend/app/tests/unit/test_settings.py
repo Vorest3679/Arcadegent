@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.core.config import Settings
 
 
@@ -26,6 +28,11 @@ def test_settings_reads_llm_and_mcp_dir_env(monkeypatch) -> None:
     monkeypatch.setenv("AMAP_API_KEY", "amap-key")
     monkeypatch.setenv("AMAP_BASE_URL", "https://restapi.amap.com")
     monkeypatch.setenv("AMAP_TIMEOUT_SECONDS", "6")
+    monkeypatch.setenv("ARCADE_DATA_SOURCE", "supabase")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-key")
+    monkeypatch.setenv("SUPABASE_TIMEOUT_SECONDS", "11")
 
     settings = Settings.from_env()
 
@@ -47,6 +54,11 @@ def test_settings_reads_llm_and_mcp_dir_env(monkeypatch) -> None:
     assert settings.amap_api_key == "amap-key"
     assert settings.amap_base_url == "https://restapi.amap.com"
     assert settings.amap_timeout_seconds == 6
+    assert settings.arcade_data_source == "supabase"
+    assert settings.supabase_url == "https://example.supabase.co"
+    assert settings.supabase_anon_key == "anon-key"
+    assert settings.supabase_service_role_key == "service-key"
+    assert settings.supabase_timeout_seconds == 11
 
 def test_settings_does_not_use_openai_env_names(monkeypatch) -> None:
     monkeypatch.setenv("LLM_API_KEY", "")
@@ -66,3 +78,10 @@ def test_settings_does_not_use_openai_env_names(monkeypatch) -> None:
 def test_settings_defaults_include_extended_agent_step_budget(monkeypatch) -> None:
     _ = monkeypatch
     assert Settings.agent_max_steps >= 8
+
+
+def test_settings_rejects_unknown_arcade_data_source(monkeypatch) -> None:
+    monkeypatch.setenv("ARCADE_DATA_SOURCE", "sqlite")
+
+    with pytest.raises(ValueError, match="invalid_arcade_data_source:sqlite"):
+        Settings.from_env()

@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Literal
 from typing import Any
 
-from app.infra.db.local_store import LocalArcadeStore
+from app.infra.db.repository import ArcadeRepository
 
 
 class DBQueryTool:
     """Unified query interface used by orchestrator runtime."""
 
-    def __init__(self, store: LocalArcadeStore) -> None:
+    def __init__(self, store: ArcadeRepository) -> None:
         self._store = store
 
     def search_shops(

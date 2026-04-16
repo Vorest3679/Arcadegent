@@ -38,3 +38,4 @@ output
 tests/
 uv.lock
 test-results/
+supabase/

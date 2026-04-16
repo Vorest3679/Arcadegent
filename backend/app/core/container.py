@@ -19,6 +19,8 @@ from app.agent.tools.mcp_gateway import MCPToolGateway, build_mcp_server_configs
 from app.agent.tools.registry import ToolRegistry
 from app.core.config import Settings
 from app.infra.db.local_store import LocalArcadeStore
+from app.infra.db.repository import ArcadeRepository
+from app.infra.db.supabase_repository import SupabaseArcadeRepository, SupabaseRepositoryConfig
 from app.services.arcade_geo_resolver import ArcadeGeoResolver, ArcadeGeoResolverConfig
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
 from app.services.amap_reverse_geocoder import AMapReverseGeocoder, AMapReverseGeocoderConfig
@@ -29,7 +31,7 @@ class AppContainer:
     """Container object attached to FastAPI app state."""
 
     settings: Settings
-    store: LocalArcadeStore
+    store: ArcadeRepository
     replay_buffer: ReplayBuffer
     session_store: SessionStateStore
     reverse_geocoder: AMapReverseGeocoder
@@ -42,7 +44,7 @@ class AppContainer:
 
 def build_container(settings: Settings) -> AppContainer:
     """Construct runtime dependencies in one place."""
-    store = LocalArcadeStore.from_jsonl(settings.data_jsonl_path)
+    store = _build_arcade_repository(settings)
     replay_buffer = ReplayBuffer(max_events_per_session=settings.replay_buffer_size)
     provider_adapter = ProviderAdapter(resolve_llm_config(settings))
     reverse_geocoder = AMapReverseGeocoder(
@@ -119,4 +121,23 @@ def build_container(settings: Settings) -> AppContainer:
         tool_registry=tool_registry,
         react_runtime=react_runtime,
         orchestrator=orchestrator,
+    )
+
+
+def _build_arcade_repository(settings: Settings) -> ArcadeRepository:
+    if settings.arcade_data_source == "jsonl":
+        return LocalArcadeStore.from_jsonl(settings.data_jsonl_path)
+
+    key = settings.supabase_anon_key or settings.supabase_service_role_key
+    if not settings.supabase_url or not key:
+        raise ValueError(
+            "supabase_config_required: set SUPABASE_URL and SUPABASE_ANON_KEY "
+            "or SUPABASE_SERVICE_ROLE_KEY when ARCADE_DATA_SOURCE=supabase"
+        )
+    return SupabaseArcadeRepository(
+        SupabaseRepositoryConfig(
+            url=settings.supabase_url,
+            key=key,
+            timeout_seconds=settings.supabase_timeout_seconds,
+        )
     )

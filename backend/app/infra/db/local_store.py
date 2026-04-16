@@ -443,9 +443,10 @@ class LocalArcadeStore:
             result[city_code] = [{"code": k, "name": entries[k]} for k in sorted(entries.keys())]
         return result
 
-    def health(self) -> dict[str, int]:
+    def health(self) -> dict[str, Any]:
         """Expose basic load/quality stats for health endpoint."""
         return {
+            "backend": "jsonl",
             "total_lines": self._stats.total_lines,
             "loaded_rows": self._stats.loaded_rows,
             "bad_lines": self._stats.bad_lines,
