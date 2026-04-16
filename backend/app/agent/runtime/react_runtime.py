@@ -379,10 +379,10 @@ class ReactRuntime:
         persist: bool = True,
     ) -> None:
         for call in tool_calls:
-            prepared_args, hydrated_fields = self._prepare_tool_arguments(
-                memory=session_state.working_memory,
+            prepared_args, hydrated_fields = await self._tool_registry.prepare_arguments(
                 tool_name=call.name,
                 raw_arguments=call.arguments,
+                runtime_context=session_state.working_memory,
             )
             logger.info(
                 "tool.call session_id=%s tool=%s call_id=%s agent=%s args=%s",
@@ -700,103 +700,6 @@ class ReactRuntime:
             persist=persist,
         )
         self._apply_tool_memory(state=state, result=result)
-
-    def _prepare_tool_arguments(
-        self,
-        *,
-        memory: dict[str, Any],
-        tool_name: str,
-        raw_arguments: dict[str, object],
-    ) -> tuple[dict[str, object], list[str]]:
-        if tool_name != "summary_tool":
-            return dict(raw_arguments), []
-
-        args = dict(raw_arguments)
-        hydrated: list[str] = []
-
-        topic = args.get("topic")
-        if topic not in {"search", "navigation"}:
-            inferred_topic = "navigation" if bool(get_working_memory_artifact(memory, "route")) else "search"
-            args["topic"] = inferred_topic
-            topic = inferred_topic
-            hydrated.append("topic")
-
-        if topic == "navigation":
-            if not isinstance(args.get("route"), dict):
-                route = get_working_memory_artifact(memory, "route")
-                if isinstance(route, dict):
-                    args["route"] = route
-                    hydrated.append("route")
-            shop_name = args.get("shop_name")
-            if not isinstance(shop_name, str) or not shop_name.strip():
-                shop_value = get_working_memory_artifact(memory, "shop")
-                candidate_name: str | None = None
-                if isinstance(shop_value, dict):
-                    name = shop_value.get("name")
-                    if isinstance(name, str) and name.strip():
-                        candidate_name = name.strip()
-                if candidate_name is None:
-                    shops_value = get_working_memory_artifact(memory, "shops")
-                    if isinstance(shops_value, list) and shops_value:
-                        first = shops_value[0]
-                        if isinstance(first, dict):
-                            name = first.get("name")
-                            if isinstance(name, str) and name.strip():
-                                candidate_name = name.strip()
-                if candidate_name is not None:
-                    args["shop_name"] = candidate_name
-                    hydrated.append("shop_name")
-            return args, hydrated
-
-        if args.get("total") is None:
-            total = get_working_memory_artifact(memory, "total")
-            if isinstance(total, int):
-                args["total"] = total
-                hydrated.append("total")
-        if not isinstance(args.get("shops"), list):
-            shops = get_working_memory_artifact(memory, "shops")
-            if isinstance(shops, list):
-                args["shops"] = shops
-                hydrated.append("shops")
-        query_meta = memory.get("last_db_query")
-        if isinstance(query_meta, dict):
-            query_sort_by = query_meta.get("sort_by")
-            query_sort_order = query_meta.get("sort_order")
-            query_sort_title_name = query_meta.get("sort_title_name")
-
-            if isinstance(query_sort_by, str) and query_sort_by.strip().lower() == "title_quantity":
-                if args.get("sort_by") != "title_quantity":
-                    args["sort_by"] = "title_quantity"
-                    hydrated.append("sort_by")
-                if isinstance(query_sort_order, str) and query_sort_order.strip():
-                    if args.get("sort_order") != query_sort_order.strip():
-                        args["sort_order"] = query_sort_order.strip()
-                        hydrated.append("sort_order")
-                if isinstance(query_sort_title_name, str) and query_sort_title_name.strip():
-                    if args.get("sort_title_name") != query_sort_title_name.strip():
-                        args["sort_title_name"] = query_sort_title_name.strip()
-                        hydrated.append("sort_title_name")
-            else:
-                if args.get("sort_by") is None and isinstance(query_sort_by, str) and query_sort_by.strip():
-                    args["sort_by"] = query_sort_by.strip()
-                    hydrated.append("sort_by")
-                if args.get("sort_order") is None and isinstance(query_sort_order, str) and query_sort_order.strip():
-                    args["sort_order"] = query_sort_order.strip()
-                    hydrated.append("sort_order")
-                if (
-                    args.get("sort_title_name") is None
-                    and isinstance(query_sort_title_name, str)
-                    and query_sort_title_name.strip()
-                ):
-                    args["sort_title_name"] = query_sort_title_name.strip()
-                    hydrated.append("sort_title_name")
-        keyword = args.get("keyword")
-        if not isinstance(keyword, str) or not keyword.strip():
-            memory_keyword = memory.get("keyword")
-            if isinstance(memory_keyword, str) and memory_keyword.strip():
-                args["keyword"] = memory_keyword.strip()
-                hydrated.append("keyword")
-        return args, hydrated
 
     def _apply_tool_memory(self, *, state: AgentSessionState, result: ToolExecutionResult) -> None:
         memory = ensure_working_memory_shape(state.working_memory)

@@ -5,7 +5,7 @@ export type RegionItem = {
 
 export type ViewMode = "chat" | "arcades";
 
-export type ArcadeSortBy = "default" | "updated_at" | "source_id" | "arcade_count" | "title_quantity";
+export type ArcadeSortBy = "default" | "updated_at" | "source_id" | "arcade_count" | "title_quantity" | "distance";
 export type SortOrder = "asc" | "desc";
 export type CoordSystem = "gcj02" | "wgs84";
 export type GeoSource = "catalog" | "geocode" | "client" | "route";
@@ -51,6 +51,7 @@ export type ArcadeSummary = {
   fav_count?: number | null;
   updated_at?: string | null;
   arcade_count: number;
+  distance_m?: number | null;
   geo?: ArcadeGeo | null;
 };
 

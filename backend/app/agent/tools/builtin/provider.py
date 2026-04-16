@@ -59,6 +59,10 @@ BuiltinToolExecutor = Callable[
     [BuiltinToolContext, dict[str, Any]],
     dict[str, Any] | Awaitable[dict[str, Any]],
 ]
+BuiltinToolArgumentPreparer = Callable[
+    [dict[str, Any], dict[str, Any]],
+    tuple[dict[str, Any], list[str]],
+]
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,7 @@ class _BuiltinServiceSpec:
 class _BuiltinToolBinding:
     descriptor: ToolDescriptor
     executor: BuiltinToolExecutor
+    argument_preparer: BuiltinToolArgumentPreparer | None
     source_path: Path
 
 
@@ -137,6 +142,20 @@ class BuiltinToolProvider:
             output = await asyncio.to_thread(binding.executor, self._context, payload)
         return ProviderExecutionResult(status="completed", output=output)
 
+    def prepare_arguments(
+        self,
+        *,
+        tool_name: str,
+        raw_arguments: dict[str, Any],
+        runtime_context: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], list[str]]:
+        binding = self._bindings.get(tool_name)
+        if binding is None:
+            raise ValueError(f"unknown_tool:{tool_name}")
+        if binding.argument_preparer is None:
+            return dict(raw_arguments), []
+        return binding.argument_preparer(dict(raw_arguments), dict(runtime_context or {}))
+
     def health(self) -> dict[str, Any]:
         return {
             "manifest_path": str(self._manifest_path),
@@ -178,6 +197,7 @@ class BuiltinToolProvider:
                 raise ValueError(f"duplicate_builtin_tool:{name}")
 
             executor = _import_object(executor_import)
+            argument_preparer = self._load_argument_preparer(item)
             metadata = self._resolve_metadata_value(item.get("metadata"))
             bindings[name] = _BuiltinToolBinding(
                 descriptor=ToolDescriptor(
@@ -191,9 +211,19 @@ class BuiltinToolProvider:
                     metadata=metadata if isinstance(metadata, dict) else {},
                 ),
                 executor=executor,
+                argument_preparer=argument_preparer,
                 source_path=tool_path,
             )
         return bindings
+
+    def _load_argument_preparer(self, item: dict[str, Any]) -> BuiltinToolArgumentPreparer | None:
+        import_path = str(item.get("argument_preparer") or "").strip()
+        if not import_path:
+            return None
+        preparer = _import_object(import_path)
+        if not callable(preparer):
+            raise ValueError(f"invalid_builtin_tool_argument_preparer:{import_path}")
+        return preparer
 
     def _parse_manifest(
         self,

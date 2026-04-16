@@ -124,6 +124,7 @@ class ArcadeShopSummaryDto(BaseModel):
     fav_count: int | None = None
     updated_at: str | None = None
     arcade_count: int = 0
+    distance_m: int | None = None
     geo: ArcadeGeoDto | None = None
 
 

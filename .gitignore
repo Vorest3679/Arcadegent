@@ -36,7 +36,5 @@ output
 .DS_Store
 
 tests/
-!apps/web/tests/
-!apps/web/tests/**
 uv.lock
 test-results/

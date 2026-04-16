@@ -45,6 +45,9 @@ class QueryContextDto(BaseModel):
     sort_by: str | None = None
     sort_order: str | None = None
     sort_title_name: str | None = None
+    origin_lng: float | None = None
+    origin_lat: float | None = None
+    origin_coord_system: str | None = None
 
 
 class SearchCatalogShopDto(BaseModel):
@@ -55,6 +58,7 @@ class SearchCatalogShopDto(BaseModel):
     city_name: str | None = None
     county_name: str | None = None
     arcade_count: int | None = None
+    distance_m: int | None = None
     detail_sections: list[str] = Field(default_factory=list)
 
 
@@ -75,6 +79,7 @@ class ShopBasicContextDto(BaseModel):
     county_name: str | None = None
     address: str | None = None
     arcade_count: int | None = None
+    distance_m: int | None = None
 
 
 class ShopTransportContextDto(BaseModel):

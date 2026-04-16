@@ -290,6 +290,70 @@ def test_tool_registry_backfills_sort_title_name_from_keyword(tmp_path: Path) ->
     assert result.output["query"]["sort_title_name"] == "maimai"
 
 
+def test_tool_registry_supports_distance_sorting(tmp_path: Path) -> None:
+    data_path = tmp_path / "shops_distance.jsonl"
+    rows = [
+        {
+            "source": "bemanicn",
+            "source_id": 1,
+            "source_url": "https://map.bemanicn.com/s/1",
+            "name": "Near Arcade",
+            "longitude_wgs84": 116.397428,
+            "latitude_wgs84": 39.90923,
+            "arcades": [{"title_name": "maimai", "quantity": 1}],
+        },
+        {
+            "source": "bemanicn",
+            "source_id": 2,
+            "source_url": "https://map.bemanicn.com/s/2",
+            "name": "Far Arcade",
+            "longitude_wgs84": 116.407428,
+            "latitude_wgs84": 39.91923,
+            "arcades": [{"title_name": "maimai", "quantity": 1}],
+        },
+    ]
+    with data_path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False))
+            handle.write("\n")
+
+    store = LocalArcadeStore.from_jsonl(data_path)
+    gateway = MCPToolGateway()
+    registry = ToolRegistry(
+        providers=[
+            BuiltinToolProvider(
+                runtime_services={
+                    "store": store,
+                    "mcp_tool_gateway": gateway,
+                }
+            ),
+            gateway,
+        ],
+        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
+        strict_schema=True,
+    )
+    result = _run(registry.execute(
+        call_id="c_distance",
+        tool_name="db_query_tool",
+        raw_arguments={
+            "has_arcades": True,
+            "sort_by": "distance",
+            "sort_order": "asc",
+            "origin_lng": 116.397428,
+            "origin_lat": 39.90923,
+            "origin_coord_system": "wgs84",
+            "page": 1,
+            "page_size": 10,
+        },
+        allowed_tools=["db_query_tool"],
+    ))
+    assert result.status == "completed"
+    assert [row["source_id"] for row in result.output["shops"]] == [1, 2]
+    assert result.output["shops"][0]["distance_m"] == 0
+    assert result.output["query"]["sort_by"] == "distance"
+    assert result.output["query"]["origin_coord_system"] == "wgs84"
+
+
 def test_tool_registry_includes_discovered_mcp_tools_when_allowed(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
 

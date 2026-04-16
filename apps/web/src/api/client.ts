@@ -85,6 +85,9 @@ export async function listArcades(params: {
   sort_by?: ArcadeSortBy;
   sort_order?: SortOrder;
   sort_title_name?: string;
+  origin_lng?: number;
+  origin_lat?: number;
+  origin_coord_system?: "wgs84" | "gcj02";
   page?: number;
   page_size?: number;
 }): Promise<PagedArcades> {

@@ -88,6 +88,7 @@ export function ArcadeSearchPanel({
           Sort By
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value as ArcadeSortBy)}>
             <option value="default">Default</option>
+            <option value="distance">Distance</option>
             <option value="title_quantity">Title Qty (arcades[].quantity)</option>
             <option value="arcade_count">Title Type Count</option>
             <option value="updated_at">Updated At</option>
@@ -137,6 +138,12 @@ export function ArcadeSearchPanel({
         {paged.items.map((item) => {
           const mapped = Boolean(getArcadeGcjPoint(item));
           const active = item.source_id === selectedSourceId;
+          const distanceText =
+            typeof item.distance_m === "number"
+              ? item.distance_m >= 1000
+                ? `${(item.distance_m / 1000).toFixed(1)} km`
+                : `${Math.round(item.distance_m)} m`
+              : null;
           return (
             <li key={item.source_id}>
               <button
@@ -155,6 +162,7 @@ export function ArcadeSearchPanel({
                 <small>
                   {item.province_name || "-"} / {item.city_name || "-"} / {item.county_name || "-"} | titles{" "}
                   {item.arcade_count}
+                  {distanceText ? ` | ${distanceText}` : ""}
                 </small>
               </button>
             </li>

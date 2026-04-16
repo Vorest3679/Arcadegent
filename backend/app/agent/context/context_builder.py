@@ -378,7 +378,7 @@ class ContextBuilder:
                 ContextBlockRefDto(
                     block="query",
                     purpose="Structured filters and sort conditions behind the current result.",
-                    primary_fields=["keyword", "region", "sort_by", "sort_order", "sort_title_name"],
+                    primary_fields=["keyword", "region", "sort_by", "sort_order", "sort_title_name", "origin"],
                 )
             )
             reading_order.append("query")
@@ -575,6 +575,11 @@ class ContextBuilder:
             sort_title_name=self._string_or_none(
                 query_meta.get("sort_title_name") if isinstance(query_meta, dict) else None
             ),
+            origin_lng=self._float_or_none(query_meta.get("origin_lng") if isinstance(query_meta, dict) else None),
+            origin_lat=self._float_or_none(query_meta.get("origin_lat") if isinstance(query_meta, dict) else None),
+            origin_coord_system=self._string_or_none(
+                query_meta.get("origin_coord_system") if isinstance(query_meta, dict) else None
+            ),
         )
         payload = self._compact_value(query.model_dump(mode="json", exclude_none=True))
         if not payload:
@@ -599,6 +604,7 @@ class ContextBuilder:
                 city_name=self._string_or_none(row.get("city_name")),
                 county_name=self._string_or_none(row.get("county_name")),
                 arcade_count=self._int_or_none(row.get("arcade_count")),
+                distance_m=self._int_or_none(row.get("distance_m")),
                 detail_sections=self._detail_sections(row),
             )
             for row in rows[:5]
@@ -627,6 +633,7 @@ class ContextBuilder:
                     county_name=self._string_or_none(row.get("county_name")),
                     address=self._string_or_none(row.get("address")),
                     arcade_count=self._int_or_none(row.get("arcade_count")),
+                    distance_m=self._int_or_none(row.get("distance_m")),
                 ),
                 transport=self._build_transport_context(row),
                 arcades=self._build_arcade_details(row),
@@ -737,6 +744,14 @@ class ContextBuilder:
             if value is None or value == "":
                 return None
             return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _float_or_none(self, value: Any) -> float | None:
+        try:
+            if value is None or value == "":
+                return None
+            return float(value)
         except (TypeError, ValueError):
             return None
 

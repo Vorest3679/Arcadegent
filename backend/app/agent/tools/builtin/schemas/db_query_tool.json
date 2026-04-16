@@ -1,8 +1,9 @@
 {
   "name": "db_query_tool",
   "kind": "function",
-  "description": "Search arcade shops by keyword and region. Use *_code for 12-digit region codes, or *_name for natural-language region names. Can also fetch one shop by shop_id. Supports sorting via sort_by/sort_order/sort_title_name.",
+  "description": "Search arcade shops by keyword and region. Use *_code for 12-digit region codes, or *_name for natural-language region names. Can also fetch one shop by shop_id. Supports sorting via sort_by/sort_order/sort_title_name, including distance sorting from an origin longitude/latitude.",
   "executor": "app.agent.tools.builtin.executors.db_query:execute",
+  "argument_preparer": "app.agent.tools.builtin.executors.db_query:prepare_arguments",
   "capabilities": ["builtin", "read_only", "search"],
   "metadata": {
     "tool_function": "app.agent.tools.builtin.executors.db_query:execute"
@@ -60,8 +61,8 @@
       },
       "sort_by": {
         "default": "default",
-        "description": "Sort field. `title_quantity` sorts by machine `quantity`(qty) for one title; `arcade_count` sorts by number of distinct title entries in one shop. Use `default` to keep built-in deterministic order.",
-        "enum": ["default", "updated_at", "source_id", "arcade_count", "title_quantity"],
+        "description": "Sort field. `distance` sorts by straight-line distance from `origin_lng`/`origin_lat`; use `sort_order=asc` for nearest first. `title_quantity` sorts by machine `quantity`(qty) for one title; `arcade_count` sorts by number of distinct title entries in one shop. Use `default` to keep built-in deterministic order.",
+        "enum": ["default", "updated_at", "source_id", "arcade_count", "title_quantity", "distance"],
         "title": "Sort By",
         "type": "string"
       },
@@ -77,6 +78,25 @@
         "default": null,
         "description": "When `sort_by=title_quantity`, provide title name, e.g. `maimai` or `sdvx`.",
         "title": "Sort Title Name"
+      },
+      "origin_lng": {
+        "anyOf": [{ "type": "number", "minimum": -180, "maximum": 180 }, { "type": "null" }],
+        "default": null,
+        "description": "Origin longitude used when `sort_by=distance`. Browser geolocation should pass WGS84 longitude.",
+        "title": "Origin Longitude"
+      },
+      "origin_lat": {
+        "anyOf": [{ "type": "number", "minimum": -90, "maximum": 90 }, { "type": "null" }],
+        "default": null,
+        "description": "Origin latitude used when `sort_by=distance`. Browser geolocation should pass WGS84 latitude.",
+        "title": "Origin Latitude"
+      },
+      "origin_coord_system": {
+        "default": "wgs84",
+        "description": "Coordinate system for origin_lng/origin_lat. Use `wgs84` for browser geolocation; use `gcj02` only for already-converted AMap coordinates.",
+        "enum": ["wgs84", "gcj02"],
+        "title": "Origin Coordinate System",
+        "type": "string"
       },
       "page": {
         "minimum": 1,

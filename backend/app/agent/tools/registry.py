@@ -250,3 +250,23 @@ class ToolRegistry:
             output=payload,
             error_message=message,
         )
+
+    async def prepare_arguments(
+        self,
+        *,
+        tool_name: str,
+        raw_arguments: dict[str, Any],
+        runtime_context: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], list[str]]:
+        tools, owners = await self._collect_tools()
+        if tool_name not in tools:
+            raise ValueError(f"unknown_tool:{tool_name}")
+        provider = owners[tool_name]
+        preparer = getattr(provider, "prepare_arguments", None)
+        if not callable(preparer):
+            return dict(raw_arguments), []
+        return preparer(
+            tool_name=tool_name,
+            raw_arguments=raw_arguments,
+            runtime_context=runtime_context,
+        )

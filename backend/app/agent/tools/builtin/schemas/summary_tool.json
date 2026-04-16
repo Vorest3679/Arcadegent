@@ -3,6 +3,7 @@
   "kind": "function",
   "description": "Format a deterministic text summary from structured search or navigation context.",
   "executor": "app.agent.tools.builtin.executors.summary:execute",
+  "argument_preparer": "app.agent.tools.builtin.executors.summary:prepare_arguments",
   "capabilities": ["builtin", "read_only", "summary"],
   "metadata": {
     "tool_function": "app.agent.tools.builtin.executors.summary:execute",
@@ -49,7 +50,7 @@
       "sort_by": {
         "anyOf": [
           {
-            "enum": ["default", "updated_at", "source_id", "arcade_count", "title_quantity"],
+            "enum": ["default", "updated_at", "source_id", "arcade_count", "title_quantity", "distance"],
             "type": "string"
           },
           {

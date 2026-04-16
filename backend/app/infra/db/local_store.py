@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,15 @@ def _as_int(value: Any) -> int | None:
         return None
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
     except (TypeError, ValueError):
         return None
 
@@ -79,8 +89,9 @@ def _keyword_terms(keyword: str | None) -> list[str]:
     return deduped
 
 
-_SORT_BY_VALUES = {"default", "updated_at", "source_id", "arcade_count", "title_quantity"}
+_SORT_BY_VALUES = {"default", "updated_at", "source_id", "arcade_count", "title_quantity", "distance"}
 _SORT_ORDER_VALUES = {"asc", "desc"}
+_COORD_SYSTEM_VALUES = {"wgs84", "gcj02"}
 
 
 def _normalize_title_name(value: str | None) -> str:
@@ -108,12 +119,83 @@ def _title_quantity(row: dict[str, Any], title_name_norm: str) -> int:
     return total
 
 
+def _valid_lng_lat(lng: float | None, lat: float | None) -> bool:
+    return lng is not None and lat is not None and -180 <= lng <= 180 and -90 <= lat <= 90
+
+
+def _haversine_meters(origin_lng: float, origin_lat: float, dest_lng: float, dest_lat: float) -> float:
+    radius_m = 6371000.0
+    lat1 = math.radians(origin_lat)
+    lat2 = math.radians(dest_lat)
+    d_lat = lat2 - lat1
+    d_lng = math.radians(dest_lng - origin_lng)
+    x = math.sin(d_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(d_lng / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(x), math.sqrt(max(1e-12, 1 - x)))
+    return radius_m * c
+
+
+def _row_coordinates(row: dict[str, Any], coord_system: str) -> tuple[float, float] | None:
+    preferred = coord_system if coord_system in _COORD_SYSTEM_VALUES else "wgs84"
+    fallbacks = (preferred, "gcj02" if preferred == "wgs84" else "wgs84")
+    for system in fallbacks:
+        lng = _as_float(row.get(f"longitude_{system}"))
+        lat = _as_float(row.get(f"latitude_{system}"))
+        if _valid_lng_lat(lng, lat):
+            return lng, lat
+    return None
+
+
+def _distance_sorted_shops(
+    items: list[dict[str, Any]],
+    *,
+    sort_order: Literal["asc", "desc"] | str,
+    origin_lng: float | None,
+    origin_lat: float | None,
+    origin_coord_system: str | None,
+) -> list[dict[str, Any]]:
+    if not _valid_lng_lat(origin_lng, origin_lat):
+        return items
+
+    coord_system = (origin_coord_system or "wgs84").strip().lower()
+    if coord_system not in _COORD_SYSTEM_VALUES:
+        coord_system = "wgs84"
+    reverse_distance = (sort_order or "asc").strip().lower() == "desc"
+
+    decorated: list[tuple[float | None, dict[str, Any]]] = []
+    for row in items:
+        coords = _row_coordinates(row, coord_system)
+        if coords is None:
+            decorated.append((None, row))
+            continue
+        distance_m = _haversine_meters(origin_lng, origin_lat, coords[0], coords[1])
+        payload = dict(row)
+        payload["distance_m"] = int(round(distance_m))
+        decorated.append((distance_m, payload))
+
+    def sort_key(item: tuple[float | None, dict[str, Any]]) -> tuple[bool, float, int]:
+        distance_m, row = item
+        if distance_m is None:
+            distance_value = math.inf
+        else:
+            distance_value = -distance_m if reverse_distance else distance_m
+        return (
+            distance_m is None,
+            distance_value,
+            int(row.get("source_id") or 0),
+        )
+
+    return [row for _, row in sorted(decorated, key=sort_key)]
+
+
 def _sort_shops(
     items: list[dict[str, Any]],
     *,
     sort_by: str,
     sort_order: Literal["asc", "desc"] | str,
     sort_title_name: str | None,
+    origin_lng: float | None,
+    origin_lat: float | None,
+    origin_coord_system: str | None,
 ) -> list[dict[str, Any]]:
     normalized_by = (sort_by or "default").strip().lower()
     if normalized_by not in _SORT_BY_VALUES:
@@ -126,6 +208,15 @@ def _sort_shops(
 
     if normalized_by == "default":
         return items
+
+    if normalized_by == "distance":
+        return _distance_sorted_shops(
+            items,
+            sort_order=normalized_order,
+            origin_lng=origin_lng,
+            origin_lat=origin_lat,
+            origin_coord_system=origin_coord_system,
+        )
 
     if normalized_by == "title_quantity":
         title_name_norm = _normalize_title_name(sort_title_name)
@@ -376,6 +467,9 @@ class LocalArcadeStore:
         sort_by: str = "default",
         sort_order: Literal["asc", "desc"] | str = "desc",
         sort_title_name: str | None = None,
+        origin_lng: float | None = None,
+        origin_lat: float | None = None,
+        origin_coord_system: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         """Filter and paginate shop list with deterministic order."""
         items: list[dict[str, Any]] = []
@@ -416,6 +510,9 @@ class LocalArcadeStore:
             sort_by=sort_by,
             sort_order=sort_order,
             sort_title_name=sort_title_name,
+            origin_lng=_as_float(origin_lng),
+            origin_lat=_as_float(origin_lat),
+            origin_coord_system=origin_coord_system,
         )
         total = len(items)
         start = max(0, (page - 1) * page_size)

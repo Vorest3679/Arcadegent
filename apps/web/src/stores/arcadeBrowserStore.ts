@@ -122,7 +122,10 @@ export const useArcadeBrowserStore = create<ArcadeBrowserStore>((set) => ({
   }),
   setCountyCode: (countyCode) => set({ countyCode }),
   setHasArcadesOnly: (hasArcadesOnly) => set({ hasArcadesOnly }),
-  setSortBy: (sortBy) => set({ sortBy }),
+  setSortBy: (sortBy) => set((state) => ({
+    sortBy,
+    sortOrder: sortBy === "distance" ? "asc" : state.sortOrder
+  })),
   setSortOrder: (sortOrder) => set({ sortOrder }),
   setSortTitleName: (sortTitleName) => set({ sortTitleName }),
   setLoading: (loading) => set({ loading }),

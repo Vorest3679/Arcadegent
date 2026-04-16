@@ -66,6 +66,7 @@ class ArcadePayloadMapper:
             fav_count=self._coerce_optional_int(row.get("fav_count")),
             updated_at=self._pick_optional_str(row.get("updated_at")),
             arcade_count=int(row.get("arcade_count") or 0),
+            distance_m=self._coerce_optional_int(row.get("distance_m")),
             geo=resolved_geo,
         )
 

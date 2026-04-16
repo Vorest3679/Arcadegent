@@ -30,6 +30,9 @@ class DBQueryTool:
         sort_by: str,
         sort_order: Literal["asc", "desc"] | str,
         sort_title_name: str | None,
+        origin_lng: float | None,
+        origin_lat: float | None,
+        origin_coord_system: str | None,
     ) -> tuple[list[dict[str, Any]], int]:
         return self._store.list_shops(
             keyword=keyword,
@@ -45,6 +48,9 @@ class DBQueryTool:
             sort_by=sort_by,
             sort_order=sort_order,
             sort_title_name=sort_title_name,
+            origin_lng=origin_lng,
+            origin_lat=origin_lat,
+            origin_coord_system=origin_coord_system,
         )
 
     def get_shop(self, source_id: int) -> dict[str, Any] | None:

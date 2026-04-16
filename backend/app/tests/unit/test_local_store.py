@@ -309,3 +309,75 @@ def test_title_quantity_sort_matches_common_title_aliases(tmp_path: Path) -> Non
         sort_title_name="sdvx",
     )
     assert [row["source_id"] for row in sdvx_desc] == [3, 2, 1]
+
+
+def test_sort_by_distance_adds_distance_and_keeps_unmapped_rows_last(tmp_path: Path) -> None:
+    data_path = tmp_path / "shops_sort_distance.jsonl"
+    rows = [
+        {
+            "source": "bemanicn",
+            "source_id": 1,
+            "source_url": "https://map.bemanicn.com/s/1",
+            "name": "Near",
+            "longitude_wgs84": 116.397428,
+            "latitude_wgs84": 39.90923,
+            "arcades": [{"title_name": "maimai", "quantity": 1}],
+        },
+        {
+            "source": "bemanicn",
+            "source_id": 2,
+            "source_url": "https://map.bemanicn.com/s/2",
+            "name": "Far",
+            "longitude_wgs84": 116.407428,
+            "latitude_wgs84": 39.91923,
+            "arcades": [{"title_name": "maimai", "quantity": 1}],
+        },
+        {
+            "source": "bemanicn",
+            "source_id": 3,
+            "source_url": "https://map.bemanicn.com/s/3",
+            "name": "Unmapped",
+            "arcades": [{"title_name": "maimai", "quantity": 1}],
+        },
+    ]
+    with data_path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False))
+            handle.write("\n")
+
+    store = LocalArcadeStore.from_jsonl(data_path)
+    nearest, total = store.list_shops(
+        keyword=None,
+        province_code=None,
+        city_code=None,
+        county_code=None,
+        has_arcades=True,
+        page=1,
+        page_size=10,
+        sort_by="distance",
+        sort_order="asc",
+        origin_lng=116.397428,
+        origin_lat=39.90923,
+        origin_coord_system="wgs84",
+    )
+    assert total == 3
+    assert [row["source_id"] for row in nearest] == [1, 2, 3]
+    assert nearest[0]["distance_m"] == 0
+    assert nearest[1]["distance_m"] > nearest[0]["distance_m"]
+    assert "distance_m" not in nearest[2]
+
+    farthest, _ = store.list_shops(
+        keyword=None,
+        province_code=None,
+        city_code=None,
+        county_code=None,
+        has_arcades=True,
+        page=1,
+        page_size=10,
+        sort_by="distance",
+        sort_order="desc",
+        origin_lng=116.397428,
+        origin_lat=39.90923,
+        origin_coord_system="wgs84",
+    )
+    assert [row["source_id"] for row in farthest] == [2, 1, 3]

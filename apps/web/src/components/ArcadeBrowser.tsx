@@ -180,6 +180,9 @@ export function ArcadeBrowser() {
         sort_by: state.sortBy,
         sort_order: state.sortOrder,
         sort_title_name: state.sortBy === "title_quantity" ? state.sortTitleName.trim() || undefined : undefined,
+        origin_lng: state.sortBy === "distance" ? state.clientLocation?.lng : undefined,
+        origin_lat: state.sortBy === "distance" ? state.clientLocation?.lat : undefined,
+        origin_coord_system: state.sortBy === "distance" ? "wgs84" : undefined,
         page,
         page_size: PAGE_SIZE
       });

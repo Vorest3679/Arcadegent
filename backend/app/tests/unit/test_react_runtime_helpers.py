@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.agent.tools.builtin.executors import db_query as db_query_executor
+from app.agent.tools.builtin.executors import summary as summary_executor
 from app.agent.runtime.react_runtime import ReactRuntime, _chunk_stream_text
 from app.agent.runtime.session_state import (
     AgentTurn,
@@ -17,17 +19,12 @@ def _runtime() -> ReactRuntime:
 
 
 def test_prepare_tool_arguments_hydrates_search_summary_from_memory() -> None:
-    runtime = _runtime()
     state = AgentSessionState(session_id="s1")
     set_working_memory_artifact(state.working_memory, "total", 5)
     set_working_memory_artifact(state.working_memory, "shops", [{"name": "A"}, {"name": "B"}])
     state.working_memory["keyword"] = "shanghai huangpu"
 
-    args, hydrated = runtime._prepare_tool_arguments(
-        memory=state.working_memory,
-        tool_name="summary_tool",
-        raw_arguments={"topic": "search"},
-    )
+    args, hydrated = summary_executor.prepare_arguments({"topic": "search"}, state.working_memory)
 
     assert args["topic"] == "search"
     assert args["total"] == 5
@@ -37,16 +34,11 @@ def test_prepare_tool_arguments_hydrates_search_summary_from_memory() -> None:
 
 
 def test_prepare_tool_arguments_hydrates_navigation_summary_from_memory() -> None:
-    runtime = _runtime()
     state = AgentSessionState(session_id="s2")
     set_working_memory_artifact(state.working_memory, "route", {"provider": "amap", "mode": "walking"})
     set_working_memory_artifact(state.working_memory, "shops", [{"name": "Foo Arcade"}])
 
-    args, hydrated = runtime._prepare_tool_arguments(
-        memory=state.working_memory,
-        tool_name="summary_tool",
-        raw_arguments={"topic": "navigation"},
-    )
+    args, hydrated = summary_executor.prepare_arguments({"topic": "navigation"}, state.working_memory)
 
     assert args["topic"] == "navigation"
     assert isinstance(args["route"], dict)
@@ -54,22 +46,35 @@ def test_prepare_tool_arguments_hydrates_navigation_summary_from_memory() -> Non
     assert hydrated == ["route", "shop_name"]
 
 
-def test_prepare_tool_arguments_keeps_non_summary_tools_unchanged() -> None:
-    runtime = _runtime()
+def test_db_query_argument_preparer_keeps_regular_search_unchanged() -> None:
     state = AgentSessionState(session_id="s3")
 
-    args, hydrated = runtime._prepare_tool_arguments(
-        memory=state.working_memory,
-        tool_name="db_query_tool",
-        raw_arguments={"page": 1},
-    )
+    args, hydrated = db_query_executor.prepare_arguments({"page": 1}, state.working_memory)
 
     assert args == {"page": 1}
     assert hydrated == []
 
 
+def test_prepare_tool_arguments_hydrates_nearby_db_query_from_client_location() -> None:
+    state = AgentSessionState(session_id="s_nearby")
+    state.working_memory["last_request"] = {"message": "附近最近的机厅", "page_size": 5}
+    set_working_memory_artifact(
+        state.working_memory,
+        "client_location",
+        {"lng": 116.397428, "lat": 39.90923, "accuracy_m": 20},
+    )
+
+    args, hydrated = db_query_executor.prepare_arguments({"page": 1, "page_size": 5}, state.working_memory)
+
+    assert args["sort_by"] == "distance"
+    assert args["sort_order"] == "asc"
+    assert args["origin_lng"] == 116.397428
+    assert args["origin_lat"] == 39.90923
+    assert args["origin_coord_system"] == "wgs84"
+    assert hydrated == ["sort_by", "sort_order", "origin_lng", "origin_lat", "origin_coord_system"]
+
+
 def test_prepare_tool_arguments_hydrates_sort_fields_from_last_db_query() -> None:
-    runtime = _runtime()
     state = AgentSessionState(session_id="s4")
     set_working_memory_artifact(state.working_memory, "total", 8)
     set_working_memory_artifact(state.working_memory, "shops", [{"name": "A"}])
@@ -80,11 +85,7 @@ def test_prepare_tool_arguments_hydrates_sort_fields_from_last_db_query() -> Non
         "sort_title_name": "maimai",
     }
 
-    args, hydrated = runtime._prepare_tool_arguments(
-        memory=state.working_memory,
-        tool_name="summary_tool",
-        raw_arguments={"topic": "search"},
-    )
+    args, hydrated = summary_executor.prepare_arguments({"topic": "search"}, state.working_memory)
 
     assert args["sort_by"] == "title_quantity"
     assert args["sort_order"] == "desc"
@@ -95,7 +96,6 @@ def test_prepare_tool_arguments_hydrates_sort_fields_from_last_db_query() -> Non
 
 
 def test_prepare_tool_arguments_overrides_default_sort_with_title_quantity_context() -> None:
-    runtime = _runtime()
     state = AgentSessionState(session_id="s5")
     set_working_memory_artifact(state.working_memory, "total", 6)
     set_working_memory_artifact(state.working_memory, "shops", [{"name": "A"}])
@@ -105,11 +105,7 @@ def test_prepare_tool_arguments_overrides_default_sort_with_title_quantity_conte
         "sort_title_name": "maimai",
     }
 
-    args, hydrated = runtime._prepare_tool_arguments(
-        memory=state.working_memory,
-        tool_name="summary_tool",
-        raw_arguments={"topic": "search", "sort_by": "default"},
-    )
+    args, hydrated = summary_executor.prepare_arguments({"topic": "search", "sort_by": "default"}, state.working_memory)
 
     assert args["sort_by"] == "title_quantity"
     assert args["sort_order"] == "desc"

@@ -517,3 +517,46 @@ def test_arcades_api_supports_title_quantity_sorting(tmp_path: Path) -> None:
     payload = resp.json()
     assert payload["total"] == 3
     assert [row["source_id"] for row in payload["items"]] == [11, 10, 12]
+
+
+def test_arcades_api_supports_distance_sorting(tmp_path: Path) -> None:
+    client = _build_client_with_rows(
+        tmp_path,
+        [
+            {
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "name": "Near Arcade",
+                "longitude_wgs84": 116.397428,
+                "latitude_wgs84": 39.90923,
+                "arcades": [{"title_name": "maimai", "quantity": 1}],
+            },
+            {
+                "source": "bemanicn",
+                "source_id": 11,
+                "source_url": "https://map.bemanicn.com/s/11",
+                "name": "Far Arcade",
+                "longitude_wgs84": 116.407428,
+                "latitude_wgs84": 39.91923,
+                "arcades": [{"title_name": "maimai", "quantity": 1}],
+            },
+        ],
+    )
+
+    resp = client.get(
+        "/api/v1/arcades",
+        params={
+            "has_arcades": "true",
+            "sort_by": "distance",
+            "sort_order": "asc",
+            "origin_lng": 116.397428,
+            "origin_lat": 39.90923,
+            "origin_coord_system": "wgs84",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total"] == 2
+    assert [row["source_id"] for row in payload["items"]] == [10, 11]
+    assert payload["items"][0]["distance_m"] == 0

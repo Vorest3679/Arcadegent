@@ -102,12 +102,17 @@ class SummaryTool:
         elif normalized_sort == "arcade_count":
             order = "\u7531\u9ad8\u5230\u4f4e" if normalized_order != "asc" else "\u7531\u4f4e\u5230\u9ad8"
             summary = f"{summary} \u7ed3\u679c\u6309\u6536\u5f55\u673a\u79cd\u6570{order}\u6392\u5e8f\u3002"
+        elif normalized_sort == "distance":
+            order = "\u7531\u8fd1\u5230\u8fdc" if normalized_order != "desc" else "\u7531\u8fdc\u5230\u8fd1"
+            summary = f"{summary} \u7ed3\u679c\u6309\u76f4\u7ebf\u8ddd\u79bb{order}\u6392\u5e8f\u3002"
 
         preview_parts: list[str] = []
         for idx, row in enumerate(shops[:3], start=1):
             name = str(row.get("name") or "unknown arcade")
             city = str(row.get("city_name") or row.get("county_name") or "-")
-            preview_parts.append(f"{idx}. {name}({city})")
+            distance = row.get("distance_m")
+            distance_text = f" {distance}\u7c73" if isinstance(distance, int) else ""
+            preview_parts.append(f"{idx}. {name}({city}){distance_text}")
 
         if preview_parts:
             summary = f"{summary} \u53ef\u5148\u770b\uff1a{'\uff1b'.join(preview_parts)}\u3002"

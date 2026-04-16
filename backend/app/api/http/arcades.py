@@ -20,11 +20,14 @@ def list_arcades(
     city_code: str | None = Query(default=None),
     county_code: str | None = Query(default=None),
     has_arcades: bool | None = Query(default=None),
-    sort_by: Literal["default", "updated_at", "source_id", "arcade_count", "title_quantity"] = Query(
+    sort_by: Literal["default", "updated_at", "source_id", "arcade_count", "title_quantity", "distance"] = Query(
         default="default"
     ),
     sort_order: Literal["asc", "desc"] = Query(default="desc"),
     sort_title_name: str | None = Query(default=None),
+    origin_lng: float | None = Query(default=None, ge=-180, le=180),
+    origin_lat: float | None = Query(default=None, ge=-90, le=90),
+    origin_coord_system: Literal["wgs84", "gcj02"] = Query(default="wgs84"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     container: AppContainer = Depends(get_container),
@@ -40,6 +43,9 @@ def list_arcades(
         sort_by=sort_by,
         sort_order=sort_order,
         sort_title_name=sort_title_name,
+        origin_lng=origin_lng,
+        origin_lat=origin_lat,
+        origin_coord_system=origin_coord_system,
     )
     items = container.arcade_payload_mapper.summaries_from_rows(
         rows,
