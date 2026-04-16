@@ -74,7 +74,8 @@ class SummaryTool:
         )
         if not preview_parts:
             return prefix
-        return f"{prefix} \u5f53\u524d\u9875\u524d{len(preview_parts)}\uff1a{'\uff1b'.join(preview_parts)}\u3002"
+        preview_text = "\uff1b".join(preview_parts)
+        return f"{prefix} \u5f53\u524d\u9875\u524d{len(preview_parts)}\uff1a{preview_text}\u3002"
 
     def _default_search_summary(
         self,
@@ -115,7 +116,8 @@ class SummaryTool:
             preview_parts.append(f"{idx}. {name}({city}){distance_text}")
 
         if preview_parts:
-            summary = f"{summary} \u53ef\u5148\u770b\uff1a{'\uff1b'.join(preview_parts)}\u3002"
+            preview_text = "\uff1b".join(preview_parts)
+            summary = f"{summary} \u53ef\u5148\u770b\uff1a{preview_text}\u3002"
         return summary
 
     def summarize_search(

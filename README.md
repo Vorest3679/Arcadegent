@@ -1,6 +1,6 @@
 # Arcadegent
 
-Arcadegent 是一个面向音游机厅检索、Agent 问答和路线建议的全栈应用。项目当前已经形成从数据抓取、ETL、FastAPI 后端、Agent 工具运行时，到 React 地图化前端的本地闭环。
+Arcadegent 是一个面向音游机厅检索、Agent 问答和路线建议的全栈应用。当前公开仓库保留应用运行、Agent 编排、地图渲染和部署相关代码；数据采集、私有数据集、运行缓存和生产密钥不随仓库公开。
 
 QQ群：1091316877
 
@@ -10,10 +10,9 @@ QQ群：1091316877
 - 实时过程展示：会话会推送 `session.started`、`subagent.changed`、`tool.*`、`navigation.route_ready`、`assistant.token`、`assistant.completed` 等事件。
 - 地图化结果：聊天路线和机厅浏览都能渲染高德地图点位、路线卡片，并提供 Web 高德查看和唤起高德导航链接。
 - 机厅浏览器：支持关键词、地区级联、省市区筛选、只看有机台、更新时间/机台数/指定机种数量排序、分页和门店详情。
-- 会话管理：历史会话列表、详情加载、运行中重连、删除会话，数据保存在本地 JSON 文件。
+- 会话管理：支持历史会话列表、详情加载、运行中重连和删除会话。
 - 地理能力：支持浏览器定位缓存、高德逆地理编码、机厅坐标缓存、无坐标机厅的区域级地图回退。
 - Agent 工具系统：内置 DB 查询、地理解析、路线规划、总结工具，同时支持启动时发现 MCP 工具并投影为 `mcp__*`。
-- 数据链路：提供 Bemanicn 抓取脚本、ETL 规范化脚本、QA 产物和 Supabase migration 草案。
 
 ## 技术栈
 
@@ -21,7 +20,7 @@ QQ群：1091316877
 - Agent: OpenAI-compatible LLM provider, ReAct runtime, YAML subagent definitions, JSON Schema tool registry
 - Frontend: React 18, TypeScript, Vite, Zustand, marked, DOMPurify
 - Map: 高德 Web JS API, 高德 REST API, 高德 MCP endpoint
-- Data: 本地 JSONL 读模型、本地 JSON 会话存储、ETL 输出 JSONL/SQLite/QA report
+- Data: JSONL 读模型、可选 Supabase 读模型、本地 JSON 会话存储
 - Tests: pytest, Playwright
 
 ## 目录结构
@@ -34,24 +33,22 @@ backend/app/agent/tools/         builtin tools、MCP gateway、工具 schema 和
 apps/web/                        React + Vite 前端
 apps/web/src/components/map/     高德地图、路线卡片和地图操作组件
 apps/web/tests/e2e/              Playwright 端到端测试
-scripts/                         Bemanicn 抓取与辅助脚本
-scripts/etl/                     ETL 规范化脚本与测试
-data/raw/                        原始抓取数据
-data/processed/                  ETL 产物
-data/runtime/                    本地会话、地理缓存等运行时数据
-supabase/migrations/             数据库迁移草案
-docs/                            方案、交接、开发细节和问题记录
+deploy/nginx/                    生产 Nginx 示例配置
+docs/guidings/                   对外指南文档
+docs/dev-details/                对外开发细节文档
+docker-compose.yml               本地或服务器 compose 编排
 ```
+
+`data/`、运行缓存、私有脚本、计划/issue 归档、数据库迁移草案和真实环境变量按敏感资料处理，不随公开仓库发布。需要本地运行完整数据链路时，请自行准备兼容的 JSONL 数据源或配置后端可访问的数据库。
 
 ## 文档入口
 
-- [内建工具动态注册表写法](docs/builtin-tool-manifest-guide.md)
+- [Docs 总览](docs/README.md)
+- [内建工具动态注册表写法](docs/guidings/builtin-tool-manifest-guide.md)
 - [Agent 地图结果渲染设计](docs/dev-details/agent-map-artifacts-rendering.md)
 - [Agent context payload 设计](docs/dev-details/agent-context-payload-design.md)
 - [动态工具注册实现说明](docs/dev-details/dynamic-tool-registry-implementation.md)
-- [浏览器定位与逆地理编码](docs/browser-location-reverse-geocoding.md)
-- [开发计划索引](docs/plans/index.md)
-- [Issue 索引](docs/issues/index.md)
+- [浏览器定位与逆地理编码](docs/dev-details/browser-location-reverse-geocoding.md)
 
 ## 环境要求
 
@@ -123,7 +120,7 @@ PORT=8000
 CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 
 ARCADE_DATA_SOURCE=jsonl
-ARCADE_DATA_JSONL=data/raw/bemanicn/shops_detail.jsonl
+ARCADE_DATA_JSONL=data/local/arcades.jsonl
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -156,7 +153,7 @@ ARCADE_GEO_REQUEST_TIMEOUT_SECONDS=1.2
 说明：
 
 - `ARCADE_DATA_SOURCE` 可选 `jsonl` 或 `supabase`，默认 `jsonl`。
-- `ARCADE_DATA_JSONL` 是 JSONL 模式读取的机厅数据源，默认指向 `data/raw/bemanicn/shops_detail.jsonl`。
+- `ARCADE_DATA_JSONL` 是 JSONL 模式读取的机厅数据源；公开仓库不包含真实数据，请指向你本地准备的兼容文件。
 - `ARCADE_DATA_SOURCE=supabase` 时必须配置 `SUPABASE_URL`，以及 `SUPABASE_ANON_KEY` 或 `SUPABASE_SERVICE_ROLE_KEY`。缺少配置会启动失败，不会静默回退 JSONL。
 - `SUPABASE_SERVICE_ROLE_KEY` 仅用于后端或导入脚本，不要暴露给浏览器端。
 - `LLM_API_KEY` 为空时服务可以启动，机厅列表接口也可使用，但 Agent 对话不会产生有意义的模型编排结果。
@@ -263,6 +260,138 @@ npm run dev
 - Chat: `http://localhost:5173`
 - Arcade Explorer: `http://localhost:5173/?view=arcades`
 
+## Docker 启动
+
+Docker 方式会启动两个容器：
+
+- `backend`：FastAPI 服务，容器内端口 `8000`
+- `web`：Nginx 托管前端静态产物，并把 `/api/*`、`/api/stream/*`、`/health` 反代到后端
+
+### 1. 安装并启动 Docker
+
+macOS / Windows 本地开发推荐安装 Docker Desktop。安装后需要先启动 Docker Desktop，再运行 compose 命令；只安装 Docker CLI 但 daemon 没启动时，会看到类似错误：
+
+```text
+Cannot connect to the Docker daemon at unix:///Users/xxx/.docker/run/docker.sock. Is the docker daemon running?
+```
+
+macOS 可用：
+
+```bash
+open -a Docker
+docker version
+```
+
+Windows PowerShell 可用：
+
+```powershell
+Start-Process "Docker Desktop"
+docker version
+```
+
+`docker version` 同时显示 `Client` 和 `Server` 信息，才说明 Docker daemon 已经可用。如果只显示 `Client` 后报 `Cannot connect to the Docker daemon`，请等待 Docker Desktop 完全启动，或在 Docker Desktop 里切到 Linux containers。
+
+Linux / 阿里云服务器可安装 Docker Engine 和 Compose plugin：
+
+```bash
+docker version
+docker compose version
+```
+
+### 2. 准备环境变量
+
+首次启动前先准备根目录 `.env`：
+
+macOS / Linux:
+
+```bash
+cp backend/.env.example .env
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item backend/.env.example .env
+```
+
+如果需要内嵌高德地图，把浏览器侧 key 放到根目录 `.env`。这些 `VITE_*` 变量会在前端镜像构建时写入静态包，修改后需要重新 build：
+
+```dotenv
+VITE_AMAP_WEB_KEY=
+VITE_AMAP_SECURITY_JS_CODE=
+VITE_AMAP_URI_SRC=arcadegent_web
+```
+
+真实数据和运行缓存仍放在宿主机 `data/` 目录。该目录会挂载到后端容器内的 `/app/data`，但不会进入镜像。
+
+### 3. 启动
+
+启动：
+
+```bash
+docker compose up --build
+```
+
+后台启动：
+
+```bash
+docker compose up -d --build
+```
+
+打开：
+
+- Web: `http://localhost:8080`
+- Health: `http://localhost:8080/health`
+- Backend Swagger: `http://localhost:8000/docs`
+
+默认端口只绑定到宿主机 `127.0.0.1`，便于后续由宿主机 Nginx 统一对外反代。如需临时从局域网访问，可以启动时覆盖绑定地址：
+
+macOS / Linux:
+
+```bash
+WEB_BIND=0.0.0.0 BACKEND_BIND=0.0.0.0 docker compose up --build
+```
+
+Windows PowerShell:
+
+```powershell
+$env:WEB_BIND="0.0.0.0"
+$env:BACKEND_BIND="0.0.0.0"
+docker compose up --build
+```
+
+Windows CMD:
+
+```bat
+set WEB_BIND=0.0.0.0
+set BACKEND_BIND=0.0.0.0
+docker compose up --build
+```
+
+### 4. 常用命令
+
+```bash
+docker compose ps
+docker compose logs -f backend
+docker compose logs -f web
+docker compose down
+```
+
+如果 Windows / macOS 首次构建时拉取基础镜像较慢，可以先确认 Docker Desktop 已登录并能访问 Docker Hub；也可以配置镜像加速器后再执行 `docker compose up --build`。
+
+## 服务器部署提示
+
+推荐的迁移形态是：Docker Compose 在服务器本机启动前后端，宿主机 Nginx 对外监听 `80/443`，并把 API、SSE 和静态页面分别反代到本机端口。
+
+1. 在服务器安装 Docker、Docker Compose plugin 和 Nginx。
+2. 上传代码、根目录 `.env`，以及私有数据目录；如果使用数据库读模型，则确认 `.env` 中数据库变量可用。
+3. 在项目根目录执行 `docker compose up -d --build`。
+4. 参考 `deploy/nginx/arcadegent.conf.example` 配置站点，把 `server_name example.com` 改成实际域名。
+5. 执行 `sudo nginx -t && sudo systemctl reload nginx`。
+6. 安全组只需要开放 `80/443`；`8000/8080` 默认只监听 `127.0.0.1`，无需对公网开放。
+
+SSE 事件流依赖长连接，Nginx 配置里 `/api/stream/` 已关闭 buffering，并把 `proxy_read_timeout` 调高；如果再接一层负载均衡，也要保留同样的长连接设置。
+
 ## API 概览
 
 - `GET /health`：健康检查、数据加载状态、tool provider 和 MCP discovery 状态
@@ -296,58 +425,15 @@ Agent 配置分为几层：
 
 路线规划优先尝试可用的高德 MCP 路线工具；不可用时使用内置 `route_plan_tool`，该工具会先请求高德 REST 路线 API，失败后退化为离线直线距离和估算时间。
 
-## 数据处理
+## 数据说明
 
-抓取 Bemanicn 数据：
+公开仓库不包含真实机厅数据、抓取产物、运行缓存或生产数据库迁移。后端只要求运行时提供兼容的数据源：
 
-```bash
-python scripts/scrape_bemanicn.py --max-shops 30
-```
+- JSONL 模式：设置 `ARCADE_DATA_SOURCE=jsonl`，并让 `ARCADE_DATA_JSONL` 指向本地私有 JSONL 文件。
+- 数据库模式：设置 `ARCADE_DATA_SOURCE=supabase`，并配置对应数据库连接变量。
+- Docker 模式：宿主机 `data/` 会挂载到后端容器的 `/app/data`，适合放置本地私有 JSONL 和运行缓存。
 
-默认输出到 `data/raw/bemanicn/`，主要包括：
-
-- `province_index.json`
-- `shops_seed.jsonl`
-- `shops_detail_raw.jsonl`
-- `shops_detail_props.jsonl`
-- `shops_detail.jsonl`
-- `run_summary.json`
-
-规范化并生成 QA 产物：
-
-```bash
-python scripts/etl/ingest_arcades.py \
-  --input data/raw/bemanicn/shops_detail.jsonl \
-  --run-summary data/raw/bemanicn/run_summary.json \
-  --output-dir data/processed/bemanicn \
-  --sqlite-path data/processed/arcadegent.db
-```
-
-主要产物：
-
-- `data/processed/bemanicn/arcade_shops.jsonl`
-- `data/processed/bemanicn/arcade_titles.jsonl`
-- `data/processed/bemanicn/bad_rows.jsonl`
-- `data/processed/bemanicn/qa_report.json`
-- `data/processed/bemanicn/ingest_run.json`
-- `data/processed/arcadegent.db`
-
-当前 API 默认直接读取 `ARCADE_DATA_JSONL` 指向的 JSONL。ETL 的主要价值是规范化、质量校验、SQLite 中间产物和后续数据库迁移准备。
-
-如需同步 ETL 产物到 Supabase，先执行 `supabase/migrations/` 下的 migration，然后运行：
-
-```bash
-python scripts/etl/sync_supabase.py --dry-run
-python scripts/etl/sync_supabase.py
-```
-
-同步脚本默认读取：
-
-- `data/processed/bemanicn/arcade_shops.jsonl`
-- `data/processed/bemanicn/arcade_titles.jsonl`
-- `data/processed/bemanicn/ingest_run.json`
-
-脚本使用 `SUPABASE_SERVICE_ROLE_KEY` 写入数据；后端运行时优先使用 `SUPABASE_ANON_KEY` 读取 Supabase RPC。同步脚本会额外读取 `data/runtime/arcade_geo_cache.json`，把运行时高德 geocode 缓存过的稳定坐标回填到 `arcade_shops` 的经纬度列；如需跳过，可加 `--skip-geo-cache`。
+所有密钥只写入本机 `.env` 或部署环境变量，不提交到仓库。
 
 ## 常用开发命令
 
@@ -356,12 +442,6 @@ python scripts/etl/sync_supabase.py
 ```bash
 cd backend
 python -m pytest -q
-```
-
-ETL 测试：
-
-```bash
-python -m pytest -q scripts/etl/tests
 ```
 
 前端开发：
@@ -397,6 +477,6 @@ npm run test:e2e
 ## 当前限制
 
 - 线上级认证、多用户隔离和权限管理尚未接入。
-- 机厅查询当前以本地 JSONL 为读模型，Supabase migration 仍是数据库落地草案。
+- 公开仓库不附带真实数据集；本地体验完整检索能力需要自行准备兼容数据源。
 - MCP discovery 依赖第三方服务返回的 tool schema，远端命名变化时可能需要手动指定 `route_tool_name`。
 - 没有高德 Web JS key 时，前端仍可列表检索并生成高德跳转 URI，但内嵌地图不可用。

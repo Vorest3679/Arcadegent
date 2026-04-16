@@ -291,7 +291,7 @@ def _normalize_region_name(value: str | None) -> str:
 
 
 class LocalArcadeStore:
-    """Read-optimized in-memory store built from `shops_detail.jsonl`."""
+    """Read-optimized in-memory store built from the configured arcade JSONL."""
 
     def __init__(self, shops: list[dict[str, Any]], stats: LoadStats) -> None:
         self._shops = shops

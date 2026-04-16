@@ -80,7 +80,7 @@ class Settings:
     port: int = 8000
     cors_allow_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     arcade_data_source: Literal["jsonl", "supabase"] = "jsonl"
-    data_jsonl_path: Path = Path("data/raw/bemanicn/shops_detail.jsonl")
+    data_jsonl_path: Path = Path("data/local/arcades.jsonl")
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""

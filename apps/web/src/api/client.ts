@@ -13,7 +13,19 @@ import type {
   SortOrder
 } from "../types";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+function resolveApiBase(): string {
+  const fallback = typeof window !== "undefined" ? window.location.origin : "http://localhost:8000";
+  const configured = import.meta.env.VITE_API_BASE?.trim();
+  if (!configured) {
+    return fallback;
+  }
+  if (/^https?:\/\//i.test(configured) || configured.startsWith("/")) {
+    return new URL(configured, fallback).toString();
+  }
+  return `http://${configured}`;
+}
+
+const API_BASE = resolveApiBase();
 
 function buildUrl(path: string, query?: Record<string, string | number | boolean | undefined | null>): string {
   const url = new URL(path, API_BASE);

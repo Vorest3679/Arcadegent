@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      CORS_ALLOW_ORIGINS: http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173,http://127.0.0.1:5173
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-}
+        VITE_AMAP_WEB_KEY: ${VITE_AMAP_WEB_KEY:-}
+        VITE_AMAP_SECURITY_JS_CODE: ${VITE_AMAP_SECURITY_JS_CODE:-}
+        VITE_AMAP_URI_SRC: ${VITE_AMAP_URI_SRC:-arcadegent_web}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:80"
+    restart: unless-stopped

@@ -8,24 +8,27 @@ __pycache__/
 .pydeps/
 .playwright-browsers/
 .env
+.playwright-cli/
 
 # Frontend
 apps/web/node_modules/
 apps/web/dist/
 apps/web/.env.local
 
-# Runtime outputs
+# Private data and runtime outputs
 data/
 
-docs/*
-!docs/issues/
-!docs/issues/**
 # IDEs
 .vscode/
 .idea/
 .qoder
 
+# Private/local-only workspaces
 scripts/
+docs/instruction/
+docs/issues/
+docs/others/
+docs/plans/
 
 .runtime_smoke/
 .tmp_pytest/
@@ -35,7 +38,7 @@ g:/
 output
 .DS_Store
 
-tests/
 uv.lock
+tests/
 test-results/
 supabase/
