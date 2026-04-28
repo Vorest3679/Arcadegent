@@ -190,16 +190,20 @@ export function ArcadeBrowser() {
       latestStore.setPaged(payload);
 
       const existing = payload.items.find((item) => item.source_id === latestStore.selectedSourceId) ?? null;
-      const fallback = payload.items[0] ?? null;
-      const nextSelected = existing ?? fallback;
-      if (!nextSelected) {
+      if (!existing) {
+        detailRequestIdRef.current += 1;
         latestStore.setSelectedSourceId(null);
         latestStore.setDetail(null);
         latestStore.setDetailError("");
+        latestStore.setDetailLoading(false);
+        latestStore.setSelectedRegionPoint(null);
+        latestStore.setMapStatus("idle");
         return;
       }
-      latestStore.setSelectedSourceId(nextSelected.source_id);
-      await loadDetailForItem(nextSelected);
+      latestStore.setSelectedSourceId(existing.source_id);
+      if (latestStore.detail?.source_id !== existing.source_id || latestStore.detailError) {
+        await loadDetailForItem(existing);
+      }
     } catch (err) {
       useArcadeBrowserStore.getState().setError(err instanceof Error ? err.message : "检索机厅失败");
     } finally {
@@ -316,6 +320,9 @@ export function ArcadeBrowser() {
   }, [clientLocation, clientOriginGcj, selectedArcade, selectedPoint]);
 
   const mapStatusText = useMemo(() => {
+    if (!selectedArcade) {
+      return "选择一个机厅后加载地图";
+    }
     if (mapStatus.state === "disabled") {
       return mapStatus.message || "未配置高德地图 Web JS Key；已保留列表和高德导航。";
     }
@@ -324,9 +331,6 @@ export function ArcadeBrowser() {
     }
     if (mapStatus.state === "loading") {
       return "地图加载中...";
-    }
-    if (!selectedArcade) {
-      return "选择一个机厅后查看地图";
     }
     if (!selectedPoint && (mapCenter || selectedRegionLabel)) {
       return `该机厅暂无精确定位，地图已停在 ${selectedRegionPoint?.label || selectedRegionLabel}`;

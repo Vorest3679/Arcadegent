@@ -132,6 +132,8 @@ const CHAT_ROUTE = {
 
 async function installAmapMock(page: Page) {
   await page.addInitScript(() => {
+    (window as any).__ARCADEGENT_AMAP_LOADS__ = 0;
+
     class MockMap {
       container: HTMLElement;
       overlays: any[] = [];
@@ -226,6 +228,7 @@ async function installAmapMock(page: Page) {
 
     window.__ARCADEGENT_AMAP_MOCK__ = {
       async load() {
+        (window as any).__ARCADEGENT_AMAP_LOADS__ += 1;
         return {
           Map: MockMap,
           Marker: MockMarker,
@@ -462,12 +465,20 @@ test("ArcadeBrowser keeps list, map, and actions in sync", async ({ page }) => {
 
   await page.goto("/?view=arcades");
 
-  await expect(page.getByTestId("arcade-map-canvas")).toBeVisible();
   await expect(page.getByTestId("arcade-list-item-101")).toBeVisible();
+  await expect(page.getByTestId("arcade-map-placeholder")).toBeVisible();
+  await expect(page.getByTestId("arcade-map-canvas")).toHaveCount(0);
+  await expect(page.getByTestId("browser-detail-title")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as any).__ARCADEGENT_AMAP_LOADS__)).toBe(0);
+
+  await page.getByTestId("arcade-list-item-101").click();
+  await expect(page.getByTestId("arcade-map-canvas")).toBeVisible();
   await expect(page.getByTestId("map-marker-101")).toBeVisible();
-  await expect(page.getByTestId("map-marker-103")).toBeVisible();
+  await expect(page.getByTestId("map-marker-103")).toHaveCount(0);
   await expect(page.getByTestId("map-marker-102")).toHaveCount(0);
   await expect(page.getByTestId("browser-detail-title")).toHaveText("Arcade One");
+  await expect.poll(() => page.evaluate(() => (window as any).__ARCADEGENT_AMAP_LOADS__)).toBeGreaterThan(0);
+  const mapLoadsAfterFirstSelection = await page.evaluate(() => (window as any).__ARCADEGENT_AMAP_LOADS__);
 
   const viewHref = await page.getByTestId("map-action-view").getAttribute("href");
   const navHref = await page.getByTestId("map-action-navigate").getAttribute("href");
@@ -477,9 +488,12 @@ test("ArcadeBrowser keeps list, map, and actions in sync", async ({ page }) => {
   expect(navHref).toContain("from=121.4065%2C31.206%2C");
   expect(navHref).toContain("callnative=0");
 
-  await page.getByTestId("map-marker-103").click();
+  await page.getByTestId("arcade-list-item-103").click();
   await expect(page.getByTestId("arcade-list-item-103")).toHaveClass(/is-active/);
+  await expect(page.getByTestId("map-marker-101")).toHaveCount(0);
+  await expect(page.getByTestId("map-marker-103")).toBeVisible();
   await expect(page.getByTestId("browser-detail-title")).toHaveText("Arcade Three");
+  expect(await page.evaluate(() => (window as any).__ARCADEGENT_AMAP_LOADS__)).toBe(mapLoadsAfterFirstSelection);
 
   await page.getByTestId("arcade-list-item-102").click();
   await expect(page.getByText(/该机厅暂时没有精确地图坐标/)).toBeVisible();
@@ -493,7 +507,7 @@ test("ChatPanel shows progressive route card from SSE route_ready", async ({ pag
   await installChatApiMocks(page);
 
   await page.goto("/");
-  await page.getByPlaceholder("尽管问，带图也行").fill("给我一条到 Arcade One 的路线");
+  await page.getByPlaceholder("尽管问机厅相关问题").fill("给我一条到 Arcade One 的路线");
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect(page.getByTestId("agent-route-card")).toBeVisible();

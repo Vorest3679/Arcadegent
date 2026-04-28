@@ -32,10 +32,10 @@ export function ArcadeDetailPanel({
   const detailLoading = useArcadeBrowserStore((state) => state.detailLoading);
   const detailError = useArcadeBrowserStore((state) => state.detailError);
   const mapRuntime = useArcadeBrowserStore((state) => state.mapRuntime);
-  const paged = useArcadeBrowserStore((state) => state.paged);
   const selectedSourceId = useArcadeBrowserStore((state) => state.selectedSourceId);
   const setMapRuntime = useArcadeBrowserStore((state) => state.setMapRuntime);
   const setMapStatus = useArcadeBrowserStore((state) => state.setMapStatus);
+  const shouldLoadMap = Boolean(selectedArcade);
   const positionHint = view.selectedPoint
     ? `地图坐标：${view.selectedPoint.lng.toFixed(6)}, ${view.selectedPoint.lat.toFixed(6)}`
     : view.mapCenter || view.selectedRegionLabel
@@ -51,23 +51,30 @@ export function ArcadeDetailPanel({
       </div>
 
       <div className="browser-map-panel">
-        <AmapMapCanvas
-          center={view.mapCenter}
-          zoom={view.mapZoom}
-          fallbackRegionName={view.fallbackRegionName}
-          emptyMessage="等待地图就绪"
-          onRuntimeChange={setMapRuntime}
-          onStatusChange={setMapStatus}
-        />
-        <AmapShopMarkers
-          runtime={mapRuntime}
-          shops={paged.items}
-          shop={selectedArcade}
-          point={view.selectedPoint}
-          selectedSourceId={selectedSourceId}
-          onSelectShop={onMarkerSelect}
-        />
-        <AmapRouteOverlay runtime={mapRuntime} route={null} />
+        {shouldLoadMap ? (
+          <>
+            <AmapMapCanvas
+              center={view.mapCenter}
+              zoom={view.mapZoom}
+              fallbackRegionName={view.fallbackRegionName}
+              emptyMessage="等待地图就绪"
+              onRuntimeChange={setMapRuntime}
+              onStatusChange={setMapStatus}
+            />
+            <AmapShopMarkers
+              runtime={mapRuntime}
+              shop={selectedArcade}
+              point={view.selectedPoint}
+              selectedSourceId={selectedSourceId}
+              onSelectShop={onMarkerSelect}
+            />
+            <AmapRouteOverlay runtime={mapRuntime} route={null} />
+          </>
+        ) : (
+          <div className="amap-canvas-shell browser-map-placeholder" data-testid="arcade-map-placeholder">
+            <div className="amap-empty-copy">选择一个机厅后加载地图</div>
+          </div>
+        )}
         {view.mapStatusText ? <div className="browser-map-state">{view.mapStatusText}</div> : null}
       </div>
 

@@ -258,7 +258,7 @@ export function useChatSessionController() {
         const reply = envelope.data.reply;
         if (typeof reply === "string" && reply) {
           if (reply.length >= getStreamReplyTarget().length) {
-            writeStreamReplyTarget(reply);
+            syncStreamReply(reply);
           }
           commitStreamReply(reply);
         }
