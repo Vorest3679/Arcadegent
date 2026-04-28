@@ -201,7 +201,7 @@ export function ArcadeBrowser() {
       latestStore.setSelectedSourceId(nextSelected.source_id);
       await loadDetailForItem(nextSelected);
     } catch (err) {
-      useArcadeBrowserStore.getState().setError(err instanceof Error ? err.message : "Search failed");
+      useArcadeBrowserStore.getState().setError(err instanceof Error ? err.message : "检索机厅失败");
     } finally {
       useArcadeBrowserStore.getState().setLoading(false);
     }
@@ -275,7 +275,7 @@ export function ArcadeBrowser() {
 
   const pageHint = useMemo(() => {
     if (paged.total <= 0) {
-      return "No results";
+      return "暂无结果";
     }
     const start = (paged.page - 1) * paged.page_size + 1;
     const end = Math.min(paged.total, paged.page * paged.page_size);
@@ -360,7 +360,7 @@ export function ArcadeBrowser() {
   return (
     <div className="browser-shell">
       <header className="browser-hero">
-        <h2>Arcade Explorer</h2>
+        <h2>机厅检索</h2>
         <p>筛选机厅、在地图上看点位，并直接跳转到高德查看或导航。</p>
       </header>
 

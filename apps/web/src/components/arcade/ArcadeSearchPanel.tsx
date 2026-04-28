@@ -48,13 +48,13 @@ export function ArcadeSearchPanel({
     <section className="browser-card browser-controls">
       <form onSubmit={(event) => void onSubmit(event)} className="browser-filter-grid">
         <label className="browser-field">
-          Keyword
+          关键词
           <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="maimai / chunithm" />
         </label>
         <label className="browser-field">
-          Province
+          省份
           <select value={provinceCode} onChange={(e) => setProvinceCode(e.target.value)}>
-            <option value="">All</option>
+            <option value="">全部</option>
             {provinces.map((row) => (
               <option value={row.code} key={row.code}>
                 {row.name}
@@ -63,9 +63,9 @@ export function ArcadeSearchPanel({
           </select>
         </label>
         <label className="browser-field">
-          City
+          城市
           <select value={cityCode} onChange={(e) => setCityCode(e.target.value)} disabled={!provinceCode}>
-            <option value="">All</option>
+            <option value="">全部</option>
             {cities.map((row) => (
               <option value={row.code} key={row.code}>
                 {row.name}
@@ -74,9 +74,9 @@ export function ArcadeSearchPanel({
           </select>
         </label>
         <label className="browser-field">
-          County
+          区县
           <select value={countyCode} onChange={(e) => setCountyCode(e.target.value)} disabled={!cityCode}>
-            <option value="">All</option>
+            <option value="">全部</option>
             {counties.map((row) => (
               <option value={row.code} key={row.code}>
                 {row.name}
@@ -85,25 +85,25 @@ export function ArcadeSearchPanel({
           </select>
         </label>
         <label className="browser-field">
-          Sort By
+          排序字段
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value as ArcadeSortBy)}>
-            <option value="default">Default</option>
-            <option value="distance">Distance</option>
-            <option value="title_quantity">Title Qty (arcades[].quantity)</option>
-            <option value="arcade_count">Title Type Count</option>
-            <option value="updated_at">Updated At</option>
-            <option value="source_id">Source ID</option>
+            <option value="default">默认</option>
+            <option value="distance">距离</option>
+            <option value="title_quantity">机台数量</option>
+            <option value="arcade_count">机种数量</option>
+            <option value="updated_at">更新时间</option>
+            <option value="source_id">来源 ID</option>
           </select>
         </label>
         <label className="browser-field">
-          Sort Order
+          排序方向
           <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)}>
-            <option value="desc">Desc</option>
-            <option value="asc">Asc</option>
+            <option value="desc">降序</option>
+            <option value="asc">升序</option>
           </select>
         </label>
         <label className="browser-field">
-          Title Name
+          机种名称
           <input
             value={sortTitleName}
             onChange={(e) => setSortTitleName(e.target.value)}
@@ -117,17 +117,17 @@ export function ArcadeSearchPanel({
             checked={hasArcadesOnly}
             onChange={(e) => setHasArcadesOnly(e.target.checked)}
           />
-          Has titles only
+          仅看有机台
         </label>
         <button type="submit" disabled={loading} className="browser-primary-btn">
-          {loading ? "Searching..." : "Search"}
+          {loading ? "检索中..." : "检索"}
         </button>
       </form>
 
       {error ? <div className="browser-error">{error}</div> : null}
 
       <div className="browser-list-header">
-        <strong>Results</strong>
+        <strong>检索结果</strong>
         <span>
           {pageHint}
           {sortHint}
@@ -158,9 +158,9 @@ export function ArcadeSearchPanel({
                     {mapped ? "地图已定位" : "暂无地图定位"}
                   </span>
                 </div>
-                <p>{item.address || "No address"}</p>
+                <p>{item.address || "暂无地址"}</p>
                 <small>
-                  {item.province_name || "-"} / {item.city_name || "-"} / {item.county_name || "-"} | titles{" "}
+                  {item.province_name || "-"} / {item.city_name || "-"} / {item.county_name || "-"} | 机种{" "}
                   {item.arcade_count}
                   {distanceText ? ` | ${distanceText}` : ""}
                 </small>
@@ -177,10 +177,10 @@ export function ArcadeSearchPanel({
           onClick={() => onSearchPage(Math.max(1, paged.page - 1))}
           className="browser-secondary-btn"
         >
-          Prev
+          上一页
         </button>
         <span>
-          Page {paged.page} / {Math.max(1, paged.total_pages)}
+          第 {paged.page} / {Math.max(1, paged.total_pages)} 页
         </span>
         <button
           type="button"
@@ -188,7 +188,7 @@ export function ArcadeSearchPanel({
           onClick={() => onSearchPage(paged.page + 1)}
           className="browser-secondary-btn"
         >
-          Next
+          下一页
         </button>
       </div>
     </section>

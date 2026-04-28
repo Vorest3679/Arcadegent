@@ -230,7 +230,7 @@ export function ChatPanel({
         <input
           value={inputValue}
           onChange={(event) => setInputValue(event.target.value)}
-          placeholder="尽管问，带图也行"
+          placeholder="尽管问机厅相关问题"
           disabled={composerBusy}
         />
         <button type="submit" disabled={composerBusy || inputValue.trim().length === 0}>

@@ -46,7 +46,7 @@ export function ArcadeDetailPanel({
     <aside className="browser-card browser-detail">
       <div className="browser-detail-head">
         <div>
-          <strong>Map & Detail</strong>
+          <strong>地图与详情</strong>
         </div>
       </div>
 
@@ -71,28 +71,28 @@ export function ArcadeDetailPanel({
         {view.mapStatusText ? <div className="browser-map-state">{view.mapStatusText}</div> : null}
       </div>
 
-      {detailLoading ? <p className="browser-detail-note">Loading detail...</p> : null}
-      {!detailLoading && !selectedArcade ? <p className="browser-detail-note">Select one shop from the left list.</p> : null}
+      {detailLoading ? <p className="browser-detail-note">正在加载详情...</p> : null}
+      {!detailLoading && !selectedArcade ? <p className="browser-detail-note">从左侧列表选择一个机厅查看详情。</p> : null}
       {detailError ? <p className="browser-error">{detailError}</p> : null}
       {selectedArcade ? (
         <div className="browser-detail-content">
           <h3 data-testid="browser-detail-title">{selectedArcade.name}</h3>
-          <p>{selectedArcade.address || "No address"}</p>
-          <p>{selectedArcade.transport || "No transport info"}</p>
+          <p>{selectedArcade.address || "暂无地址"}</p>
+          <p>{selectedArcade.transport || "暂无交通信息"}</p>
           <p className="browser-map-hint">{positionHint}</p>
           <MapActionBar actions={view.actions} />
           {selectedDetail ? (
-            <p className="browser-comment">{selectedDetail.comment || "No comments"}</p>
+            <p className="browser-comment">{selectedDetail.comment || "暂无备注"}</p>
           ) : null}
           {selectedDetail ? (
             <>
-              <h4>Titles ({selectedDetail.arcades.length})</h4>
+              <h4>机台信息（{selectedDetail.arcades.length}）</h4>
               <ul className="browser-title-list">
                 {selectedDetail.arcades.map((item, idx) => (
                   <li key={`${item.title_id}-${idx}`}>
-                    <b>{item.title_name || "Unknown"}</b>
-                    <span>Qty: {item.quantity ?? "-"}</span>
-                    <span>Version: {item.version || "-"}</span>
+                    <b>{item.title_name || "未知机种"}</b>
+                    <span>数量：{item.quantity ?? "-"}</span>
+                    <span>版本：{item.version || "-"}</span>
                   </li>
                 ))}
               </ul>
