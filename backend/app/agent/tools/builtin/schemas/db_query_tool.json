@@ -1,7 +1,7 @@
 {
   "name": "db_query_tool",
   "kind": "function",
-  "description": "Search arcade shops by keyword and region. Use *_code for 12-digit region codes, or *_name for natural-language region names. Can also fetch one shop by shop_id. Supports sorting via sort_by/sort_order/sort_title_name, including distance sorting from an origin longitude/latitude.",
+  "description": "Search arcade shops by keyword and region. Use *_code for 12-digit region codes, or *_name for natural-language region names. Can also fetch one shop by shop_id. Supports sorting via sort_by/sort_order/sort_title_name, including distance sorting from an origin longitude/latitude. For named-place nearby search, resolve the place with AMap MCP first, then pass the resolved coordinates as origin_*.",
   "executor": "app.agent.tools.builtin.executors.db_query:execute",
   "argument_preparer": "app.agent.tools.builtin.executors.db_query:prepare_arguments",
   "capabilities": ["builtin", "read_only", "search"],
@@ -82,18 +82,18 @@
       "origin_lng": {
         "anyOf": [{ "type": "number", "minimum": -180, "maximum": 180 }, { "type": "null" }],
         "default": null,
-        "description": "Origin longitude used when `sort_by=distance`. Browser geolocation should pass WGS84 longitude.",
+        "description": "Origin longitude used when `sort_by=distance`. Browser geolocation should pass WGS84 longitude; AMap MCP geocode/place-search results usually pass GCJ-02 longitude.",
         "title": "Origin Longitude"
       },
       "origin_lat": {
         "anyOf": [{ "type": "number", "minimum": -90, "maximum": 90 }, { "type": "null" }],
         "default": null,
-        "description": "Origin latitude used when `sort_by=distance`. Browser geolocation should pass WGS84 latitude.",
+        "description": "Origin latitude used when `sort_by=distance`. Browser geolocation should pass WGS84 latitude; AMap MCP geocode/place-search results usually pass GCJ-02 latitude.",
         "title": "Origin Latitude"
       },
       "origin_coord_system": {
         "default": "wgs84",
-        "description": "Coordinate system for origin_lng/origin_lat. Use `wgs84` for browser geolocation; use `gcj02` only for already-converted AMap coordinates.",
+        "description": "Coordinate system for origin_lng/origin_lat. Use `wgs84` for browser geolocation; use `gcj02` for AMap MCP/REST coordinates unless the tool explicitly says otherwise.",
         "enum": ["wgs84", "gcj02"],
         "title": "Origin Coordinate System",
         "type": "string"

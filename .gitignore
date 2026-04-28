@@ -25,6 +25,8 @@ data/
 
 # Private/local-only workspaces
 scripts/
+!backend/scripts/
+!backend/scripts/enrich_arcade_geo_jsonl.py
 docs/instruction/
 docs/issues/
 docs/others/
@@ -40,5 +42,9 @@ output
 
 uv.lock
 tests/
+!backend/app/tests/
+!backend/app/tests/unit/
+backend/app/tests/unit/*
+!backend/app/tests/unit/test_arcade_geo_jsonl_enricher.py
 test-results/
 supabase/

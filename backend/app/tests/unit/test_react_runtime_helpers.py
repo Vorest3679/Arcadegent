@@ -74,6 +74,25 @@ def test_prepare_tool_arguments_hydrates_nearby_db_query_from_client_location() 
     assert hydrated == ["sort_by", "sort_order", "origin_lng", "origin_lat", "origin_coord_system"]
 
 
+def test_prepare_tool_arguments_hydrates_nearby_db_query_from_mcp_location() -> None:
+    state = AgentSessionState(session_id="s_nearby_mcp")
+    state.working_memory["last_request"] = {"message": "鲁迅公园附近的机厅", "page_size": 10}
+    set_working_memory_artifact(
+        state.working_memory,
+        "resolved_locations",
+        [{"name": "鲁迅公园", "location": "121.48819,31.27687"}],
+    )
+
+    args, hydrated = db_query_executor.prepare_arguments({"page": 1, "page_size": 10}, state.working_memory)
+
+    assert args["sort_by"] == "distance"
+    assert args["sort_order"] == "asc"
+    assert args["origin_lng"] == 121.48819
+    assert args["origin_lat"] == 31.27687
+    assert args["origin_coord_system"] == "gcj02"
+    assert hydrated == ["sort_by", "sort_order", "origin_lng", "origin_lat", "origin_coord_system"]
+
+
 def test_prepare_tool_arguments_hydrates_sort_fields_from_last_db_query() -> None:
     state = AgentSessionState(session_id="s4")
     set_working_memory_artifact(state.working_memory, "total", 8)

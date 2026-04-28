@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,7 @@ class ArcadeGeoResolverConfig:
     request_timeout_seconds: float = 1.2
     sync_limit: int = 8
     max_workers: int = 4
+    request_interval_seconds: float = 0.0
 
 
 class ArcadeGeoResolver:
@@ -34,6 +36,8 @@ class ArcadeGeoResolver:
     def __init__(self, *, config: ArcadeGeoResolverConfig) -> None:
         self._config = config
         self._lock = Lock()
+        self._request_lock = Lock()
+        self._last_request_at = 0.0
         self._cache = self._load_cache()
 
     def resolve_one(self, raw: Mapping[str, Any]) -> ArcadeGeoDto | None:
@@ -52,6 +56,18 @@ class ArcadeGeoResolver:
 
         geocoded = self._geocode(raw)
         if geocoded is not None:
+            self._write_cache_entry(key=key, raw=raw, geo=geocoded)
+        return geocoded
+
+    def geocode_one(self, raw: Mapping[str, Any]) -> ArcadeGeoDto | None:
+        """Force an AMap geocode lookup, reusing cache but ignoring catalog coordinates."""
+        key = self._cache_key(raw)
+        cached = self._geo_from_cache(key) if key is not None else None
+        if cached is not None and cached.gcj02 is not None:
+            return cached
+
+        geocoded = self._geocode(raw)
+        if geocoded is not None and key is not None:
             self._write_cache_entry(key=key, raw=raw, geo=geocoded)
         return geocoded
 
@@ -183,6 +199,7 @@ class ArcadeGeoResolver:
         return ArcadeGeoDto(gcj02=gcj, wgs84=None, source="geocode", precision="approx")
 
     def _request_geocode(self, *, query: str, city: str | None) -> dict[str, Any] | None:
+        self._wait_for_request_slot()
         params = {
             "key": self._config.api_key,
             "address": query,
@@ -202,6 +219,18 @@ class ArcadeGeoResolver:
         except json.JSONDecodeError:
             return None
         return payload if isinstance(payload, dict) else None
+
+    def _wait_for_request_slot(self) -> None:
+        interval = max(0.0, float(self._config.request_interval_seconds or 0.0))
+        if interval <= 0:
+            return
+        with self._request_lock:
+            now = time.monotonic()
+            wait_seconds = self._last_request_at + interval - now
+            if wait_seconds > 0:
+                time.sleep(wait_seconds)
+                now = time.monotonic()
+            self._last_request_at = now
 
     def _write_cache_entry(self, *, key: str, raw: Mapping[str, Any], geo: ArcadeGeoDto) -> None:
         source_id = self._source_id(raw)

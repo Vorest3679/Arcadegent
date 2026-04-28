@@ -29,11 +29,66 @@ def _is_nearby_search_request(memory: dict[str, Any]) -> bool:
     return bool(re.search(r"附近|最近|nearby|nearest|near me|near ", message))
 
 
+def _coerce_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_location_string(value: Any) -> tuple[float, float] | None:
+    if not isinstance(value, str):
+        return None
+    parts = [part.strip() for part in value.split(",")]
+    if len(parts) != 2:
+        return None
+    lng = _coerce_float(parts[0])
+    lat = _coerce_float(parts[1])
+    if lng is None or lat is None:
+        return None
+    return lng, lat
+
+
+def _resolved_location_origin(memory: dict[str, Any]) -> dict[str, Any] | None:
+    locations = _memory_artifact(memory, "resolved_locations")
+    if not isinstance(locations, list):
+        return None
+
+    for item in locations:
+        if not isinstance(item, dict):
+            continue
+        lng = _coerce_float(
+            item.get("lng", item.get("lon", item.get("longitude")))
+        )
+        lat = _coerce_float(item.get("lat", item.get("latitude")))
+        if lng is None or lat is None:
+            parsed = _parse_location_string(item.get("location"))
+            if parsed is None:
+                continue
+            lng, lat = parsed
+        if not (-180 <= lng <= 180 and -90 <= lat <= 90):
+            continue
+        coord_system = str(
+            item.get("coord_system")
+            or item.get("coordinate_system")
+            or item.get("coordsys")
+            or "gcj02"
+        ).strip().lower()
+        if coord_system not in {"wgs84", "gcj02"}:
+            coord_system = "gcj02"
+        return {"lng": lng, "lat": lat, "coord_system": coord_system}
+    return None
+
+
 def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     args = dict(raw_arguments)
     hydrated: list[str] = []
     location = _memory_artifact(runtime_context, "client_location")
-    if not isinstance(location, dict):
+    resolved_origin = _resolved_location_origin(runtime_context)
+    has_client_location = isinstance(location, dict)
+    if not has_client_location and resolved_origin is None:
         return args, hydrated
 
     current_sort = args.get("sort_by")
@@ -49,14 +104,17 @@ def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, 
     if args.get("sort_order") is None:
         args["sort_order"] = "asc"
         hydrated.append("sort_order")
-    if args.get("origin_lng") is None and location.get("lng") is not None:
-        args["origin_lng"] = location.get("lng")
+
+    origin_source = location if has_client_location else resolved_origin
+    origin_coord_system = "wgs84" if has_client_location else (resolved_origin or {}).get("coord_system")
+    if args.get("origin_lng") is None and isinstance(origin_source, dict) and origin_source.get("lng") is not None:
+        args["origin_lng"] = origin_source.get("lng")
         hydrated.append("origin_lng")
-    if args.get("origin_lat") is None and location.get("lat") is not None:
-        args["origin_lat"] = location.get("lat")
+    if args.get("origin_lat") is None and isinstance(origin_source, dict) and origin_source.get("lat") is not None:
+        args["origin_lat"] = origin_source.get("lat")
         hydrated.append("origin_lat")
     if args.get("origin_coord_system") is None:
-        args["origin_coord_system"] = "wgs84"
+        args["origin_coord_system"] = origin_coord_system or "gcj02"
         hydrated.append("origin_coord_system")
     return args, hydrated
 
