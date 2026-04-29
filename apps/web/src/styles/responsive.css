@@ -13,14 +13,24 @@
 }
 
 @media (max-width: 960px) {
+  html,
+  body,
+  #root {
+    overflow: hidden;
+  }
+
   .app-shell {
     display: block;
+    min-height: 100dvh;
+    height: 100dvh;
   }
 
   .app-sidebar {
     position: fixed;
     inset: 0 auto 0 0;
     width: min(88vw, 320px);
+    height: 100dvh;
+    padding: max(18px, var(--safe-top)) 14px max(18px, var(--safe-bottom)) max(14px, var(--safe-left));
     transform: translateX(-104%);
     transition: transform 0.2s ease;
     box-shadow: 16px 0 28px rgba(15, 27, 23, 0.18);
@@ -31,7 +41,39 @@
   }
 
   .app-main {
-    padding: 12px;
+    height: 100dvh;
+    min-height: 0;
+    padding: max(12px, var(--safe-top)) max(12px, var(--safe-right)) max(12px, var(--safe-bottom)) max(12px, var(--safe-left));
+    overflow: hidden;
+  }
+
+  .topbar {
+    flex: 0 0 auto;
+  }
+
+  .topbar > div {
+    min-width: 0;
+  }
+
+  .topbar h2,
+  .topbar p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-view {
+    min-height: 0;
+  }
+
+  .browser-shell {
+    min-height: 0;
+    overflow: auto;
+    padding-bottom: max(8px, var(--safe-bottom));
+  }
+
+  .browser-hero p {
+    font-size: 0.92rem;
   }
 }
 
@@ -43,26 +85,198 @@
 }
 
 @media (max-width: 620px) {
+  .topbar {
+    margin-bottom: 10px;
+  }
+
+  .menu-btn {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .chat-empty {
+    margin: 24px auto;
+  }
+
+  .chat-empty-subtitle {
+    font-size: 0.92rem;
+  }
+
+  .quick-chip {
+    min-height: 46px;
+  }
+
   .chat-scroll {
     padding: 16px 12px 10px;
   }
 
   .chat-bubble {
-    max-width: 90%;
+    max-width: 92%;
+    padding: 10px 11px;
+  }
+
+  .chat-event-bubble {
+    max-width: 92%;
+  }
+
+  .chat-map-card-item {
+    width: 100%;
   }
 
   .chat-composer {
     grid-template-columns: 1fr;
+    padding: 10px 10px max(10px, var(--safe-bottom));
+  }
+
+  .chat-composer input,
+  .chat-composer button,
+  .browser-field input,
+  .browser-field select,
+  .browser-primary-btn,
+  .browser-secondary-btn,
+  .map-action-btn {
+    min-height: 44px;
+    font-size: 16px;
   }
 
   .browser-filter-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .browser-controls,
+  .browser-detail {
+    padding: 12px;
+  }
+
+  .browser-list-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.88rem;
+  }
+
+  .browser-result-list {
+    max-height: 44dvh;
+  }
+
+  .browser-item-topline {
+    display: grid;
+    gap: 6px;
+  }
+
+  .browser-geo-pill {
+    justify-self: start;
+  }
+
+  .browser-pager {
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+
+  .browser-pager .browser-secondary-btn {
+    flex: 1 1 calc(50% - 5px);
+  }
+
+  .browser-page-control {
+    order: -1;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .amap-canvas-shell {
+    min-height: 260px;
+  }
+
+  .agent-map-card {
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .agent-map-head {
+    display: grid;
+    gap: 8px;
+  }
+
+  .agent-map-head > small {
+    justify-self: start;
+  }
+
+  .agent-map-canvas-wrap .amap-canvas-shell {
+    min-height: 240px;
+  }
+
+  .agent-candidate-list {
+    max-height: 220px;
+  }
+
+  .map-action-bar {
+    gap: 8px;
+  }
+
+  .map-action-btn {
+    flex: 1 1 100%;
   }
 }
 
 @media (max-width: 460px) {
   .browser-filter-grid {
     grid-template-columns: 1fr;
+  }
+
+  .app-main {
+    padding-right: max(10px, var(--safe-right));
+    padding-left: max(10px, var(--safe-left));
+  }
+
+  .chat-scroll {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .chat-bubble,
+  .chat-event-bubble {
+    max-width: 96%;
+  }
+
+  .chat-stage-list li {
+    display: grid;
+    gap: 4px;
+  }
+
+  .browser-hero h2 {
+    font-size: 1.08rem;
+  }
+
+  .browser-card {
+    border-radius: 14px;
+  }
+
+  .browser-item-btn {
+    padding: 10px 9px;
+  }
+
+  .amap-canvas-shell,
+  .agent-map-canvas-wrap .amap-canvas-shell {
+    min-height: 220px;
+  }
+}
+
+@media (display-mode: standalone) and (max-width: 960px) {
+  .app-main {
+    padding-top: max(14px, var(--safe-top));
+    padding-bottom: max(12px, var(--safe-bottom));
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .quick-chip:hover,
+  .browser-item-btn:hover,
+  .sidebar-session-wrap:hover,
+  .chat-composer button:hover:not(:disabled) {
+    transform: none;
+    box-shadow: none;
+    filter: none;
   }
 }
 

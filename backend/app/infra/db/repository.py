@@ -22,6 +22,8 @@ class ArcadeRepository(Protocol):
         has_arcades: bool | None,
         page: int,
         page_size: int,
+        shop_name: str | None = None,
+        title_name: str | None = None,
         province_name: str | None = None,
         city_name: str | None = None,
         county_name: str | None = None,

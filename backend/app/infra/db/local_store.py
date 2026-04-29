@@ -71,6 +71,14 @@ def _build_search_blob(shop: dict[str, Any]) -> str:
     return " ".join(chunks).lower()
 
 
+def _build_shop_name_search_blob(shop: dict[str, Any]) -> str:
+    chunks: list[str] = [
+        str(shop.get("name") or ""),
+        str(shop.get("name_pinyin") or ""),
+    ]
+    return " ".join(chunks).lower()
+
+
 def _keyword_terms(keyword: str | None) -> list[str]:
     if not keyword:
         return []
@@ -117,6 +125,17 @@ def _title_quantity(row: dict[str, Any], title_name_norm: str) -> int:
             continue
         total += int(_as_int(item.get("quantity")) or 0)
     return total
+
+
+def _has_title(row: dict[str, Any], title_name_norm: str) -> bool:
+    if not title_name_norm:
+        return True
+    for item in row.get("arcades") or []:
+        if not isinstance(item, dict):
+            continue
+        if _normalize_title_name(item.get("title_name")) == title_name_norm:
+            return True
+    return False
 
 
 def _valid_lng_lat(lng: float | None, lat: float | None) -> bool:
@@ -462,6 +481,8 @@ class LocalArcadeStore:
         has_arcades: bool | None,
         page: int,
         page_size: int,
+        shop_name: str | None = None,
+        title_name: str | None = None,
         province_name: str | None = None,
         city_name: str | None = None,
         county_name: str | None = None,
@@ -475,6 +496,8 @@ class LocalArcadeStore:
         """Filter and paginate shop list with deterministic order."""
         items: list[dict[str, Any]] = []
         terms = _keyword_terms(keyword)
+        shop_name_terms = _keyword_terms(shop_name)
+        title_name_norm = _normalize_title_name(title_name)
         province_name_norm = _normalize_region_name(province_name)
         city_name_norm = _normalize_region_name(city_name)
         county_name_norm = _normalize_region_name(county_name)
@@ -503,6 +526,11 @@ class LocalArcadeStore:
                 continue
             search_blob = str(row.get("_search_blob") or "")
             if terms and not all(term in search_blob for term in terms):
+                continue
+            shop_name_blob = _build_shop_name_search_blob(row)
+            if shop_name_terms and not all(term in shop_name_blob for term in shop_name_terms):
+                continue
+            if title_name_norm and not _has_title(row, title_name_norm):
                 continue
             items.append(row)
 

@@ -171,15 +171,18 @@ export function ArcadeBrowser() {
     state.setError("");
 
     try {
+      const legacyKeyword = [state.shopName, state.titleName].filter(Boolean).join(" ");
       const payload = await listArcades({
-        keyword: state.keyword,
+        keyword: legacyKeyword,
+        shop_name: state.shopName,
+        title_name: state.titleName || undefined,
         province_code: state.provinceCode || undefined,
         city_code: state.cityCode || undefined,
         county_code: state.countyCode || undefined,
         has_arcades: state.hasArcadesOnly ? true : undefined,
         sort_by: state.sortBy,
         sort_order: state.sortOrder,
-        sort_title_name: state.sortBy === "title_quantity" ? state.sortTitleName.trim() || undefined : undefined,
+        sort_title_name: state.sortBy === "title_quantity" ? state.titleName || undefined : undefined,
         origin_lng: state.sortBy === "distance" ? state.clientLocation?.lng : undefined,
         origin_lat: state.sortBy === "distance" ? state.clientLocation?.lat : undefined,
         origin_coord_system: state.sortBy === "distance" ? "wgs84" : undefined,

@@ -90,6 +90,8 @@ async function deleteJson(path: string): Promise<void> {
 
 export async function listArcades(params: {
   keyword?: string;
+  shop_name?: string;
+  title_name?: string;
   province_code?: string;
   city_code?: string;
   county_code?: string;

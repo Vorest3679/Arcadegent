@@ -16,6 +16,8 @@ router = APIRouter(prefix="/api/v1/arcades", tags=["arcades"])
 @router.get("", response_model=PagedArcadeResponse)
 def list_arcades(
     keyword: str | None = Query(default=None),
+    shop_name: str | None = Query(default=None),
+    title_name: str | None = Query(default=None),
     province_code: str | None = Query(default=None),
     city_code: str | None = Query(default=None),
     county_code: str | None = Query(default=None),
@@ -34,6 +36,8 @@ def list_arcades(
 ) -> PagedArcadeResponse:
     rows, total = container.store.list_shops(
         keyword=keyword,
+        shop_name=shop_name,
+        title_name=title_name,
         province_code=province_code,
         city_code=city_code,
         county_code=county_code,

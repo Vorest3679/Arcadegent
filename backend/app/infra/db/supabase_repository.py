@@ -52,6 +52,8 @@ class SupabaseArcadeRepository:
         has_arcades: bool | None,
         page: int,
         page_size: int,
+        shop_name: str | None = None,
+        title_name: str | None = None,
         province_name: str | None = None,
         city_name: str | None = None,
         county_name: str | None = None,
@@ -62,27 +64,51 @@ class SupabaseArcadeRepository:
         origin_lat: float | None = None,
         origin_coord_system: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
-        payload = self._rpc(
-            "arcadegent_search_shops",
-            {
-                "p_keyword": keyword,
-                "p_province_code": province_code,
-                "p_city_code": city_code,
-                "p_county_code": county_code,
-                "p_province_name": province_name,
-                "p_city_name": city_name,
-                "p_county_name": county_name,
-                "p_has_arcades": has_arcades,
-                "p_page": page,
-                "p_page_size": page_size,
-                "p_sort_by": sort_by,
-                "p_sort_order": sort_order,
-                "p_sort_title_name": sort_title_name,
-                "p_origin_lng": origin_lng,
-                "p_origin_lat": origin_lat,
-                "p_origin_coord_system": origin_coord_system,
-            },
-        )
+        rpc_payload = {
+            "p_keyword": keyword,
+            "p_province_code": province_code,
+            "p_city_code": city_code,
+            "p_county_code": county_code,
+            "p_province_name": province_name,
+            "p_city_name": city_name,
+            "p_county_name": county_name,
+            "p_has_arcades": has_arcades,
+            "p_page": page,
+            "p_page_size": page_size,
+            "p_sort_by": sort_by,
+            "p_sort_order": sort_order,
+            "p_sort_title_name": sort_title_name,
+            "p_origin_lng": origin_lng,
+            "p_origin_lat": origin_lat,
+            "p_origin_coord_system": origin_coord_system,
+        }
+        if shop_name is not None and shop_name.strip():
+            rpc_payload["p_shop_name"] = shop_name
+        if title_name is not None and title_name.strip():
+            rpc_payload["p_title_name"] = title_name
+
+        try:
+            payload = self._rpc(
+                "arcadegent_search_shops",
+                rpc_payload,
+            )
+        except RuntimeError:
+            if "p_shop_name" not in rpc_payload and "p_title_name" not in rpc_payload:
+                raise
+            legacy_payload = dict(rpc_payload)
+            legacy_payload.pop("p_shop_name", None)
+            legacy_payload.pop("p_title_name", None)
+            legacy_payload["p_keyword"] = " ".join(
+                dict.fromkeys(
+                    term.strip()
+                    for term in (keyword, shop_name, title_name)
+                    if isinstance(term, str) and term.strip()
+                )
+            )
+            payload = self._rpc(
+                "arcadegent_search_shops",
+                legacy_payload,
+            )
         if not isinstance(payload, dict):
             raise RuntimeError("supabase_rpc_invalid_response:arcadegent_search_shops")
         rows = payload.get("rows")

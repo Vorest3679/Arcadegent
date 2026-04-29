@@ -192,6 +192,81 @@ def test_arcade_list_enriches_geo_and_writes_cache(tmp_path: Path) -> None:
     assert cache_path.exists()
 
 
+def test_arcade_list_supports_shop_name_search_without_title_matches(tmp_path: Path) -> None:
+    client = _build_client_with_rows(
+        tmp_path,
+        [
+            {
+                "source": "bemanicn",
+                "source_id": 31,
+                "source_url": "https://map.bemanicn.com/s/31",
+                "name": "星际传奇人民广场店",
+                "name_pinyin": "xing-ji-chuan-qi-ren-min-guang-chang-dian",
+                "arcades": [{"title_name": "SOUND VOLTEX", "quantity": 1}],
+            },
+            {
+                "source": "bemanicn",
+                "source_id": 32,
+                "source_url": "https://map.bemanicn.com/s/32",
+                "name": "Gamma Arcade",
+                "arcades": [{"title_name": "maimai", "quantity": 2}],
+            },
+        ],
+    )
+
+    by_shop_name = client.get("/api/v1/arcades", params={"shop_name": "星际传奇"})
+    assert by_shop_name.status_code == 200
+    assert by_shop_name.json()["total"] == 1
+    assert by_shop_name.json()["items"][0]["source_id"] == 31
+
+    by_title_as_shop_name = client.get("/api/v1/arcades", params={"shop_name": "maimai"})
+    assert by_title_as_shop_name.status_code == 200
+    assert by_title_as_shop_name.json()["total"] == 0
+
+    legacy_keyword = client.get("/api/v1/arcades", params={"keyword": "maimai"})
+    assert legacy_keyword.status_code == 200
+    assert legacy_keyword.json()["total"] == 1
+    assert legacy_keyword.json()["items"][0]["source_id"] == 32
+
+
+def test_arcade_list_supports_title_name_filter(tmp_path: Path) -> None:
+    client = _build_client_with_rows(
+        tmp_path,
+        [
+            {
+                "source": "bemanicn",
+                "source_id": 41,
+                "source_url": "https://map.bemanicn.com/s/41",
+                "name": "星际传奇一号店",
+                "arcades": [{"title_name": "CHUNITHM", "quantity": 1}],
+            },
+            {
+                "source": "bemanicn",
+                "source_id": 42,
+                "source_url": "https://map.bemanicn.com/s/42",
+                "name": "星际传奇二号店",
+                "arcades": [{"title_name": "SOUND VOLTEX", "quantity": 1}],
+            },
+            {
+                "source": "bemanicn",
+                "source_id": 43,
+                "source_url": "https://map.bemanicn.com/s/43",
+                "name": "Delta Arcade",
+                "arcades": [{"title_name": "CHUNITHM", "quantity": 1}],
+            },
+        ],
+    )
+
+    resp = client.get(
+        "/api/v1/arcades",
+        params={"shop_name": "星际传奇", "title_name": "CHUNITHM"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["source_id"] == 41
+
+
 def test_arcade_detail_returns_geo(tmp_path: Path) -> None:
     row = {
         "source": "bemanicn",

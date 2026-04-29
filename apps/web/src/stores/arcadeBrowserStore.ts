@@ -35,14 +35,14 @@ type ArcadeBrowserStore = {
   provinces: RegionItem[];
   cities: RegionItem[];
   counties: RegionItem[];
-  keyword: string;
+  shopName: string;
+  titleName: string;
   provinceCode: string;
   cityCode: string;
   countyCode: string;
   hasArcadesOnly: boolean;
   sortBy: ArcadeSortBy;
   sortOrder: SortOrder;
-  sortTitleName: string;
   loading: boolean;
   error: string;
   detail: ArcadeDetail | null;
@@ -58,14 +58,14 @@ type ArcadeBrowserStore = {
   setProvinces: (provinces: RegionItem[]) => void;
   setCities: (cities: RegionItem[]) => void;
   setCounties: (counties: RegionItem[]) => void;
-  setKeyword: (keyword: string) => void;
+  setShopName: (shopName: string) => void;
+  setTitleName: (titleName: string) => void;
   setProvinceCode: (provinceCode: string) => void;
   setCityCode: (cityCode: string) => void;
   setCountyCode: (countyCode: string) => void;
   setHasArcadesOnly: (hasArcadesOnly: boolean) => void;
   setSortBy: (sortBy: ArcadeSortBy) => void;
   setSortOrder: (sortOrder: SortOrder) => void;
-  setSortTitleName: (sortTitleName: string) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string) => void;
   setDetail: (detail: ArcadeDetail | null) => void;
@@ -84,14 +84,14 @@ export const useArcadeBrowserStore = create<ArcadeBrowserStore>((set) => ({
   provinces: [],
   cities: [],
   counties: [],
-  keyword: "",
+  shopName: "",
+  titleName: "",
   provinceCode: "",
   cityCode: "",
   countyCode: "",
   hasArcadesOnly: true,
   sortBy: "default",
   sortOrder: "desc",
-  sortTitleName: "",
   loading: false,
   error: "",
   detail: null,
@@ -107,7 +107,8 @@ export const useArcadeBrowserStore = create<ArcadeBrowserStore>((set) => ({
   setProvinces: (provinces) => set({ provinces }),
   setCities: (cities) => set({ cities }),
   setCounties: (counties) => set({ counties }),
-  setKeyword: (keyword) => set({ keyword }),
+  setShopName: (shopName) => set({ shopName }),
+  setTitleName: (titleName) => set({ titleName }),
   setProvinceCode: (provinceCode) => set({
     provinceCode,
     cityCode: "",
@@ -127,7 +128,6 @@ export const useArcadeBrowserStore = create<ArcadeBrowserStore>((set) => ({
     sortOrder: sortBy === "distance" ? "asc" : state.sortOrder
   })),
   setSortOrder: (sortOrder) => set({ sortOrder }),
-  setSortTitleName: (sortTitleName) => set({ sortTitleName }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   setDetail: (detail) => set({ detail }),

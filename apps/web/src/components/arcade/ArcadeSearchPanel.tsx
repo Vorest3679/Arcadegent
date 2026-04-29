@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { getArcadeGcjPoint } from "../../lib/amapCoords";
 import { useArcadeBrowserStore } from "../../stores/arcadeBrowserStore";
 import type { ArcadeSortBy, ArcadeSummary, SortOrder } from "../../types";
+import { ARCADE_TITLE_OPTIONS } from "./titleOptions";
 
 type ArcadeSearchPanelProps = {
   pageHint: string;
@@ -19,31 +20,31 @@ export function ArcadeSearchPanel({
   const provinces = useArcadeBrowserStore((state) => state.provinces);
   const cities = useArcadeBrowserStore((state) => state.cities);
   const counties = useArcadeBrowserStore((state) => state.counties);
-  const keyword = useArcadeBrowserStore((state) => state.keyword);
+  const shopName = useArcadeBrowserStore((state) => state.shopName);
+  const titleName = useArcadeBrowserStore((state) => state.titleName);
   const provinceCode = useArcadeBrowserStore((state) => state.provinceCode);
   const cityCode = useArcadeBrowserStore((state) => state.cityCode);
   const countyCode = useArcadeBrowserStore((state) => state.countyCode);
   const hasArcadesOnly = useArcadeBrowserStore((state) => state.hasArcadesOnly);
   const sortBy = useArcadeBrowserStore((state) => state.sortBy);
   const sortOrder = useArcadeBrowserStore((state) => state.sortOrder);
-  const sortTitleName = useArcadeBrowserStore((state) => state.sortTitleName);
   const loading = useArcadeBrowserStore((state) => state.loading);
   const error = useArcadeBrowserStore((state) => state.error);
   const paged = useArcadeBrowserStore((state) => state.paged);
   const selectedSourceId = useArcadeBrowserStore((state) => state.selectedSourceId);
-  const setKeyword = useArcadeBrowserStore((state) => state.setKeyword);
+  const setShopName = useArcadeBrowserStore((state) => state.setShopName);
+  const setTitleName = useArcadeBrowserStore((state) => state.setTitleName);
   const setProvinceCode = useArcadeBrowserStore((state) => state.setProvinceCode);
   const setCityCode = useArcadeBrowserStore((state) => state.setCityCode);
   const setCountyCode = useArcadeBrowserStore((state) => state.setCountyCode);
   const setHasArcadesOnly = useArcadeBrowserStore((state) => state.setHasArcadesOnly);
   const setSortBy = useArcadeBrowserStore((state) => state.setSortBy);
   const setSortOrder = useArcadeBrowserStore((state) => state.setSortOrder);
-  const setSortTitleName = useArcadeBrowserStore((state) => state.setSortTitleName);
   const totalPages = Math.max(1, paged.total_pages);
   const [pageInput, setPageInput] = useState(String(paged.page));
   const sortHint =
-    sortBy === "title_quantity" && sortTitleName.trim()
-      ? ` | ${sortTitleName.trim()} ${sortOrder.toUpperCase()}`
+    sortBy === "title_quantity" && titleName
+      ? ` | ${titleName} ${sortOrder.toUpperCase()}`
       : "";
 
   useEffect(() => {
@@ -78,8 +79,8 @@ export function ArcadeSearchPanel({
     <section className="browser-card browser-controls">
       <form onSubmit={(event) => void onSubmit(event)} className="browser-filter-grid">
         <label className="browser-field">
-          关键词
-          <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="maimai / chunithm" />
+          机厅名称
+          <input value={shopName} onChange={(e) => setShopName(e.target.value)} placeholder="星际传奇" />
         </label>
         <label className="browser-field">
           省份
@@ -119,8 +120,8 @@ export function ArcadeSearchPanel({
           <select value={sortBy} onChange={(e) => setSortBy(e.target.value as ArcadeSortBy)}>
             <option value="default">默认</option>
             <option value="distance">距离</option>
-            <option value="title_quantity">机台数量</option>
-            <option value="arcade_count">机种数量</option>
+            <option value="title_quantity">指定机种机台数</option>
+            <option value="arcade_count">机种数</option>
             <option value="updated_at">更新时间</option>
             <option value="source_id">来源 ID</option>
           </select>
@@ -133,13 +134,18 @@ export function ArcadeSearchPanel({
           </select>
         </label>
         <label className="browser-field">
-          机种名称
-          <input
-            value={sortTitleName}
-            onChange={(e) => setSortTitleName(e.target.value)}
-            placeholder="maimai / sdvx"
-            disabled={sortBy !== "title_quantity"}
-          />
+          机种
+          <select
+            value={titleName}
+            onChange={(e) => setTitleName(e.target.value)}
+          >
+            <option value="">全部</option>
+            {ARCADE_TITLE_OPTIONS.map((title) => (
+              <option value={title} key={title}>
+                {title}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="browser-check">
           <input
