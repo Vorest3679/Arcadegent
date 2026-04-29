@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Arcadegent">
+  <rect width="512" height="512" rx="112" fill="#206d5e"/>
+  <path fill="#f6f2e6" d="M148 162c0-24 20-44 44-44h128c24 0 44 20 44 44v188c0 24-20 44-44 44H192c-24 0-44-20-44-44V162Z"/>
+  <path fill="#d8ece7" d="M184 166c0-8 6-14 14-14h116c8 0 14 6 14 14v76c0 8-6 14-14 14H198c-8 0-14-6-14-14v-76Z"/>
+  <path fill="#206d5e" d="M222 278h68c10 0 18 8 18 18v16c0 10-8 18-18 18h-68c-10 0-18-8-18-18v-16c0-10 8-18 18-18Z"/>
+  <circle cx="212" cy="352" r="20" fill="#dc9b2d"/>
+  <circle cx="300" cy="352" r="20" fill="#dc9b2d"/>
+  <path fill="#206d5e" d="M222 192a34 34 0 1 1 68 0v18h-28v-18a6 6 0 1 0-12 0v18h-28v-18Z"/>
+</svg>
