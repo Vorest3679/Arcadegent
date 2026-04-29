@@ -8,7 +8,7 @@ from app.api.deps import get_container
 from app.core.container import AppContainer
 from app.protocol.messages import RegionItemDto
 
-router = APIRouter(prefix="/api/v1/regions", tags=["regions"])
+router = APIRouter(prefix="/api/regions", tags=["regions"])
 
 
 @router.get("/provinces", response_model=list[RegionItemDto])
@@ -32,4 +32,3 @@ def list_counties(
 ) -> list[RegionItemDto]:
     rows = container.store.list_counties(city_code=city_code)
     return [RegionItemDto(code=row["code"], name=row["name"]) for row in rows]
-

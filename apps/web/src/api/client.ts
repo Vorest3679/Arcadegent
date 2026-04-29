@@ -105,23 +105,23 @@ export async function listArcades(params: {
   page?: number;
   page_size?: number;
 }): Promise<PagedArcades> {
-  return fetchJson<PagedArcades>(buildUrl("/api/v1/arcades", params));
+  return fetchJson<PagedArcades>(buildUrl("/api/arcades", params));
 }
 
 export async function getArcadeDetail(sourceId: number): Promise<ArcadeDetail> {
-  return fetchJson<ArcadeDetail>(buildUrl(`/api/v1/arcades/${sourceId}`));
+  return fetchJson<ArcadeDetail>(buildUrl(`/api/arcades/${sourceId}`));
 }
 
 export async function listProvinces(): Promise<RegionItem[]> {
-  return fetchJson<RegionItem[]>(buildUrl("/api/v1/regions/provinces"));
+  return fetchJson<RegionItem[]>(buildUrl("/api/regions/provinces"));
 }
 
 export async function listCities(provinceCode: string): Promise<RegionItem[]> {
-  return fetchJson<RegionItem[]>(buildUrl("/api/v1/regions/cities", { province_code: provinceCode }));
+  return fetchJson<RegionItem[]>(buildUrl("/api/regions/cities", { province_code: provinceCode }));
 }
 
 export async function listCounties(cityCode: string): Promise<RegionItem[]> {
-  return fetchJson<RegionItem[]>(buildUrl("/api/v1/regions/counties", { city_code: cityCode }));
+  return fetchJson<RegionItem[]>(buildUrl("/api/regions/counties", { city_code: cityCode }));
 }
 
 export async function sendChat(payload: ChatRequest): Promise<ChatResponse> {
@@ -139,19 +139,19 @@ export function buildChatStreamUrl(sessionId: string, lastEventId?: number): str
 }
 
 export async function listChatSessions(limit = 40): Promise<ChatSessionSummary[]> {
-  return fetchJson<ChatSessionSummary[]>(buildUrl("/api/v1/chat/sessions", { limit }));
+  return fetchJson<ChatSessionSummary[]>(buildUrl("/api/chat/sessions", { limit }));
 }
 
 export async function getChatSession(sessionId: string): Promise<ChatSessionDetail> {
-  return fetchJson<ChatSessionDetail>(buildUrl(`/api/v1/chat/sessions/${encodeURIComponent(sessionId)}`));
+  return fetchJson<ChatSessionDetail>(buildUrl(`/api/chat/sessions/${encodeURIComponent(sessionId)}`));
 }
 
 export async function deleteChatSession(sessionId: string): Promise<void> {
-  return deleteJson(`/api/v1/chat/sessions/${encodeURIComponent(sessionId)}`);
+  return deleteJson(`/api/chat/sessions/${encodeURIComponent(sessionId)}`);
 }
 
 export async function reverseGeocodeLocation(
   payload: ReverseGeocodeRequest
 ): Promise<ReverseGeocodeResponse> {
-  return postJson<ReverseGeocodeResponse>("/api/v1/location/reverse-geocode", payload);
+  return postJson<ReverseGeocodeResponse>("/api/location/reverse-geocode", payload);
 }

@@ -22,7 +22,7 @@
 新会话首条消息发送
   -> 前端再次请求浏览器定位
   -> 若与缓存位置等价，则直接复用缓存中的地区信息
-  -> 否则 POST /api/v1/location/reverse-geocode
+  -> 否则 POST /api/location/reverse-geocode
   -> 后端调用高德 /v3/geocode/regeo
   -> 返回 province/city/district/township/formatted_address
   -> 前端把 location 注入 POST /api/chat/sessions
@@ -67,7 +67,7 @@
 接口地址：
 
 ```text
-POST /api/v1/location/reverse-geocode
+POST /api/location/reverse-geocode
 ```
 
 请求体：
@@ -122,7 +122,7 @@ POST /api/v1/location/reverse-geocode
 `location.py` 暴露了：
 
 ```text
-POST /api/v1/location/reverse-geocode
+POST /api/location/reverse-geocode
 ```
 
 这个接口只做两件事：

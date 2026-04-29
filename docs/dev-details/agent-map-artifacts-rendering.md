@@ -31,7 +31,7 @@ assistant markdown text
 页面加载历史会话或最终刷新会话详情时，调用：
 
 ```text
-GET /api/v1/chat/sessions/{session_id}
+GET /api/chat/sessions/{session_id}
 ```
 
 后端返回的 `ChatSessionDetail` 中，地图相关字段是：

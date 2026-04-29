@@ -11,7 +11,7 @@ from app.api.deps import get_container
 from app.core.container import AppContainer
 from app.protocol.messages import ArcadeShopDetailDto, PagedArcadeResponse
 
-router = APIRouter(prefix="/api/v1/arcades", tags=["arcades"])
+router = APIRouter(prefix="/api/arcades", tags=["arcades"])
 
 @router.get("", response_model=PagedArcadeResponse)
 def list_arcades(

@@ -189,7 +189,7 @@ async def dispatch_chat_session(
     return ChatSessionDispatchDto(session_id=session_id, status="running")
 
 
-@router.get("/v1/chat/sessions", response_model=list[ChatSessionSummaryDto])
+@router.get("/chat/sessions", response_model=list[ChatSessionSummaryDto])
 def list_chat_sessions(
     limit: int = Query(default=40, ge=1, le=200),
     container: AppContainer = Depends(get_container),
@@ -198,7 +198,7 @@ def list_chat_sessions(
     return [_to_summary(state) for state in sessions if state.turns]
 
 
-@router.get("/v1/chat/sessions/{session_id}", response_model=ChatSessionDetailDto)
+@router.get("/chat/sessions/{session_id}", response_model=ChatSessionDetailDto)
 def get_chat_session(
     session_id: str,
     container: AppContainer = Depends(get_container),
@@ -209,7 +209,7 @@ def get_chat_session(
     return _to_detail(session, container=container)
 
 
-@router.delete("/v1/chat/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/chat/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_chat_session(
     session_id: str,
     container: AppContainer = Depends(get_container),

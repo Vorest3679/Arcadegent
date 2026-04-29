@@ -8,7 +8,7 @@ from app.api.deps import get_container
 from app.core.container import AppContainer
 from app.protocol.messages import ReverseGeocodeRequest, ReverseGeocodeResponse
 
-router = APIRouter(prefix="/api/v1/location", tags=["location"])
+router = APIRouter(prefix="/api/location", tags=["location"])
 
 
 @router.post("/reverse-geocode", response_model=ReverseGeocodeResponse)

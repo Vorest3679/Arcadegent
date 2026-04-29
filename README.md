@@ -396,18 +396,18 @@ SSE 事件流依赖长连接，Nginx 配置里 `/api/stream/` 已关闭 bufferin
 ## API 概览
 
 - `GET /health`：健康检查、数据加载状态、tool provider 和 MCP discovery 状态
-- `GET /api/v1/arcades`：机厅列表、筛选、排序和分页
-- `GET /api/v1/arcades/{source_id}`：机厅详情
-- `GET /api/v1/regions/provinces`：省份列表
-- `GET /api/v1/regions/cities`：城市列表，参数 `province_code`
-- `GET /api/v1/regions/counties`：区县列表，参数 `city_code`
-- `POST /api/v1/location/reverse-geocode`：浏览器坐标逆地理编码
+- `GET /api/arcades`：机厅列表、筛选、排序和分页
+- `GET /api/arcades/{source_id}`：机厅详情
+- `GET /api/regions/provinces`：省份列表
+- `GET /api/regions/cities`：城市列表，参数 `province_code`
+- `GET /api/regions/counties`：区县列表，参数 `city_code`
+- `POST /api/location/reverse-geocode`：浏览器坐标逆地理编码
 - `POST /api/chat`：同步 Agent 对话入口
 - `POST /api/chat/sessions`：异步派发 Agent 会话，前端默认使用
 - `GET /api/stream/{session_id}`：SSE 实时事件流，支持 `last_event_id` 和 `Last-Event-ID`
-- `GET /api/v1/chat/sessions`：历史会话列表
-- `GET /api/v1/chat/sessions/{session_id}`：会话详情、历史 turns、地图 artifacts
-- `DELETE /api/v1/chat/sessions/{session_id}`：删除会话
+- `GET /api/chat/sessions`：历史会话列表
+- `GET /api/chat/sessions/{session_id}`：会话详情、历史 turns、地图 artifacts
+- `DELETE /api/chat/sessions/{session_id}`：删除会话
 
 ## Agent 运行时
 

@@ -129,7 +129,7 @@ def _wait_for_session_status(
     deadline = time.monotonic() + timeout_seconds
     last_payload: dict[str, object] | None = None
     while time.monotonic() < deadline:
-        resp = client.get(f"/api/v1/chat/sessions/{session_id}")
+        resp = client.get(f"/api/chat/sessions/{session_id}")
         if resp.status_code == 200:
             payload = resp.json()
             if isinstance(payload, dict):
@@ -150,7 +150,7 @@ def test_health_arcades_and_chat(tmp_path: Path) -> None:
     assert health.json()["status"] == "ok"
     assert health.json()["mcp"]["enabled"] is False
 
-    listing = client.get("/api/v1/arcades", params={"keyword": "Gamma"})
+    listing = client.get("/api/arcades", params={"keyword": "Gamma"})
     assert listing.status_code == 200
     body = listing.json()
     assert body["total"] == 1
@@ -184,7 +184,7 @@ def test_arcade_list_enriches_geo_and_writes_cache(tmp_path: Path) -> None:
         "geocodes": [{"location": "121.475,31.228"}],
     }
 
-    resp = client.get("/api/v1/arcades")
+    resp = client.get("/api/arcades")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -214,16 +214,16 @@ def test_arcade_list_supports_shop_name_search_without_title_matches(tmp_path: P
         ],
     )
 
-    by_shop_name = client.get("/api/v1/arcades", params={"shop_name": "星际传奇"})
+    by_shop_name = client.get("/api/arcades", params={"shop_name": "星际传奇"})
     assert by_shop_name.status_code == 200
     assert by_shop_name.json()["total"] == 1
     assert by_shop_name.json()["items"][0]["source_id"] == 31
 
-    by_title_as_shop_name = client.get("/api/v1/arcades", params={"shop_name": "maimai"})
+    by_title_as_shop_name = client.get("/api/arcades", params={"shop_name": "maimai"})
     assert by_title_as_shop_name.status_code == 200
     assert by_title_as_shop_name.json()["total"] == 0
 
-    legacy_keyword = client.get("/api/v1/arcades", params={"keyword": "maimai"})
+    legacy_keyword = client.get("/api/arcades", params={"keyword": "maimai"})
     assert legacy_keyword.status_code == 200
     assert legacy_keyword.json()["total"] == 1
     assert legacy_keyword.json()["items"][0]["source_id"] == 32
@@ -258,7 +258,7 @@ def test_arcade_list_supports_title_name_filter(tmp_path: Path) -> None:
     )
 
     resp = client.get(
-        "/api/v1/arcades",
+        "/api/arcades",
         params={"shop_name": "星际传奇", "title_name": "CHUNITHM"},
     )
     assert resp.status_code == 200
@@ -289,7 +289,7 @@ def test_arcade_detail_returns_geo(tmp_path: Path) -> None:
         "geocodes": [{"location": "116.3974,39.9087"}],
     }
 
-    resp = client.get("/api/v1/arcades/22")
+    resp = client.get("/api/arcades/22")
 
     assert resp.status_code == 200
     assert resp.json()["geo"]["gcj02"]["lat"] == 39.9087
@@ -370,7 +370,7 @@ def test_chat_session_detail_supports_legacy_route_payload(tmp_path: Path) -> No
     )
     client = _build_client(tmp_path, session_store_path=session_store_path)
 
-    resp = client.get("/api/v1/chat/sessions/legacy-session")
+    resp = client.get("/api/chat/sessions/legacy-session")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -427,14 +427,14 @@ def test_chat_reuses_session_context(tmp_path: Path) -> None:
         assert second_payload["shops"]
         assert second_payload["shops"][0]["source_id"] == 10
 
-    sessions_resp = client.get("/api/v1/chat/sessions")
+    sessions_resp = client.get("/api/chat/sessions")
     assert sessions_resp.status_code == 200
     sessions = sessions_resp.json()
     assert sessions
     assert sessions[0]["session_id"] == session_id
     assert sessions[0]["turn_count"] >= 2
 
-    detail_resp = client.get(f"/api/v1/chat/sessions/{session_id}")
+    detail_resp = client.get(f"/api/chat/sessions/{session_id}")
     assert detail_resp.status_code == 200
     detail = detail_resp.json()
     assert detail["session_id"] == session_id
@@ -445,10 +445,10 @@ def test_chat_reuses_session_context(tmp_path: Path) -> None:
     assert turns[0]["role"] == "user"
     assert turns[-1]["role"] == "assistant"
 
-    delete_resp = client.delete(f"/api/v1/chat/sessions/{session_id}")
+    delete_resp = client.delete(f"/api/chat/sessions/{session_id}")
     assert delete_resp.status_code == 204
 
-    deleted_detail = client.get(f"/api/v1/chat/sessions/{session_id}")
+    deleted_detail = client.get(f"/api/chat/sessions/{session_id}")
     assert deleted_detail.status_code == 404
 
 
@@ -462,13 +462,13 @@ def test_chat_sessions_survive_app_restart(tmp_path: Path) -> None:
 
     restarted_client = _build_client(tmp_path, session_store_path=session_store_path)
 
-    sessions_resp = restarted_client.get("/api/v1/chat/sessions")
+    sessions_resp = restarted_client.get("/api/chat/sessions")
     assert sessions_resp.status_code == 200
     sessions = sessions_resp.json()
     assert sessions
     assert any(row["session_id"] == session_id for row in sessions)
 
-    detail_resp = restarted_client.get(f"/api/v1/chat/sessions/{session_id}")
+    detail_resp = restarted_client.get(f"/api/chat/sessions/{session_id}")
     assert detail_resp.status_code == 200
     detail = detail_resp.json()
     assert detail["session_id"] == session_id
@@ -519,7 +519,7 @@ def test_chat_dispatch_runs_in_background(tmp_path: Path) -> None:
     assert detail["turns"][0]["role"] == "user"
     assert detail["turns"][-1]["role"] == "assistant"
 
-    sessions_resp = client.get("/api/v1/chat/sessions")
+    sessions_resp = client.get("/api/chat/sessions")
     assert sessions_resp.status_code == 200
     sessions = sessions_resp.json()
     session_row = next(row for row in sessions if row["session_id"] == session_id)
@@ -582,7 +582,7 @@ def test_arcades_api_supports_title_quantity_sorting(tmp_path: Path) -> None:
     )
 
     resp = client.get(
-        "/api/v1/arcades",
+        "/api/arcades",
         params={
             "has_arcades": "true",
             "sort_by": "title_quantity",
@@ -622,7 +622,7 @@ def test_arcades_api_supports_distance_sorting(tmp_path: Path) -> None:
     )
 
     resp = client.get(
-        "/api/v1/arcades",
+        "/api/arcades",
         params={
             "has_arcades": "true",
             "sort_by": "distance",
