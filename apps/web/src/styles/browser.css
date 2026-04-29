@@ -188,6 +188,29 @@
   gap: 10px;
 }
 
+.browser-page-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.browser-page-input {
+  width: 52px;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  font: inherit;
+  text-align: center;
+  background: #fff;
+}
+
+.browser-page-input:disabled {
+  color: var(--muted);
+  background: #f7f9f7;
+}
+
 .browser-secondary-btn {
   min-height: 34px;
   border: 1px solid var(--line);

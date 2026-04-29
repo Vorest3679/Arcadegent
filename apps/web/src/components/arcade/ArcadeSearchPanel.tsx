@@ -1,4 +1,4 @@
-import type { FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { getArcadeGcjPoint } from "../../lib/amapCoords";
 import { useArcadeBrowserStore } from "../../stores/arcadeBrowserStore";
 import type { ArcadeSortBy, ArcadeSummary, SortOrder } from "../../types";
@@ -39,10 +39,40 @@ export function ArcadeSearchPanel({
   const setSortBy = useArcadeBrowserStore((state) => state.setSortBy);
   const setSortOrder = useArcadeBrowserStore((state) => state.setSortOrder);
   const setSortTitleName = useArcadeBrowserStore((state) => state.setSortTitleName);
+  const totalPages = Math.max(1, paged.total_pages);
+  const [pageInput, setPageInput] = useState(String(paged.page));
   const sortHint =
     sortBy === "title_quantity" && sortTitleName.trim()
       ? ` | ${sortTitleName.trim()} ${sortOrder.toUpperCase()}`
       : "";
+
+  useEffect(() => {
+    setPageInput(String(paged.page));
+  }, [paged.page]);
+
+  function submitPageInput(): void {
+    const parsedPage = Number.parseInt(pageInput, 10);
+    const nextPage = Number.isFinite(parsedPage)
+      ? Math.min(Math.max(parsedPage, 1), totalPages)
+      : paged.page;
+
+    setPageInput(String(nextPage));
+    if (nextPage !== paged.page && !loading) {
+      onSearchPage(nextPage);
+    }
+  }
+
+  function onPageInputKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitPageInput();
+      event.currentTarget.blur();
+    }
+    if (event.key === "Escape") {
+      setPageInput(String(paged.page));
+      event.currentTarget.blur();
+    }
+  }
 
   return (
     <section className="browser-card browser-controls">
@@ -179,8 +209,20 @@ export function ArcadeSearchPanel({
         >
           上一页
         </button>
-        <span>
-          第 {paged.page} / {Math.max(1, paged.total_pages)} 页
+        <span className="browser-page-control">
+          第
+          <input
+            aria-label="页码"
+            className="browser-page-input"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={pageInput}
+            disabled={loading || paged.total_pages === 0}
+            onChange={(event) => setPageInput(event.target.value.replace(/\D/g, ""))}
+            onBlur={submitPageInput}
+            onKeyDown={onPageInputKeyDown}
+          />
+          / {totalPages} 页
         </span>
         <button
           type="button"

@@ -80,7 +80,9 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 16px;
   min-height: 0;
   overflow: auto;
 }
@@ -92,12 +94,13 @@
 }
 
 .sidebar-session-wrap {
+  height: 76px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel-strong);
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 8px;
   align-items: stretch;
   transition: transform 0.18s ease, box-shadow 0.22s ease, border-color 0.22s ease;
 }
@@ -109,6 +112,8 @@
 
 .sidebar-session {
   width: 100%;
+  min-width: 0;
+  height: 100%;
   border: 0;
   border-radius: 12px;
   padding: 10px;
@@ -117,18 +122,26 @@
   cursor: pointer;
   font: inherit;
   display: grid;
-  gap: 5px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 4px;
 }
 
 .sidebar-session strong {
   font-size: 0.92rem;
   line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .sidebar-session small {
   color: var(--muted);
   font-size: 0.78rem;
   line-height: 1.3;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .sidebar-session-wrap.is-active {
@@ -137,8 +150,10 @@
 }
 
 .sidebar-session-delete {
-  width: 28px;
-  margin: 8px 8px 8px 0;
+  width: 36px;
+  height: 52px;
+  align-self: center;
+  margin: 0 8px 0 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff3ef;
