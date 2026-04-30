@@ -1,5 +1,6 @@
 services:
   backend:
+    image: localhost/arcadegent-backend:latest
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -22,6 +23,7 @@ services:
     restart: unless-stopped
 
   web:
+    image: localhost/arcadegent-web:latest
     build:
       context: .
       dockerfile: apps/web/Dockerfile
