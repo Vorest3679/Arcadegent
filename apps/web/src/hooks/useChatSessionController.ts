@@ -8,7 +8,6 @@ import {
 } from "../api/client";
 import { resolveClientLocationForSessionStart, warmupClientLocationCache } from "../lib/clientLocation";
 import { STREAM_EVENT_NAMES, toProgressText, toVisibleTurns } from "../lib/chatStream";
-import { syncViewModeInUrl } from "../lib/viewMode";
 import { useAppStore } from "../stores/appStore";
 import type {
   ChatMapArtifacts,
@@ -66,7 +65,6 @@ function coerceStreamRoute(data: Record<string, unknown>): RouteSummary | null {
 }
 
 export function useChatSessionController() {
-  const viewMode = useAppStore((state) => state.viewMode);
   const turns = useAppStore((state) => state.turns);
   const sending = useAppStore((state) => state.sending);
   const streamConnected = useAppStore((state) => state.streamConnected);
@@ -123,10 +121,6 @@ export function useChatSessionController() {
     void loadSessionList();
     void warmupClientLocationCache();
   }, []);
-
-  useEffect(() => {
-    syncViewModeInUrl(viewMode);
-  }, [viewMode]);
 
   useEffect(() => {
     return () => {

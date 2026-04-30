@@ -1,29 +1,34 @@
 import type { ViewMode } from "../types";
 
-export function normalizeViewMode(raw: string | null): ViewMode {
-  return raw === "arcades" ? "arcades" : "chat";
+const VIEW_MODE_PATHS: Record<ViewMode, string> = {
+  chat: "/",
+  arcades: "/arcades"
+};
+
+export function readViewModeFromPath(pathname: string): ViewMode {
+  return pathname === VIEW_MODE_PATHS.arcades || pathname.startsWith(`${VIEW_MODE_PATHS.arcades}/`)
+    ? "arcades"
+    : "chat";
 }
 
 export function readInitialViewMode(): ViewMode {
   if (typeof window === "undefined") {
     return "chat";
   }
-  return normalizeViewMode(new URLSearchParams(window.location.search).get("view"));
+  return readViewModeFromPath(window.location.pathname);
 }
 
-export function syncViewModeInUrl(viewMode: ViewMode): void {
+export function syncViewModeInUrl(viewMode: ViewMode, options: { replace?: boolean } = {}): void {
   if (typeof window === "undefined") {
     return;
   }
   const url = new URL(window.location.href);
-  if (viewMode === "chat") {
-    url.searchParams.delete("view");
-  } else {
-    url.searchParams.set("view", viewMode);
-  }
+  url.pathname = VIEW_MODE_PATHS[viewMode];
+  url.search = "";
   const nextHref = `${url.pathname}${url.search}${url.hash}`;
   const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   if (nextHref !== currentHref) {
-    window.history.replaceState({}, "", nextHref);
+    const action = options.replace ? "replaceState" : "pushState";
+    window.history[action]({}, "", nextHref);
   }
 }

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { StreamProgressItem } from "../lib/chatStream";
-import { readInitialViewMode } from "../lib/viewMode";
+import { readInitialViewMode, syncViewModeInUrl } from "../lib/viewMode";
 import type {
   ChatHistoryTurn,
   ChatMapArtifacts,
@@ -33,7 +33,7 @@ type AppStore = {
   streamItems: StreamProgressItem[];
   awaitingAssistant: boolean;
   activeMapArtifacts: ChatMapArtifacts | null;
-  setViewMode: (viewMode: ViewMode) => void;
+  setViewMode: (viewMode: ViewMode, options?: { replace?: boolean; syncUrl?: boolean }) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
   setSessions: (sessions: ChatSessionSummary[]) => void;
@@ -72,7 +72,12 @@ export const useAppStore = create<AppStore>((set) => ({
   streamItems: [],
   awaitingAssistant: false,
   activeMapArtifacts: null,
-  setViewMode: (viewMode) => set({ viewMode }),
+  setViewMode: (viewMode, options = {}) => {
+    if (options.syncUrl !== false) {
+      syncViewModeInUrl(viewMode, { replace: options.replace });
+    }
+    set({ viewMode });
+  },
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setSessions: (sessions) => set({ sessions }),

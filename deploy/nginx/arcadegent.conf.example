@@ -10,7 +10,20 @@ server {
     listen 80;
     server_name example.com;
 
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name example.com;
+
+    # Replace these paths with the certificates issued for your domain.
+    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
     client_max_body_size 10m;
+
+    add_header Permissions-Policy "geolocation=(self)" always;
 
     location = /health {
         proxy_pass http://arcadegent_backend;

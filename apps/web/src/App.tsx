@@ -1,8 +1,10 @@
+import { useEffect } from "react";
 import { AppSidebar } from "./components/AppSidebar";
 import { AppTopbar } from "./components/AppTopbar";
 import { ArcadeBrowser } from "./components/ArcadeBrowser";
 import { ChatPanel } from "./components/ChatPanel";
 import { useChatSessionController } from "./hooks/useChatSessionController";
+import { readInitialViewMode } from "./lib/viewMode";
 import { useAppStore } from "./stores/appStore";
 
 export function App() {
@@ -10,6 +12,15 @@ export function App() {
   const sidebarOpen = useAppStore((state) => state.sidebarOpen);
   const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
   const chat = useChatSessionController();
+
+  useEffect(() => {
+    function handlePopState() {
+      useAppStore.getState().setViewMode(readInitialViewMode(), { syncUrl: false });
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   return (
     <div className="app-shell">

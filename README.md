@@ -259,7 +259,7 @@ npm run dev
 打开：
 
 - Chat: `http://localhost:5173`
-- Arcade Explorer: `http://localhost:5173/?view=arcades`
+- Arcade Explorer: `http://localhost:5173/arcades`
 
 ## Docker 启动
 
@@ -384,6 +384,8 @@ docker compose down
 
 推荐的迁移形态是：Docker Compose 在服务器本机启动前后端，宿主机 Nginx 对外监听 `80/443`，并把 API、SSE 和静态页面分别反代到本机端口。
 
+浏览器定位在公网域名下要求 HTTPS 安全上下文；`localhost` 是开发例外。线上如果只用 `http://` 访问，浏览器通常不会弹出定位授权框，前端也就不会把 `client_location` 注入会话。请给域名配置 TLS 证书，并让 80 端口跳转到 443。部署示例里的 `Permissions-Policy: geolocation=(self)` 用于明确允许本站调用定位能力。
+
 1. 在服务器安装 Docker、Docker Compose plugin 和 Nginx。
 2. 上传代码、根目录 `.env`，以及私有数据目录；如果使用数据库读模型，则确认 `.env` 中数据库变量可用。
 3. 在项目根目录执行 `docker compose up -d --build`。
@@ -471,6 +473,7 @@ npm run test:e2e
 - 后端启动但无数据：检查 `ARCADE_DATA_JSONL` 是否存在，或访问 `/health` 看 `store` 状态。
 - Agent 回复 provider 错误：检查 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 和 `AGENT_PROVIDER_PROFILE`。
 - 高德 MCP 没有路线：访问 `/health`，查看 `mcp.servers.amap.available_tools`、`selected_route_tool`、`last_error`，必要时配置 `route_tool_name`。
+- 浏览器不弹定位授权：确认线上页面是 `https://` 打开，外层 Nginx 或 CDN 没有设置禁止定位的 `Permissions-Policy`，并在浏览器地址栏站点设置里清除旧的定位拒绝记录。
 - 前端地图不可用：检查 `VITE_AMAP_WEB_KEY` 是否是 Web JS API key，必要时配置 `VITE_AMAP_SECURITY_JS_CODE`。
 - 路线只有直线估算：通常是高德 MCP 和 REST 都不可用，检查 `AMAP_API_KEY`、额度、网络和 `/health`。
 - 前端跨域错误：确认 `.env` 里的 `CORS_ALLOW_ORIGINS` 包含当前 Vite 地址。

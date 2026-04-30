@@ -38,6 +38,16 @@
 - `apps/web/src/api/client.ts`
 - `apps/web/src/App.tsx`
 
+### 0. 浏览器定位前置条件
+
+浏览器的 `navigator.geolocation` 在公网域名下只会在 HTTPS 安全上下文中工作；`localhost` / `127.0.0.1` 是开发环境例外。线上如果通过 `http://` 打开页面，浏览器通常不会弹定位授权框，前端会按定位失败处理，最终不会向会话请求注入 `location`。
+
+部署时需要确认：
+
+- 站点用 `https://` 访问，80 端口跳转到 443。
+- 外层 Nginx、CDN 或 iframe 容器没有用 `Permissions-Policy` 禁止 `geolocation`。
+- 用户浏览器没有在站点设置里保留“拒绝定位”的旧权限。
+
 ### 1. 页面打开时预热缓存
 
 `App.tsx` 在初始化时调用 `warmupClientLocationCache()`，让页面打开后先做一次后台定位预热。
@@ -209,6 +219,7 @@ state.working_memory["client_location"]
 
 ## 降级与容错
 
+- 非 HTTPS 公网页面：浏览器不会弹定位授权，前端不会注入 location
 - 浏览器拒绝定位：前端会回退到缓存；没有缓存时则不注入 location
 - 高德逆地理失败：只保留经纬度，不阻塞发消息
 - 后端未配置 `AMAP_API_KEY`：`resolved=false`，聊天仍可继续
