@@ -17,6 +17,16 @@ apps/web/.env.local
 
 # Private data and runtime outputs
 data/
+.runtime_smoke/
+.tmp_pytest/
+.tmp_pytest_run/
+.tmp/
+output/
+test-results/
+
+# Supabase local CLI state; keep migrations tracked for deploy replay.
+supabase/.branches/
+supabase/.temp/
 
 # IDEs
 .vscode/
@@ -32,19 +42,12 @@ docs/issues/
 docs/others/
 docs/plans/
 
-.runtime_smoke/
-.tmp_pytest/
-.tmp_pytest_run/
 g:/
-.tmp
-output
 .DS_Store
 
-uv.lock
+/uv.lock
 tests/
 !backend/app/tests/
 !backend/app/tests/unit/
 backend/app/tests/unit/*
 !backend/app/tests/unit/test_arcade_geo_jsonl_enricher.py
-test-results/
-supabase/
