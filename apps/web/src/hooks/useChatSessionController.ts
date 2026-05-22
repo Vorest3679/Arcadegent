@@ -7,6 +7,11 @@ import {
   listChatSessions
 } from "../api/client";
 import { resolveClientLocationForSessionStart, warmupClientLocationCache } from "../lib/clientLocation";
+import {
+  getChatClientId,
+  readStoredActiveSessionId,
+  writeStoredActiveSessionId
+} from "../lib/chatSessionStorage";
 import { STREAM_EVENT_NAMES, toProgressText, toVisibleTurns } from "../lib/chatStream";
 import { useAppStore } from "../stores/appStore";
 import type {
@@ -82,6 +87,10 @@ export function useChatSessionController() {
   } = useStreamReply();
 
   const streamRef = useRef<EventSource | null>(null);
+  const clientIdRef = useRef("");
+  if (!clientIdRef.current) {
+    clientIdRef.current = getChatClientId();
+  }
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
@@ -118,7 +127,7 @@ export function useChatSessionController() {
   }, [awaitingAssistant, getStreamReplyTarget, streamReplyTarget, turns, writeStreamReplyTarget]);
 
   useEffect(() => {
-    void loadSessionList();
+    void loadSessionList(readStoredActiveSessionId() || undefined);
     void warmupClientLocationCache();
   }, []);
 
@@ -180,7 +189,7 @@ export function useChatSessionController() {
     store.setActiveSessionStatus("running");
     resetStreamReply();
 
-    const source = new EventSource(buildChatStreamUrl(sessionId));
+    const source = new EventSource(buildChatStreamUrl(sessionId, undefined, clientIdRef.current));
     streamRef.current = source;
 
     const handleEvent = (raw: Event) => {
@@ -315,6 +324,7 @@ export function useChatSessionController() {
     const store = useAppStore.getState();
 
     store.setActiveSessionId(sessionId);
+    writeStoredActiveSessionId(sessionId);
     store.setTurns(toVisibleTurns(detail.turns));
     store.setActiveSubagent(detail.active_subagent || null);
     store.setActiveSessionStatus(detail.status);
@@ -362,11 +372,12 @@ export function useChatSessionController() {
     store.setSessionsLoading(true);
 
     try {
-      const rows = await listChatSessions(60);
+      const rows = await listChatSessions(60, clientIdRef.current);
       const latestStore = useAppStore.getState();
       latestStore.setSessions(rows);
 
       if (!rows.length) {
+        writeStoredActiveSessionId(null);
         latestStore.setActiveSessionId(null);
         latestStore.setActiveSessionStatus(null);
         latestStore.setTurns([]);
@@ -416,7 +427,7 @@ export function useChatSessionController() {
     store.setChatError("");
 
     try {
-      const detail = await getChatSession(sessionId);
+      const detail = await getChatSession(sessionId, clientIdRef.current);
       applySessionDetail(sessionId, detail, { preserveStreamState, reconnectStream });
       return detail;
     } catch (err) {
@@ -444,6 +455,7 @@ export function useChatSessionController() {
     const store = useAppStore.getState();
     store.setViewMode("chat");
     store.resetActiveSessionState();
+    writeStoredActiveSessionId(null);
     store.setInputValue("");
     store.setChatError("");
     store.setSidebarOpen(false);
@@ -474,6 +486,7 @@ export function useChatSessionController() {
 
       store.setInputValue("");
       store.setActiveSessionId(sessionId);
+      writeStoredActiveSessionId(sessionId);
       store.setActiveSessionStatus("running");
       store.setActiveMapArtifacts(null);
       store.setAwaitingAssistant(true);
@@ -481,12 +494,14 @@ export function useChatSessionController() {
 
       const dispatched = await dispatchChatSession({
         session_id: sessionId,
+        client_id: clientIdRef.current,
         message,
         location: location ?? undefined,
         page_size: 5
       });
       const latestStore = useAppStore.getState();
       latestStore.setActiveSessionId(dispatched.session_id);
+      writeStoredActiveSessionId(dispatched.session_id);
       latestStore.setActiveSessionStatus(dispatched.status);
       startStream(dispatched.session_id);
       await loadSessionList(dispatched.session_id, { preserveStreamState: true });
@@ -495,6 +510,7 @@ export function useChatSessionController() {
       store.setChatError(err instanceof Error ? err.message : "发送失败");
       store.setInputValue(message);
       store.setActiveSessionId(previousSessionId);
+      writeStoredActiveSessionId(previousSessionId);
       store.setActiveSessionStatus(previousSessionStatus);
       store.setTurns((previous) => {
         const next = [...previous];
@@ -537,12 +553,13 @@ export function useChatSessionController() {
     currentState.setChatError("");
 
     try {
-      await deleteChatSession(sessionId);
+      await deleteChatSession(sessionId, clientIdRef.current);
       const store = useAppStore.getState();
       const isActive = store.activeSessionId === sessionId;
 
       if (isActive) {
         store.resetActiveSessionState();
+        writeStoredActiveSessionId(null);
         store.setStreamItems([]);
         resetStreamReply();
       }

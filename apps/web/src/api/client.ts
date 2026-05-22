@@ -81,8 +81,11 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
   return parseJsonResponse<T>(resp, path);
 }
 
-async function deleteJson(path: string): Promise<void> {
-  const resp = await fetch(buildUrl(path), { method: "DELETE" });
+async function deleteJson(
+  path: string,
+  query?: Record<string, string | number | boolean | undefined | null>
+): Promise<void> {
+  const resp = await fetch(buildUrl(path, query), { method: "DELETE" });
   if (!resp.ok) {
     throw new Error(`HTTP ${resp.status}: ${path}`);
   }
@@ -132,22 +135,25 @@ export async function dispatchChatSession(payload: ChatRequest): Promise<ChatSes
   return postJson<ChatSessionDispatch>("/api/chat/sessions", payload);
 }
 
-export function buildChatStreamUrl(sessionId: string, lastEventId?: number): string {
+export function buildChatStreamUrl(sessionId: string, lastEventId?: number, clientId?: string): string {
   return buildUrl(`/api/stream/${encodeURIComponent(sessionId)}`, {
+    client_id: clientId,
     last_event_id: typeof lastEventId === "number" ? lastEventId : undefined
   });
 }
 
-export async function listChatSessions(limit = 40): Promise<ChatSessionSummary[]> {
-  return fetchJson<ChatSessionSummary[]>(buildUrl("/api/chat/sessions", { limit }));
+export async function listChatSessions(limit = 40, clientId?: string): Promise<ChatSessionSummary[]> {
+  return fetchJson<ChatSessionSummary[]>(buildUrl("/api/chat/sessions", { limit, client_id: clientId }));
 }
 
-export async function getChatSession(sessionId: string): Promise<ChatSessionDetail> {
-  return fetchJson<ChatSessionDetail>(buildUrl(`/api/chat/sessions/${encodeURIComponent(sessionId)}`));
+export async function getChatSession(sessionId: string, clientId?: string): Promise<ChatSessionDetail> {
+  return fetchJson<ChatSessionDetail>(
+    buildUrl(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, { client_id: clientId })
+  );
 }
 
-export async function deleteChatSession(sessionId: string): Promise<void> {
-  return deleteJson(`/api/chat/sessions/${encodeURIComponent(sessionId)}`);
+export async function deleteChatSession(sessionId: string, clientId?: string): Promise<void> {
+  return deleteJson(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, { client_id: clientId });
 }
 
 export async function reverseGeocodeLocation(

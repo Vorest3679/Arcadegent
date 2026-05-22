@@ -478,6 +478,60 @@ def test_chat_sessions_survive_app_restart(tmp_path: Path) -> None:
     assert detail["turns"][-1]["role"] == "assistant"
 
 
+def test_chat_sessions_are_scoped_by_client_id(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)
+
+    first_resp = client.post(
+        "/api/chat",
+        json={"client_id": "client-a", "message": "find Gamma", "page_size": 3},
+    )
+    assert first_resp.status_code == 200
+    first_session_id = first_resp.json()["session_id"]
+
+    second_resp = client.post(
+        "/api/chat",
+        json={"client_id": "client-b", "message": "find Gamma", "page_size": 3},
+    )
+    assert second_resp.status_code == 200
+    second_session_id = second_resp.json()["session_id"]
+
+    first_list_resp = client.get("/api/chat/sessions", params={"client_id": "client-a"})
+    assert first_list_resp.status_code == 200
+    assert [row["session_id"] for row in first_list_resp.json()] == [first_session_id]
+
+    second_list_resp = client.get("/api/chat/sessions", params={"client_id": "client-b"})
+    assert second_list_resp.status_code == 200
+    assert [row["session_id"] for row in second_list_resp.json()] == [second_session_id]
+
+    wrong_detail_resp = client.get(
+        f"/api/chat/sessions/{first_session_id}",
+        params={"client_id": "client-b"},
+    )
+    assert wrong_detail_resp.status_code == 404
+
+    wrong_continue_resp = client.post(
+        "/api/chat",
+        json={
+            "client_id": "client-b",
+            "session_id": first_session_id,
+            "message": "continue from another client",
+        },
+    )
+    assert wrong_continue_resp.status_code == 404
+
+    wrong_delete_resp = client.delete(
+        f"/api/chat/sessions/{first_session_id}",
+        params={"client_id": "client-b"},
+    )
+    assert wrong_delete_resp.status_code == 404
+
+    right_delete_resp = client.delete(
+        f"/api/chat/sessions/{first_session_id}",
+        params={"client_id": "client-a"},
+    )
+    assert right_delete_resp.status_code == 204
+
+
 def test_second_turn_resets_stream_replay_buffer(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
 

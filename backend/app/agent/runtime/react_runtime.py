@@ -18,6 +18,7 @@ from app.agent.runtime.session_state import (
     AgentSessionState,
     AgentTurn,
     SessionStateStore,
+    SessionOwnershipError,
     append_worker_run,
     ensure_working_memory_shape,
     get_working_memory_artifact,
@@ -134,9 +135,10 @@ class ReactRuntime:
         self._arcade_payload_mapper = arcade_payload_mapper
         self._max_steps = max(2, max_steps)
 
-    def prepare_session(self, session_id: str) -> None:
+    def prepare_session(self, session_id: str, *, client_id: str | None = None) -> None:
         """Clear stale stream events and mark the session as running for a fresh turn."""
         state = self._session_store.get_or_create(session_id)
+        self._bind_client_scope(state, client_id)
         state.status = "running"
         state.last_error = None
         state.updated_at = _utc_now_iso()
@@ -148,6 +150,7 @@ class ReactRuntime:
         """Session-aware chat execution with main-agent orchestration."""
         session_id = request.session_id or f"s_{uuid4().hex[:12]}"
         state = self._session_store.get_or_create(session_id)
+        self._bind_client_scope(state, request.client_id)
         state.status = "running"
         state.last_error = None
         state.updated_at = _utc_now_iso()
@@ -1052,6 +1055,15 @@ class ReactRuntime:
         prepared.pop("reply", None)
         prepared["assistant_token_emitted"] = False
         return prepared
+
+    def _bind_client_scope(self, state: AgentSessionState, client_id: str | None) -> None:
+        """Attach a browser-owned client id to new sessions and reject cross-client writes."""
+        if client_id is None:
+            return
+        if state.client_id is not None and state.client_id != client_id:
+            raise SessionOwnershipError(state.session_id)
+        if state.client_id is None:
+            state.client_id = client_id
 
     def _append_turn(self, state: AgentSessionState, turn: AgentTurn, *, persist: bool = True) -> None:
         """Append a turn to the session state, with optional persistence."""

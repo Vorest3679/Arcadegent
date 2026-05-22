@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_container
@@ -24,10 +24,14 @@ def _format_sse(*, event: str, data: dict, event_id: int) -> str:
 async def stream(
     session_id: str,
     request: Request,
+    client_id: str | None = Query(default=None, min_length=1, max_length=128),
     last_event_id: int | None = Query(default=None),
     last_event_id_header: str | None = Header(default=None, alias="Last-Event-ID"),
     container: AppContainer = Depends(get_container),
 ) -> StreamingResponse:
+    if client_id is not None and container.session_store.snapshot(session_id, client_id=client_id) is None:
+        raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
+
     async def iterator() -> AsyncIterator[str]:
         cursor = last_event_id
         if cursor is None and isinstance(last_event_id_header, str):
@@ -52,7 +56,7 @@ async def stream(
                         return
                 waited = 0
             else:
-                snapshot = container.session_store.snapshot(session_id)
+                snapshot = container.session_store.snapshot(session_id, client_id=client_id)
                 session_status = snapshot.status if snapshot is not None else None
                 if session_status in {"completed", "failed"}:
                     return

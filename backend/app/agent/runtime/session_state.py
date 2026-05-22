@@ -17,6 +17,14 @@ SessionStatus = Literal["idle", "running", "completed", "failed"]
 logger = logging.getLogger(__name__)
 
 
+class SessionOwnershipError(RuntimeError):
+    """Raised when a request tries to mutate a session owned by another client."""
+
+    def __init__(self, session_id: str) -> None:
+        super().__init__(f"session '{session_id}' is not available for this client")
+        self.session_id = session_id
+
+
 def _utc_now_iso() -> str:
     """Generate UTC ISO8601 timestamp used by chat session snapshots."""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -42,6 +50,7 @@ class AgentSessionState:
     """Session-level execution state and memory."""
 
     session_id: str
+    client_id: str | None = None
     turn_index: int = 0
     active_subagent: str = "main_agent"
     intent: str = "search"
@@ -108,26 +117,33 @@ class SessionStateStore:
                 self._states[session_id] = state
             return deepcopy(state)
 
-    def snapshot(self, session_id: str) -> AgentSessionState | None:
+    def snapshot(self, session_id: str, *, client_id: str | None = None) -> AgentSessionState | None:
         """Return deep-copied session state for API serialization."""
         with self._lock:
             state = self._states.get(session_id)
             if state is None:
                 return None
+            if not _client_can_access(state, client_id):
+                return None
             return deepcopy(state)
 
-    def list_snapshots(self, *, limit: int = 50) -> list[AgentSessionState]:
+    def list_snapshots(self, *, limit: int = 50, client_id: str | None = None) -> list[AgentSessionState]:
         """Return recent session snapshots sorted by updated_at desc."""
         safe_limit = max(1, min(limit, 200))
         with self._lock:
-            snapshots = [deepcopy(item) for item in self._states.values()]
+            snapshots = [
+                deepcopy(item)
+                for item in self._states.values()
+                if _client_matches_list_scope(item, client_id)
+            ]
         snapshots.sort(key=lambda item: item.updated_at, reverse=True)
         return snapshots[:safe_limit]
 
-    def delete(self, session_id: str) -> bool:
+    def delete(self, session_id: str, *, client_id: str | None = None) -> bool:
         """Delete one session by id; return True when it existed."""
         with self._lock:
-            existed = session_id in self._states
+            state = self._states.get(session_id)
+            existed = state is not None and _client_can_access(state, client_id)
             if existed:
                 del self._states[session_id]
                 self._flush_to_disk_locked()
@@ -179,6 +195,7 @@ class SessionStateStore:
 def _state_to_dict(state: AgentSessionState) -> dict[str, Any]:
     return {
         "session_id": state.session_id,
+        "client_id": state.client_id,
         "turn_index": state.turn_index,
         "active_subagent": state.active_subagent,
         "intent": state.intent,
@@ -221,6 +238,7 @@ def _state_from_dict(raw: object) -> AgentSessionState | None:
     working_memory = ensure_working_memory_shape(raw.get("working_memory"))
     return AgentSessionState(
         session_id=session_id,
+        client_id=raw.get("client_id") if isinstance(raw.get("client_id"), str) else None,
         turn_index=_coerce_int(raw.get("turn_index"), default=0),
         active_subagent=_coerce_active_agent(raw.get("active_subagent"), default="main_agent"),
         intent=_coerce_str(raw.get("intent"), default="search"),
@@ -292,3 +310,15 @@ def _coerce_active_agent(raw: object, *, default: str) -> str:
         "navigation_agent": "navigation_worker",
     }
     return mapping.get(raw, raw)
+
+
+def _client_can_access(state: AgentSessionState, client_id: str | None) -> bool:
+    if client_id is None:
+        return True
+    return state.client_id in {None, client_id}
+
+
+def _client_matches_list_scope(state: AgentSessionState, client_id: str | None) -> bool:
+    if client_id is None:
+        return True
+    return state.client_id == client_id

@@ -188,6 +188,7 @@ class ChatRequest(BaseModel):
     """Chat entrypoint request used by the orchestrator."""
 
     session_id: str | None = None
+    client_id: str | None = Field(default=None, min_length=1, max_length=128)
     message: str = Field(..., min_length=1, max_length=2000)
     intent: IntentType | None = None
     shop_id: int | None = None

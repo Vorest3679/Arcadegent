@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from app.infra.observability.logger import get_logger
 from app.agent.runtime.react_runtime import ReactRuntime
+from app.agent.runtime.session_state import SessionOwnershipError
 from app.protocol.messages import ChatRequest, ChatResponse
 
 
@@ -40,7 +41,7 @@ class Orchestrator:
         self._reserve_session(normalized.session_id)
         try:
             if normalized.session_id:
-                self._react_runtime.prepare_session(normalized.session_id)
+                self._react_runtime.prepare_session(normalized.session_id, client_id=normalized.client_id)
             return await self._react_runtime.run_chat(normalized)
         finally:
             self._release_session(normalized.session_id)
@@ -50,15 +51,19 @@ class Orchestrator:
         分派聊天在后台任务中执行，并立即返回。"""
         normalized = self._normalize_request(request)
         self._reserve_session(normalized.session_id)
-        if normalized.session_id:
-            self._react_runtime.prepare_session(normalized.session_id)
-        task = asyncio.create_task(
-            self._run_chat_in_background(normalized),
-            name=f"chat-run-{normalized.session_id}",
-        )
-        with self._lock:
-            self._background_tasks[normalized.session_id] = task
-        return normalized.session_id
+        try:
+            if normalized.session_id:
+                self._react_runtime.prepare_session(normalized.session_id, client_id=normalized.client_id)
+            task = asyncio.create_task(
+                self._run_chat_in_background(normalized),
+                name=f"chat-run-{normalized.session_id}",
+            )
+            with self._lock:
+                self._background_tasks[normalized.session_id] = task
+            return normalized.session_id
+        except Exception:
+            self._release_session(normalized.session_id)
+            raise
 
     def is_session_running(self, session_id: str) -> bool:
         with self._lock:
