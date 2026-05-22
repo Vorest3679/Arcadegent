@@ -111,6 +111,7 @@ export type ReverseGeocodeResponse = ClientLocationContext & {
 
 export type ChatRequest = {
   session_id?: string;
+  client_id?: string;
   message: string;
   intent?: IntentType;
   shop_id?: number;
