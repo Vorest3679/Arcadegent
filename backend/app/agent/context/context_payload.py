@@ -33,6 +33,8 @@ class QueryContextDto(BaseModel):
     """Structured search/navigation query constraints."""
 
     keyword: str | None = None
+    shop_name: str | None = None
+    title_name: str | None = None
     province_code: str | None = None
     province_name: str | None = None
     city_code: str | None = None
@@ -82,6 +84,23 @@ class ShopBasicContextDto(BaseModel):
     distance_m: int | None = None
 
 
+class ShopHoursContextDto(BaseModel):
+    """Business-hour facts for one shop."""
+
+    start_time: int | float | str | None = None
+    end_time: int | float | str | None = None
+    hours_text: str | None = None
+    open_overnight: bool | None = None
+
+
+class ShopPricingContextDto(BaseModel):
+    """Token pricing facts for one shop."""
+
+    price: str | int | float | None = None
+    token_price_rmb: float | None = None
+    token_price_text: str | None = None
+
+
 class ShopTransportContextDto(BaseModel):
     """Transport guidance block for one shop."""
 
@@ -94,6 +113,10 @@ class ShopArcadeContextDto(BaseModel):
     title_name: str | None = None
     quantity: int | None = None
     version: str | None = None
+    coin: str | int | float | None = None
+    eacoin: str | int | float | None = None
+    base_play_price_rmb: float | None = None
+    base_play_price_text: str | None = None
     comment: str | None = None
 
 
@@ -108,6 +131,8 @@ class ShopDetailContextDto(BaseModel):
 
     source_id: int | None = None
     basic: ShopBasicContextDto
+    hours: ShopHoursContextDto | None = None
+    pricing: ShopPricingContextDto | None = None
     transport: ShopTransportContextDto | None = None
     arcades: list[ShopArcadeContextDto] = Field(default_factory=list)
     comment: ShopCommentContextDto | None = None

@@ -18,6 +18,8 @@ class DBQueryTool:
         self,
         *,
         keyword: str | None,
+        shop_name: str | None,
+        title_name: str | None,
         province_code: str | None,
         city_code: str | None,
         county_code: str | None,
@@ -36,6 +38,8 @@ class DBQueryTool:
     ) -> tuple[list[dict[str, Any]], int]:
         return self._store.list_shops(
             keyword=keyword,
+            shop_name=shop_name,
+            title_name=title_name,
             province_code=province_code,
             city_code=city_code,
             county_code=county_code,

@@ -17,6 +17,18 @@
         "description": "Search keyword, e.g. `maimai` or `广州 maimai`.",
         "title": "Keyword"
       },
+      "shop_name": {
+        "anyOf": [{ "type": "string" }, { "type": "null" }],
+        "default": null,
+        "description": "Filter by arcade shop name only, e.g. `菲游乐闵行龙湖天街店`. Use this when the user asks about a specific shop.",
+        "title": "Shop Name"
+      },
+      "title_name": {
+        "anyOf": [{ "type": "string" }, { "type": "null" }],
+        "default": null,
+        "description": "Filter by title/machine name only, e.g. `maimai`, `CHUNITHM`, or `头文字D`.",
+        "title": "Title Name"
+      },
       "province_code": {
         "anyOf": [{ "type": "string" }, { "type": "null" }],
         "default": null,

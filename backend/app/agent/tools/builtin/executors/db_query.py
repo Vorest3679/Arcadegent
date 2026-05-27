@@ -155,6 +155,8 @@ def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]
 
     rows, total = tool.search_shops(
         keyword=args.get("keyword"),
+        shop_name=args.get("shop_name"),
+        title_name=args.get("title_name"),
         province_code=province_code,
         city_code=city_code,
         county_code=county_code,
@@ -172,8 +174,10 @@ def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]
         origin_coord_system=origin_coord_system,
     )
     logger.info(
-        "db_query_tool.filters keyword=%s province_code=%s city_code=%s county_code=%s province_name=%s city_name=%s county_name=%s has_arcades=%s sort_by=%s sort_order=%s sort_title_name=%s origin_lng=%s origin_lat=%s origin_coord_system=%s page=%s page_size=%s total=%s",
+        "db_query_tool.filters keyword=%s shop_name=%s title_name=%s province_code=%s city_code=%s county_code=%s province_name=%s city_name=%s county_name=%s has_arcades=%s sort_by=%s sort_order=%s sort_title_name=%s origin_lng=%s origin_lat=%s origin_coord_system=%s page=%s page_size=%s total=%s",
         short_text(args.get("keyword")),
+        short_text(args.get("shop_name")),
+        short_text(args.get("title_name")),
         province_code,
         city_code,
         county_code,
@@ -196,6 +200,8 @@ def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]
         "total": total,
         "query": {
             "keyword": args.get("keyword"),
+            "shop_name": args.get("shop_name"),
+            "title_name": args.get("title_name"),
             "province_code": province_code,
             "city_code": city_code,
             "county_code": county_code,
