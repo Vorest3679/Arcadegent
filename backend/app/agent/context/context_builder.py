@@ -20,6 +20,8 @@ from app.agent.context.context_payload import (
     ShopBasicContextDto,
     ShopCommentContextDto,
     ShopDetailContextDto,
+    ShopHoursContextDto,
+    ShopPricingContextDto,
     ShopTransportContextDto,
 )
 from app.agent.runtime.session_state import AgentSessionState, AgentTurn, get_working_memory_artifact
@@ -539,6 +541,12 @@ class ContextBuilder:
                     request.keyword,
                 )
             ),
+            shop_name=self._string_or_none(
+                query_meta.get("shop_name") if isinstance(query_meta, dict) else None
+            ),
+            title_name=self._string_or_none(
+                query_meta.get("title_name") if isinstance(query_meta, dict) else None
+            ),
             province_code=self._string_or_none(
                 self._first_non_empty(
                     (query_meta.get("province_code") if isinstance(query_meta, dict) else None),
@@ -635,8 +643,13 @@ class ContextBuilder:
                     arcade_count=self._int_or_none(row.get("arcade_count")),
                     distance_m=self._int_or_none(row.get("distance_m")),
                 ),
+                hours=self._build_hours_context(row),
+                pricing=self._build_pricing_context(row),
                 transport=self._build_transport_context(row),
-                arcades=self._build_arcade_details(row),
+                arcades=self._build_arcade_details(
+                    row,
+                    token_price_rmb=self._float_or_none(row.get("price")),
+                ),
                 comment=self._build_comment_context(row),
             )
             compact = self._compact_value(detail.model_dump(mode="json", exclude_none=True))
@@ -674,21 +687,86 @@ class ContextBuilder:
             return None
         return ShopTransportContextDto(summary=transport)
 
+    def _build_hours_context(self, row: dict[str, Any]) -> ShopHoursContextDto | None:
+        start_raw = row.get("start_time")
+        end_raw = row.get("end_time")
+        start_hour = self._float_or_none(start_raw)
+        end_hour = self._float_or_none(end_raw)
+        if start_raw in (None, "") and end_raw in (None, ""):
+            return None
+
+        start_text = self._format_hour(start_hour)
+        end_text = self._format_hour(end_hour)
+        hours_text = None
+        if start_text and end_text:
+            hours_text = f"{start_text}-{end_text}"
+        elif start_text:
+            hours_text = f"{start_text} 起"
+        elif end_text:
+            hours_text = f"{end_text} 止"
+
+        open_overnight = None
+        if start_hour is not None and end_hour is not None:
+            open_overnight = end_hour >= 24 or end_hour < start_hour
+
+        return ShopHoursContextDto(
+            start_time=start_raw if isinstance(start_raw, (int, float, str)) else None,
+            end_time=end_raw if isinstance(end_raw, (int, float, str)) else None,
+            hours_text=hours_text,
+            open_overnight=open_overnight,
+        )
+
+    def _build_pricing_context(self, row: dict[str, Any]) -> ShopPricingContextDto | None:
+        price_raw = row.get("price")
+        token_price = self._float_or_none(price_raw)
+        if price_raw in (None, "") and token_price is None:
+            return None
+
+        token_price_text = None
+        if token_price is not None:
+            token_price_text = f"{self._format_money(token_price)} 元/币"
+
+        return ShopPricingContextDto(
+            price=price_raw if isinstance(price_raw, (int, float, str)) else None,
+            token_price_rmb=token_price,
+            token_price_text=token_price_text,
+        )
+
     def _build_comment_context(self, row: dict[str, Any]) -> ShopCommentContextDto | None:
         comment = self._string_or_none(row.get("comment"))
         if comment is None:
             return None
         return ShopCommentContextDto(summary=comment)
 
-    def _build_arcade_details(self, row: dict[str, Any]) -> list[ShopArcadeContextDto]:
+    def _build_arcade_details(
+        self,
+        row: dict[str, Any],
+        *,
+        token_price_rmb: float | None,
+    ) -> list[ShopArcadeContextDto]:
         items: list[ShopArcadeContextDto] = []
         for raw in row.get("arcades") or []:
             if not isinstance(raw, dict):
                 continue
+            coin = self._float_or_none(raw.get("coin"))
+            base_play_price = None
+            base_play_price_text = None
+            if (
+                token_price_rmb is not None
+                and token_price_rmb > 0
+                and coin is not None
+                and coin > 0
+            ):
+                base_play_price = round(token_price_rmb * coin, 2)
+                base_play_price_text = f"{self._format_money(base_play_price)} 元/局"
             item = ShopArcadeContextDto(
                 title_name=self._string_or_none(raw.get("title_name")),
                 quantity=self._int_or_none(raw.get("quantity")),
                 version=self._string_or_none(raw.get("version")),
+                coin=raw.get("coin") if isinstance(raw.get("coin"), (int, float, str)) else None,
+                eacoin=raw.get("eacoin") if isinstance(raw.get("eacoin"), (int, float, str)) else None,
+                base_play_price_rmb=base_play_price,
+                base_play_price_text=base_play_price_text,
                 comment=self._string_or_none(raw.get("comment")),
             )
             compact = self._compact_value(item.model_dump(mode="json", exclude_none=True))
@@ -702,6 +780,10 @@ class ContextBuilder:
         sections: list[str] = ["basic"]
         if self._string_or_none(row.get("transport")):
             sections.append("transport")
+        if row.get("start_time") not in (None, "") or row.get("end_time") not in (None, ""):
+            sections.append("hours")
+        if row.get("price") not in (None, ""):
+            sections.append("pricing")
         if isinstance(row.get("arcades"), list) and row.get("arcades"):
             sections.append("arcades")
         if self._string_or_none(row.get("comment")):
@@ -754,6 +836,21 @@ class ContextBuilder:
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    def _format_hour(self, value: float | None) -> str | None:
+        if value is None:
+            return None
+        prefix = "次日" if value >= 24 else ""
+        normalized = value % 24
+        hour = int(normalized)
+        minute = int(round((normalized - hour) * 60))
+        if minute == 60:
+            hour = (hour + 1) % 24
+            minute = 0
+        return f"{prefix}{hour:02d}:{minute:02d}"
+
+    def _format_money(self, value: float) -> str:
+        return f"{value:.2f}".rstrip("0").rstrip(".")
 
     def _bool_or_none(self, value: Any) -> bool | None:
         if isinstance(value, bool):
