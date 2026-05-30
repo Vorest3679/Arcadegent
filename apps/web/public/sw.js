@@ -1,13 +1,11 @@
-const APP_CACHE = "arcadegent-app-v1";
-const RUNTIME_CACHE = "arcadegent-runtime-v1";
+const APP_CACHE = "arcadegent-app-v1.1";
+const RUNTIME_CACHE = "arcadegent-runtime-v1.1";
 const CORE_ASSETS = [
   "/",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
-  "/icons/maskable-512.png",
-  "/icons/arcadegent-icon.svg",
-  "/icons/arcadegent-maskable.svg"
+  "/icons/maskable-512.png"
 ];
 const BYPASS_PATH_PREFIXES = ["/api/", "/health"];
 
