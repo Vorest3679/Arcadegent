@@ -5,8 +5,8 @@ import { MarkdownMessage } from "./MarkdownMessage";
 import { AgentMapCard } from "./map/AgentMapCard";
 
 const QUICK_PROMPTS = [
-  "帮我找北京适合下班后去的机厅",
-  "我在广州，推荐几家有 maimai 的店",
+  "帮我找找适合下班后去的机厅",
+  "南京最多机台的机厅是哪家？",
   "给我一条从当前位置到最近机厅的路线建议"
 ];
 
