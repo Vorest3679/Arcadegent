@@ -34,9 +34,7 @@ supabase/.temp/
 .qoder
 
 # Private/local-only workspaces
-scripts/
-!backend/scripts/
-!backend/scripts/enrich_arcade_geo_jsonl.py
+backend/scripts/
 docs/instruction/
 docs/issues/
 docs/others/
