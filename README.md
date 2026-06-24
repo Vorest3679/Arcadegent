@@ -1,6 +1,6 @@
 # Arcadegent
 
-Arcadegent 是一个面向音游机厅检索、Agent 问答和路线建议的全栈应用。当前公开仓库保留应用运行、Agent 编排、地图渲染和部署相关代码；数据采集、运行缓存和生产密钥不随仓库公开。
+Arcadegent 是一个面向音游机厅检索、Agent 问答和路线建议的全栈应用。当前公开仓库保留应用运行、Agent 编排、地图渲染、数据采集脚本和部署相关代码；抓取产物、运行缓存和生产密钥不随仓库公开。
 注：数据源来自于全国音游地图：https://map.bemanicn.com/ 
 
 QQ群：1091316877
@@ -37,10 +37,11 @@ apps/web/tests/e2e/              Playwright 端到端测试
 deploy/nginx/                    生产 Nginx 示例配置
 docs/guidings/                   对外指南文档
 docs/dev-details/                对外开发细节文档
+scripts/                         数据采集、ETL、Supabase 同步和素材补全脚本
 docker-compose.yml               本地或服务器 compose 编排
 ```
 
-`data/`、运行缓存、私有脚本、计划/issue 归档、数据库迁移草案和真实环境变量按敏感资料处理，不随公开仓库发布。需要本地运行完整数据链路时，请自行准备兼容的 JSONL 数据源或配置后端可访问的数据库。
+`data/`、运行缓存、计划/issue 归档、数据库迁移草案和真实环境变量按敏感资料处理，不随公开仓库发布。需要本地运行完整数据链路时，可以使用 `scripts/` 自行抓取并生成兼容 JSONL 数据源，或配置后端可访问的数据库。
 
 ## 文档入口
 
@@ -430,13 +431,84 @@ Agent 配置分为几层：
 
 ## 数据说明
 
-公开仓库不包含真实机厅数据、抓取产物、运行缓存或生产数据库迁移。后端只要求运行时提供兼容的数据源：
+公开仓库包含数据采集和 ETL 脚本，但不包含真实机厅数据、抓取产物、运行缓存或生产数据库迁移。后端只要求运行时提供兼容的数据源：
 
 - JSONL 模式：设置 `ARCADE_DATA_SOURCE=jsonl`，并让 `ARCADE_DATA_JSONL` 指向本地私有 JSONL 文件。
 - 数据库模式：设置 `ARCADE_DATA_SOURCE=supabase`，并配置对应数据库连接变量。
 - Docker 模式：宿主机 `data/` 会挂载到后端容器的 `/app/data`，适合放置本地私有 JSONL 和运行缓存。
 
 所有密钥只写入本机 `.env` 或部署环境变量，不提交到仓库。
+
+## 数据采集脚本
+
+`scripts/` 目录提供从全国音游地图公开页面采集机厅数据、规范化为应用读模型、以及可选同步到 Supabase 的脚本。脚本会把输出写入 `data/` 下的本地产物目录，这些产物默认不提交到仓库。
+
+### 1. 抓取原始数据
+
+```bash
+python scripts/scrape_bemanicn.py
+```
+
+常用调试参数：
+
+```bash
+python scripts/scrape_bemanicn.py --max-shops 30
+python scripts/scrape_bemanicn.py --province-code 310000000000 --workers 4
+```
+
+默认输出目录为 `data/raw/bemanicn/`，主要产物包括：
+
+- `province_index.json`
+- `shops_seed.jsonl`
+- `shops_detail_raw.jsonl`
+- `shops_detail_props.jsonl`
+- `shops_detail.jsonl`
+- `run_summary.json`
+
+### 2. 规范化 ETL 产物
+
+```bash
+python scripts/etl/ingest_arcades.py \
+  --input data/raw/bemanicn/shops_detail.jsonl \
+  --run-summary data/raw/bemanicn/run_summary.json \
+  --output-dir data/processed/bemanicn \
+  --sqlite-path data/processed/arcadegent.db
+```
+
+ETL 会输出 `arcade_shops.jsonl`、`arcade_titles.jsonl`、`bad_rows.jsonl`、`qa_report.json` 和 `ingest_run.json`。如果本地只使用 JSONL 读模型，可以将后端环境变量指向规范化后的机厅文件：
+
+```dotenv
+ARCADE_DATA_SOURCE=jsonl
+ARCADE_DATA_JSONL=data/processed/bemanicn/arcade_shops.jsonl
+```
+
+### 3. 可选同步到 Supabase
+
+确认 `.env` 中已经配置 `SUPABASE_URL` 和 `SUPABASE_SERVICE_ROLE_KEY` 后，可以先 dry run：
+
+```bash
+python scripts/etl/sync_supabase.py --dry-run
+```
+
+确认数量无误后再执行同步：
+
+```bash
+python scripts/etl/sync_supabase.py
+```
+
+`sync_supabase.py` 会读取 `data/processed/bemanicn/` 下的规范化产物，并通过 Supabase PostgREST 写入 `arcade_shops`、`arcade_titles` 和 `ingest_runs`。`SUPABASE_SERVICE_ROLE_KEY` 只允许在后端或本地脚本环境使用，不要写入前端环境变量或提交到仓库。
+
+### 4. 可选补全机种图标
+
+如需下载机种标题图标并把本地文件字段合并回 JSON / JSONL，可使用：
+
+```bash
+python scripts/add_title_icons.py \
+  --input data/processed/bemanicn/arcade_titles.jsonl \
+  --output data/processed/bemanicn/arcade_titles.icons.jsonl
+```
+
+图标默认写入 `data/assets/bemanicn/titles/`，也属于本地生成产物，不随仓库公开。
 
 ## 常用开发命令
 
