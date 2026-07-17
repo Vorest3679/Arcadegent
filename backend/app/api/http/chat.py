@@ -199,7 +199,7 @@ def list_chat_sessions(
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
     container: AppContainer = Depends(get_container),
 ) -> list[ChatSessionSummaryDto]:
-    sessions = container.session_store.list_snapshots(limit=limit, client_id=client_id)
+    sessions = container.session_store.list_sessions(limit=limit, client_id=client_id)
     return [_to_summary(state) for state in sessions if state.turns or state.status == "running"]
 
 
@@ -209,7 +209,7 @@ def get_chat_session(
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
     container: AppContainer = Depends(get_container),
 ) -> ChatSessionDetailDto:
-    session = container.session_store.snapshot(session_id, client_id=client_id)
+    session = container.session_store.get_session(session_id, client_id=client_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
     return _to_detail(session, container=container)
@@ -221,12 +221,12 @@ def delete_chat_session(
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
     container: AppContainer = Depends(get_container),
 ) -> Response:
-    session = container.session_store.snapshot(session_id, client_id=client_id)
+    session = container.session_store.get_session(session_id, client_id=client_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
     if container.orchestrator.is_session_running(session_id):
         raise HTTPException(status_code=409, detail=f"session '{session_id}' is currently running")
-    deleted = container.session_store.delete(session_id, client_id=client_id)
+    deleted = container.session_store.delete_session(session_id, client_id=client_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

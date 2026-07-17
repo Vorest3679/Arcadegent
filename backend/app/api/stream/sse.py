@@ -29,7 +29,7 @@ async def stream(
     last_event_id_header: str | None = Header(default=None, alias="Last-Event-ID"),
     container: AppContainer = Depends(get_container),
 ) -> StreamingResponse:
-    if client_id is not None and container.session_store.snapshot(session_id, client_id=client_id) is None:
+    if client_id is not None and container.session_store.get_session(session_id, client_id=client_id) is None:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
 
     async def iterator() -> AsyncIterator[str]:
@@ -56,8 +56,8 @@ async def stream(
                         return
                 waited = 0
             else:
-                snapshot = container.session_store.snapshot(session_id, client_id=client_id)
-                session_status = snapshot.status if snapshot is not None else None
+                session = container.session_store.get_session(session_id, client_id=client_id)
+                session_status = session.status if session is not None else None
                 if session_status in {"completed", "failed"}:
                     return
                 yield ": keep-alive\n\n"

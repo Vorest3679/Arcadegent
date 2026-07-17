@@ -17,13 +17,13 @@ from app.agent.runtime.loop_guard import LoopGuard
 from app.agent.runtime.session_state import (
     AgentSessionState,
     AgentTurn,
-    SessionStateStore,
     SessionOwnershipError,
     append_worker_run,
     ensure_working_memory_shape,
     get_working_memory_artifact,
     set_working_memory_artifact,
 )
+from app.infra.db.protocols import SessionStateRepository
 from app.agent.subagents.subagent_builder import SubAgentBuilder, SubAgentProfile
 from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
 from app.infra.observability.logger import get_logger
@@ -121,7 +121,7 @@ class ReactRuntime:
         subagent_builder: SubAgentBuilder,
         tool_registry: ToolRegistry,
         provider_adapter: ProviderAdapter,
-        session_store: SessionStateStore,
+        session_store: SessionStateRepository,
         replay_buffer: ReplayBuffer,
         arcade_payload_mapper: ArcadePayloadMapper,
         max_steps: int,
@@ -137,25 +137,25 @@ class ReactRuntime:
 
     def prepare_session(self, session_id: str, *, client_id: str | None = None) -> None:
         """Clear stale stream events and mark the session as running for a fresh turn."""
-        state = self._session_store.get_or_create(session_id)
+        state = self._session_store.get_or_create_session(session_id)
         self._bind_client_scope(state, client_id)
         state.status = "running"
         state.last_error = None
         state.updated_at = _utc_now_iso()
         state.working_memory = ensure_working_memory_shape(state.working_memory)
-        self._session_store.save(state)
+        self._session_store.save_session(state)
         self._replay_buffer.reset(session_id)
 
     async def run_chat(self, request: ChatRequest) -> ChatResponse:
         """Session-aware chat execution with main-agent orchestration."""
         session_id = request.session_id or f"s_{uuid4().hex[:12]}"
-        state = self._session_store.get_or_create(session_id)
+        state = self._session_store.get_or_create_session(session_id)
         self._bind_client_scope(state, request.client_id)
         state.status = "running"
         state.last_error = None
         state.updated_at = _utc_now_iso()
         state.working_memory = ensure_working_memory_shape(state.working_memory)
-        self._session_store.save(state)
+        self._session_store.save_session(state)
         try:
             return await self._run_chat_session(request=request, session_id=session_id, state=state)
         except Exception as exc:
@@ -164,7 +164,7 @@ class ReactRuntime:
             state.last_error = error_message
             state.working_memory["last_error"] = {"message": error_message}
             state.updated_at = _utc_now_iso()
-            self._session_store.save(state)
+            self._session_store.save_session(state)
             self._replay_buffer.append(
                 session_id,
                 "session.failed",
@@ -280,7 +280,7 @@ class ReactRuntime:
         state.last_error = None
         state.working_memory["reply"] = final_text
         state.updated_at = _utc_now_iso()
-        self._session_store.save(state)
+        self._session_store.save_session(state)
         self._replay_buffer.append(
             session_id,
             "assistant.completed",
@@ -495,7 +495,7 @@ class ReactRuntime:
 
         previous_agent = state.active_subagent
         state.active_subagent = worker_name
-        self._session_store.save(state)
+        self._session_store.save_session(state)
         self._emit_agent_changed(
             session_id=session_id,
             from_agent=previous_agent,
@@ -623,7 +623,7 @@ class ReactRuntime:
 
         state.active_subagent = "main_agent"
         state.updated_at = _utc_now_iso()
-        self._session_store.save(state)
+        self._session_store.save_session(state)
         self._emit_agent_changed(
             session_id=session_id,
             from_agent=worker_name,
@@ -1070,7 +1070,7 @@ class ReactRuntime:
         state.turns.append(turn)
         state.updated_at = _utc_now_iso()
         if persist:
-            self._session_store.save(state)
+            self._session_store.save_session(state)
 
     def _emit_agent_changed(
         self,

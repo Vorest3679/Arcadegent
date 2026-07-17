@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Literal, Protocol
 
+from app.agent.runtime.session_state import AgentSessionState
+
 
 class ArcadeRepository(Protocol):
     """Read contract for arcade shop repositories."""
@@ -51,4 +53,41 @@ class ArcadeRepository(Protocol):
 
     def list_counties(self, city_code: str) -> list[dict[str, str]]:
         """Return county choices under a city code."""
+        ...
+
+
+class SessionStateRepository(Protocol):
+    """Persistence contract for the ReAct runtime's session store."""
+
+    def health(self) -> dict[str, Any]:
+        """Return diagnostics for the active repository backend."""
+        ...
+
+    def get_or_create_session(self, session_id: str) -> AgentSessionState:
+        """Fetch an existing session or return a fresh, unpersisted one."""
+        ...
+
+    def get_session(self, session_id: str, *, client_id: str | None = None) -> AgentSessionState | None:
+        """Return a deep-copied session state for API serialization.
+
+        Applies client-scope access control: if ``client_id`` is provided and
+        does not match the session's owner, returns ``None``.
+        """
+        ...
+
+    def list_sessions(
+        self,
+        *,
+        limit: int = 50,
+        client_id: str | None = None,
+    ) -> list[AgentSessionState]:
+        """Return recent sessions sorted by updated_at desc, optionally filtered by client."""
+        ...
+
+    def delete_session(self, session_id: str, *, client_id: str | None = None) -> bool:
+        """Delete one session by id; return True when it existed."""
+        ...
+
+    def save_session(self, state: AgentSessionState) -> None:
+        """Persist one mutated session state."""
         ...

@@ -2,19 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Literal
 
 import httpx
 
-
-@dataclass(frozen=True)
-class SupabaseRepositoryConfig:
-    """Connection settings for Supabase runtime reads."""
-
-    url: str
-    key: str
-    timeout_seconds: float = 8.0
+from app.infra.db.online.config import SupabaseRepositoryConfig
 
 
 class SupabaseArcadeRepository:
@@ -110,11 +102,18 @@ class SupabaseArcadeRepository:
                 legacy_payload,
             )
         if not isinstance(payload, dict):
-            raise RuntimeError("supabase_rpc_invalid_response:arcadegent_search_shops")
+            raise RuntimeError(
+                f"supabase_rpc_invalid_response:arcadegent_search_shops:{type(payload).__name__}"
+            )
         rows = payload.get("rows")
         total = payload.get("total")
         if not isinstance(rows, list) or not isinstance(total, int):
-            raise RuntimeError("supabase_rpc_invalid_shape:arcadegent_search_shops")
+            import json
+
+            preview = json.dumps(payload, ensure_ascii=False)[:500]
+            raise RuntimeError(
+                f"supabase_rpc_invalid_shape:arcadegent_search_shops:{preview}"
+            )
         return [row for row in rows if isinstance(row, dict)], total
 
     def get_shop(self, source_id: int) -> dict[str, Any] | None:

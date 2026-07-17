@@ -10,7 +10,6 @@ from app.agent.events.replay_buffer import ReplayBuffer
 from app.agent.llm.llm_config import resolve_llm_config
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.react_runtime import ReactRuntime
-from app.agent.runtime.session_state import SessionStateStore
 from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.runtime.orchestrator import Orchestrator
 from app.agent.tools.builtin import BuiltinToolProvider
@@ -18,9 +17,9 @@ from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.mcp_gateway import MCPToolGateway, build_mcp_server_configs
 from app.agent.tools.registry import ToolRegistry
 from app.core.config import Settings
-from app.infra.db.local_store import LocalArcadeStore
-from app.infra.db.repository import ArcadeRepository
-from app.infra.db.supabase_repository import SupabaseArcadeRepository, SupabaseRepositoryConfig
+from app.infra.db.local import LocalArcadeStore
+from app.infra.db.online import SupabaseArcadeRepository, SupabaseRepositoryConfig, build_supabase_session_repository
+from app.infra.db.protocols import ArcadeRepository, SessionStateRepository
 from app.services.arcade_geo_resolver import ArcadeGeoResolver, ArcadeGeoResolverConfig
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
 from app.services.amap_reverse_geocoder import AMapReverseGeocoder, AMapReverseGeocoderConfig
@@ -33,7 +32,7 @@ class AppContainer:
     settings: Settings
     store: ArcadeRepository
     replay_buffer: ReplayBuffer
-    session_store: SessionStateStore
+    session_store: SessionStateRepository
     reverse_geocoder: AMapReverseGeocoder
     arcade_geo_resolver: ArcadeGeoResolver
     arcade_payload_mapper: ArcadePayloadMapper
@@ -96,7 +95,7 @@ def build_container(settings: Settings) -> AppContainer:
         permission_checker=permission_checker,
         strict_schema=True,
     )
-    session_store = SessionStateStore(storage_path=settings.chat_session_store_path)
+    session_store = _build_session_repository(settings)
     react_runtime = ReactRuntime(
         context_builder=context_builder,
         subagent_builder=subagent_builder,
@@ -121,6 +120,20 @@ def build_container(settings: Settings) -> AppContainer:
         tool_registry=tool_registry,
         react_runtime=react_runtime,
         orchestrator=orchestrator,
+    )
+
+
+def _build_session_repository(settings: Settings) -> SessionStateRepository:
+    if not settings.supabase_url or not settings.supabase_service_role_key:
+        raise ValueError(
+            "supabase_session_store_config_required: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"
+        )
+    return build_supabase_session_repository(
+        SupabaseRepositoryConfig(
+            url=settings.supabase_url,
+            key=settings.supabase_service_role_key,
+            timeout_seconds=settings.supabase_timeout_seconds,
+        )
     )
 
 

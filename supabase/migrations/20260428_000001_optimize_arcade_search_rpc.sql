@@ -2,6 +2,12 @@
 -- The previous RPC aggregated all arcade_titles for every shop before ranking,
 -- which made small pages pay the cost of building thousands of JSON arrays.
 
+-- Remove the old 16-parameter overload so PostgREST can resolve the new signature.
+drop function if exists arcadegent_search_shops(
+  text, text, text, text, text, text, text, boolean, integer, integer,
+  text, text, text, double precision, double precision, text
+);
+
 create or replace function arcadegent_search_shops(
   p_keyword text default null,
   p_shop_name text default null,

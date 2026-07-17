@@ -1,20 +1,15 @@
-"""Session state store for multi-turn ReAct execution."""
+"""Runtime session models and helpers for multi-turn ReAct execution."""
 
 from __future__ import annotations
 
-import json
-import logging
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
-from threading import Lock
 from typing import Any, Literal
 
 TurnRole = Literal["user", "assistant", "tool"]
 TurnScope = Literal["conversation", "worker"]
 SessionStatus = Literal["idle", "running", "completed", "failed"]
-logger = logging.getLogger(__name__)
 
 
 class SessionOwnershipError(RuntimeError):
@@ -64,8 +59,9 @@ class AgentSessionState:
 
 
 def ensure_working_memory_shape(memory: dict[str, Any] | None) -> dict[str, Any]:
-    """Normalize working memory into the phase-1 hub layout. 
-    This allows flexible schema evolution while ensuring the expected sub-keys exist for easier access."""
+    """Normalize working memory into the phase-1 hub layout.
+    This allows flexible schema evolution while ensuring the expected sub-keys exist for easier access.
+    """
     normalized = memory if isinstance(memory, dict) else {}
     artifacts = normalized.get("artifacts")
     if not isinstance(artifacts, dict):
@@ -100,99 +96,11 @@ def append_worker_run(memory: dict[str, Any] | None, run: dict[str, Any], *, max
         del worker_runs[:-max_entries]
 
 
-class SessionStateStore:
-    """Thread-safe session store keyed by session_id with optional disk persistence."""
+def state_to_dict(state: AgentSessionState) -> dict[str, Any]:
+    """Serialize a runtime state to the legacy local JSON shape.
 
-    def __init__(self, *, storage_path: Path | None = None) -> None:
-        self._lock = Lock()
-        self._states: dict[str, AgentSessionState] = {}
-        self._storage_path = storage_path
-        self._load_from_disk()
-
-    def get_or_create(self, session_id: str) -> AgentSessionState:
-        with self._lock:
-            state = self._states.get(session_id)
-            if state is None:
-                state = AgentSessionState(session_id=session_id)
-                self._states[session_id] = state
-            return deepcopy(state)
-
-    def snapshot(self, session_id: str, *, client_id: str | None = None) -> AgentSessionState | None:
-        """Return deep-copied session state for API serialization."""
-        with self._lock:
-            state = self._states.get(session_id)
-            if state is None:
-                return None
-            if not _client_can_access(state, client_id):
-                return None
-            return deepcopy(state)
-
-    def list_snapshots(self, *, limit: int = 50, client_id: str | None = None) -> list[AgentSessionState]:
-        """Return recent session snapshots sorted by updated_at desc."""
-        safe_limit = max(1, min(limit, 200))
-        with self._lock:
-            snapshots = [
-                deepcopy(item)
-                for item in self._states.values()
-                if _client_matches_list_scope(item, client_id)
-            ]
-        snapshots.sort(key=lambda item: item.updated_at, reverse=True)
-        return snapshots[:safe_limit]
-
-    def delete(self, session_id: str, *, client_id: str | None = None) -> bool:
-        """Delete one session by id; return True when it existed."""
-        with self._lock:
-            state = self._states.get(session_id)
-            existed = state is not None and _client_can_access(state, client_id)
-            if existed:
-                del self._states[session_id]
-                self._flush_to_disk_locked()
-            return existed
-
-    def save(self, state: AgentSessionState) -> None:
-        """Persist one mutated session state and flush the snapshot file."""
-        with self._lock:
-            self._states[state.session_id] = deepcopy(state)
-            self._flush_to_disk_locked()
-
-    def _load_from_disk(self) -> None:
-        if self._storage_path is None or not self._storage_path.exists():
-            return
-        try:
-            payload = json.loads(self._storage_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("session_store.load_failed path=%s error=%s", self._storage_path, exc)
-            return
-
-        raw_sessions = payload.get("sessions") if isinstance(payload, dict) else payload
-        if not isinstance(raw_sessions, list):
-            logger.warning("session_store.load_invalid path=%s", self._storage_path)
-            return
-
-        restored: dict[str, AgentSessionState] = {}
-        for raw_state in raw_sessions:
-            state = _state_from_dict(raw_state)
-            if state is not None:
-                restored[state.session_id] = state
-        self._states = restored
-
-    def _flush_to_disk_locked(self) -> None:
-        if self._storage_path is None: #if no storage path, skip disk flush
-            return
-        # Sort sessions by updated_at desc for better readability, though not required for loading.
-        snapshots = sorted(self._states.values(), key=lambda item: item.updated_at, reverse=True)
-        # save the whole session list as one JSON object to simplify loading and future schema evolution, even if it may rewrite unchanged sessions
-        payload = {
-            "version": 1,
-            "sessions": [_state_to_dict(item) for item in snapshots],
-        }
-        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = self._storage_path.with_name(f"{self._storage_path.name}.tmp")
-        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        temp_path.replace(self._storage_path)
-
-
-def _state_to_dict(state: AgentSessionState) -> dict[str, Any]:
+    Kept for migration scripts and any future export use.
+    """
     return {
         "session_id": state.session_id,
         "client_id": state.client_id,
@@ -222,7 +130,8 @@ def _state_to_dict(state: AgentSessionState) -> dict[str, Any]:
     }
 
 
-def _state_from_dict(raw: object) -> AgentSessionState | None:
+def state_from_dict(raw: object) -> AgentSessionState | None:
+    """Deserialize a runtime state from the legacy local JSON shape."""
     if not isinstance(raw, dict):
         return None
     session_id = raw.get("session_id")

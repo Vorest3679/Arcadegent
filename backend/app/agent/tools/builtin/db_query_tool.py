@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 from typing import Any
 
-from app.infra.db.repository import ArcadeRepository
+from app.infra.db.protocols import ArcadeRepository
 
 
 class DBQueryTool:

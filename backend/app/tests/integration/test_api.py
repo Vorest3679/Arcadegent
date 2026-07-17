@@ -11,6 +11,78 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.agent.runtime.session_state import (
+    AgentSessionState,
+    _client_can_access,
+    _client_matches_list_scope,
+    state_from_dict,
+)
+from app.infra.db.protocols import SessionStateRepository
+
+
+class InMemorySessionStateRepository:
+    """Test-only in-memory implementation of SessionStateRepository."""
+
+    def __init__(self) -> None:
+        self._states: dict[str, AgentSessionState] = {}
+
+    def health(self) -> dict[str, object]:
+        return {"backend": "memory", "rows": len(self._states)}
+
+    def get_or_create_session(self, session_id: str) -> AgentSessionState:
+        from copy import deepcopy
+
+        state = self._states.get(session_id)
+        if state is None:
+            state = AgentSessionState(session_id=session_id)
+            self._states[session_id] = state
+        return deepcopy(state)
+
+    def get_session(self, session_id: str, *, client_id: str | None = None) -> AgentSessionState | None:
+        from copy import deepcopy
+
+        state = self._states.get(session_id)
+        if state is None:
+            return None
+        if not _client_can_access(state, client_id):
+            return None
+        return deepcopy(state)
+
+    def list_sessions(
+        self,
+        *,
+        limit: int = 50,
+        client_id: str | None = None,
+    ) -> list[AgentSessionState]:
+        from copy import deepcopy
+
+        snapshots = [
+            deepcopy(state)
+            for state in self._states.values()
+            if _client_matches_list_scope(state, client_id)
+        ]
+        snapshots.sort(key=lambda s: s.updated_at, reverse=True)
+        return snapshots[:limit]
+
+    def delete_session(self, session_id: str, *, client_id: str | None = None) -> bool:
+        state = self._states.get(session_id)
+        if state is None:
+            return False
+        if not _client_can_access(state, client_id):
+            return False
+        del self._states[session_id]
+        return True
+
+    def save_session(self, state: AgentSessionState) -> None:
+        from copy import deepcopy
+
+        self._states[state.session_id] = deepcopy(state)
+
+    def seed(self, state: AgentSessionState) -> None:
+        from copy import deepcopy
+
+        self._states[state.session_id] = deepcopy(state)
+
 
 def _seed_data(path: Path) -> None:
     rows = [
@@ -59,7 +131,7 @@ def _clear_llm_env() -> None:
 def _build_client(
     tmp_path: Path,
     *,
-    session_store_path: Path | None = None,
+    session_store: SessionStateRepository | None = None,
     mcp_servers_dir: Path | None = None,
     cache_path: Path | None = None,
 ) -> TestClient:
@@ -71,17 +143,24 @@ def _build_client(
     _clear_llm_env()
     os.environ["ARCADE_DATA_JSONL"] = str(data_path)
     os.environ["ARCADE_DATA_SOURCE"] = "jsonl"
-    os.environ["CHAT_SESSION_STORE_PATH"] = str(session_store_path or (tmp_path / "chat_sessions.json"))
     os.environ["ARCADE_GEO_CACHE_PATH"] = str(cache_path or (tmp_path / "arcade_geo_cache.json"))
     os.environ["LLM_API_KEY"] = ""
     os.environ["LLM_BASE_URL"] = "https://api.example.invalid/v1"
     os.environ["LLM_MODEL"] = "test-model"
     os.environ["AMAP_API_KEY"] = "test-amap-key"
     os.environ["MCP_SERVERS_DIR"] = str(mcp_servers_dir or empty_mcp_dir)
+    os.environ["SUPABASE_URL"] = "https://example.supabase.co"
+    os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "test-key"
+
+    store = session_store or InMemorySessionStateRepository()
+    import app.core.container as container_module
+
+    container_module._build_session_repository = lambda _settings: store
 
     from app.main import create_app
 
     client = TestClient(create_app())
+    client.app.state.container.session_store = store  # type: ignore[attr-defined]
     client.__enter__()
     return client
 
@@ -90,7 +169,7 @@ def _build_client_with_rows(
     tmp_path: Path,
     rows: list[dict[str, object]],
     *,
-    session_store_path: Path | None = None,
+    session_store: SessionStateRepository | None = None,
     cache_path: Path | None = None,
 ) -> TestClient:
     data_path = tmp_path / "shops_custom.jsonl"
@@ -104,17 +183,24 @@ def _build_client_with_rows(
     _clear_llm_env()
     os.environ["ARCADE_DATA_JSONL"] = str(data_path)
     os.environ["ARCADE_DATA_SOURCE"] = "jsonl"
-    os.environ["CHAT_SESSION_STORE_PATH"] = str(session_store_path or (tmp_path / "chat_sessions.json"))
     os.environ["ARCADE_GEO_CACHE_PATH"] = str(cache_path or (tmp_path / "arcade_geo_cache.json"))
     os.environ["LLM_API_KEY"] = ""
     os.environ["LLM_BASE_URL"] = "https://api.example.invalid/v1"
     os.environ["LLM_MODEL"] = "test-model"
     os.environ["AMAP_API_KEY"] = "test-amap-key"
     os.environ["MCP_SERVERS_DIR"] = str(empty_mcp_dir)
+    os.environ["SUPABASE_URL"] = "https://example.supabase.co"
+    os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "test-key"
+
+    store = session_store or InMemorySessionStateRepository()
+    import app.core.container as container_module
+
+    container_module._build_session_repository = lambda _settings: store
 
     from app.main import create_app
 
     client = TestClient(create_app())
+    client.app.state.container.session_store = store  # type: ignore[attr-defined]
     client.__enter__()
     return client
 
@@ -368,7 +454,13 @@ def test_chat_session_detail_supports_legacy_route_payload(tmp_path: Path) -> No
         ),
         encoding="utf-8",
     )
-    client = _build_client(tmp_path, session_store_path=session_store_path)
+    fake_store = InMemorySessionStateRepository()
+    legacy = json.loads(session_store_path.read_text(encoding="utf-8"))
+    for raw in legacy.get("sessions", []):
+        state = state_from_dict(raw)
+        if state is not None:
+            fake_store.seed(state)
+    client = _build_client(tmp_path, session_store=fake_store)
 
     resp = client.get("/api/chat/sessions/legacy-session")
 
@@ -453,14 +545,14 @@ def test_chat_reuses_session_context(tmp_path: Path) -> None:
 
 
 def test_chat_sessions_survive_app_restart(tmp_path: Path) -> None:
-    session_store_path = tmp_path / "persisted_chat_sessions.json"
-    client = _build_client(tmp_path, session_store_path=session_store_path)
+    shared_store = InMemorySessionStateRepository()
+    client = _build_client(tmp_path, session_store=shared_store)
 
     first_resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
     assert first_resp.status_code == 200
     session_id = first_resp.json()["session_id"]
 
-    restarted_client = _build_client(tmp_path, session_store_path=session_store_path)
+    restarted_client = _build_client(tmp_path, session_store=shared_store)
 
     sessions_resp = restarted_client.get("/api/chat/sessions")
     assert sessions_resp.status_code == 200

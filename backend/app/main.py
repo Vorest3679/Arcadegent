@@ -20,6 +20,7 @@ from app.core.lifecycle import on_shutdown, on_startup
 from app.infra.observability.logger import get_logger, setup_logging
 
 access_logger = get_logger("uvicorn.access")
+logger = get_logger(__name__)
 
 # 装配应用：配置、日志、依赖容器、生命周期、路由
 def create_app() -> FastAPI:
@@ -49,6 +50,12 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+    logger.info(
+        "CORS configured: origins=%s, arcade_data_source=%s, supabase_url=%s",
+        settings.cors_allow_origins,
+        settings.arcade_data_source,
+        "<set>" if settings.supabase_url else "<unset>",
     )
 
     @app.middleware("http")

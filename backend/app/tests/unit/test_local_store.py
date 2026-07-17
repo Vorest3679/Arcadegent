@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.infra.db.local_store import LocalArcadeStore
+from app.infra.db.local import LocalArcadeStore
 
 
 def _write_rows(path: Path) -> None:
