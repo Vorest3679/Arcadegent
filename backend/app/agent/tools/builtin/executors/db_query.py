@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from app.agent.tools.builtin.executor_utils import as_region_code_or_name, short_text
+from app.agent.tools.builtin.geo_outlier_filter import filter_geo_outliers, row_coordinates
 from app.agent.tools.builtin.provider import BuiltinToolContext
 from app.infra.observability.logger import get_logger
 
@@ -119,6 +120,42 @@ def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, 
     return args, hydrated
 
 
+def _apply_geo_outlier_filter(
+    rows: list[dict[str, Any]],
+    origin_lng: Any,
+    origin_lat: Any,
+) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], float]]]:
+    """Remove shops implausibly far from the query's geographic context.
+
+    With a valid origin (hydrated for nearby/distance queries) rows are
+    filtered by distance to that origin; otherwise the result set's own
+    median center is used, so foreign-province artifacts are dropped even
+    when the client location is unknown.
+    """
+    if not rows:
+        return rows, []
+
+    lng = _coerce_float(origin_lng)
+    lat = _coerce_float(origin_lat)
+    origin = None
+    if lng is not None and lat is not None and -180 <= lng <= 180 and -90 <= lat <= 90:
+        origin = (lng, lat)
+
+    if origin is not None:
+        kept, removed = filter_geo_outliers(rows, origin=origin)
+        removed_ids = {id(row) for row, _ in removed}
+        located_count = sum(1 for row in rows if row_coordinates(row) is not None)
+        if located_count and len(removed_ids) == located_count:
+            # Every located row is far from the origin — the origin is
+            # likely unrelated to this query (e.g. user asking about
+            # another city). Fall back to cluster mode instead of
+            # returning an empty result.
+            return filter_geo_outliers(rows)
+        return kept, removed
+
+    return filter_geo_outliers(rows)
+
+
 def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]:
     """Normalize region filters and execute the store-backed shop query."""
     tool = context.require("db_query_tool")
@@ -195,9 +232,24 @@ def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]
         args["page_size"],
         total,
     )
+    rows, removed_outliers = _apply_geo_outlier_filter(rows, origin_lng, origin_lat)
+    if removed_outliers:
+        logger.info(
+            "db_query_tool.geo_outliers removed=%s details=%s",
+            len(removed_outliers),
+            [
+                {
+                    "source_id": row.get("source_id"),
+                    "name": short_text(str(row.get("name") or "")),
+                    "distance_km": round(distance_km, 1),
+                }
+                for row, distance_km in removed_outliers
+            ],
+        )
     return {
         "shops": rows,
         "total": total,
+        "geo_outliers_removed": len(removed_outliers),
         "query": {
             "keyword": args.get("keyword"),
             "shop_name": args.get("shop_name"),
