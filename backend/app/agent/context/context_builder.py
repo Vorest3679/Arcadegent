@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -288,10 +289,15 @@ class ContextBuilder:
         return "\n".join(lines)
 
     def _tail_turns(self, turns: list[AgentTurn], *, scope: str) -> list[AgentTurn]:
-        scoped_turns = [turn for turn in turns if turn.scope == scope]
+        scoped_turns = [turn for turn in turns if turn.scope == scope
+                        and not (turn.payload.get("model") or {}).get("error")]
         if len(scoped_turns) <= self._history_turn_limit:
             return scoped_turns
-        return scoped_turns[-self._history_turn_limit :]
+        start = len(scoped_turns) - self._history_turn_limit
+        # Retain the entire user turn so a tool-call/result group is never split.
+        while start > 0 and scoped_turns[start].role != "user":
+            start -= 1
+        return scoped_turns[start:]
 
     def _to_model_message(self, turn: AgentTurn) -> dict[str, Any]:
         if turn.role == "tool":
@@ -304,7 +310,18 @@ class ContextBuilder:
             if turn.call_id:
                 payload["tool_call_id"] = turn.call_id
             return payload
-        return {"role": turn.role, "content": turn.content}
+        message: dict[str, Any] = {"role": turn.role, "content": turn.content}
+        if turn.role == "assistant" and isinstance(turn.payload, dict):
+            model_meta = turn.payload.get("model")
+            transcript = model_meta.get("transcript") if isinstance(model_meta, dict) else None
+            if isinstance(transcript, dict):
+                chat_message = transcript.get("chat_message")
+                if isinstance(chat_message, dict):
+                    message["chat_message"] = deepcopy(chat_message)
+                responses_output = transcript.get("responses_output")
+                if isinstance(responses_output, list):
+                    message["responses_output"] = deepcopy(responses_output)
+        return message
 
     def _build_skill_block(self, skill_files: list[str]) -> str:
         sections: list[str] = []
@@ -675,6 +692,8 @@ class ContextBuilder:
             distance_m=self._int_or_none(route.get("distance_m")),
             duration_s=self._int_or_none(route.get("duration_s")),
             hint=self._string_or_none(route.get("hint")),
+            degraded=route.get("degraded") if isinstance(route.get("degraded"), bool) else None,
+            route_kind=self._string_or_none(route.get("route_kind")),
         )
         compact = self._compact_value(payload.model_dump(mode="json", exclude_none=True))
         if not compact:

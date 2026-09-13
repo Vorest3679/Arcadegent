@@ -83,9 +83,21 @@ def get_working_memory_artifact(memory: dict[str, Any] | None, key: str) -> Any:
     return normalized.get(key)
 
 
-def set_working_memory_artifact(memory: dict[str, Any] | None, key: str, value: Any) -> None:
+def set_working_memory_artifact(
+    memory: dict[str, Any] | None,
+    key: str,
+    value: Any,
+    *,
+    turn_index: int | None = None,
+) -> None:
     normalized = ensure_working_memory_shape(memory)
     normalized["artifacts"][key] = deepcopy(value)
+    if turn_index is not None:
+        meta = normalized.get("artifact_meta")
+        if not isinstance(meta, dict):
+            meta = {}
+            normalized["artifact_meta"] = meta
+        meta[key] = {"turn_index": turn_index, "updated_at": _utc_now_iso()}
 
 
 def append_worker_run(memory: dict[str, Any] | None, run: dict[str, Any], *, max_entries: int = 20) -> None:

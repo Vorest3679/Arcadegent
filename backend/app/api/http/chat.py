@@ -50,13 +50,25 @@ def _build_title(turns: list[AgentTurn]) -> str:
 
 
 def _build_preview(turns: list[AgentTurn]) -> str | None:
-    for turn in reversed(turns):
-        if turn.role not in {"assistant", "user"}:
-            continue
+    for turn in reversed(_visible_turns(turns)):
         preview = _single_line(turn.content, limit=72)
         if preview:
             return preview
     return None
+
+
+def _visible_turns(turns: list[AgentTurn]) -> list[AgentTurn]:
+    """Keep model/tool traces for context while excluding them from the chat UI."""
+    return [
+        turn
+        for turn in turns
+        if turn.role == "user"
+        or (
+            turn.role == "assistant"
+            and turn.scope == "conversation"
+            and not isinstance(turn.payload.get("model"), dict)
+        )
+    ]
 
 
 def _to_turn(turn: AgentTurn) -> ChatHistoryTurnDto:
@@ -76,7 +88,7 @@ def _to_summary(state: AgentSessionState) -> ChatSessionSummaryDto:
         preview=_build_preview(state.turns),
         intent=_normalize_intent(state.intent),
         status=state.status,
-        turn_count=len(state.turns),
+        turn_count=len(_visible_turns(state.turns)),
         created_at=state.created_at,
         updated_at=state.updated_at,
     )
@@ -107,6 +119,7 @@ def _state_client_location(state: AgentSessionState) -> ClientLocationContext | 
 
 
 def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSessionDetailDto:
+    visible_turns = _visible_turns(state.turns)
     raw_shops = _state_shop_rows(state)
     shops = container.arcade_payload_mapper.summaries_from_rows(raw_shops)
     route = container.arcade_payload_mapper.route_from_payload(
@@ -134,10 +147,10 @@ def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSess
         view_payload=get_working_memory_artifact(state.working_memory, "view_payload")
         if isinstance(get_working_memory_artifact(state.working_memory, "view_payload"), dict)
         else None,
-        turn_count=len(state.turns),
+        turn_count=len(visible_turns),
         created_at=state.created_at,
         updated_at=state.updated_at,
-        turns=[_to_turn(turn) for turn in state.turns],
+        turns=[_to_turn(turn) for turn in visible_turns],
     )
 
 
@@ -191,6 +204,23 @@ async def dispatch_chat_session(
     except SessionOwnershipError as exc:
         raise HTTPException(status_code=404, detail=f"session '{exc.session_id}' not found") from exc
     return ChatSessionDispatchDto(session_id=session_id, status="running")
+
+
+@router.post("/chat/sessions/{session_id}/cancel", response_model=ChatSessionDetailDto)
+async def cancel_chat_session(
+    session_id: str,
+    client_id: str | None = Query(default=None, min_length=1, max_length=128),
+    container: AppContainer = Depends(get_container),
+) -> ChatSessionDetailDto:
+    session = container.session_store.get_session(session_id, client_id=client_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
+    await container.orchestrator.cancel_chat(
+        session_id,
+        reason="实时连接中断，当前请求已停止；再次输入会继续使用已保存的上下文。",
+    )
+    updated = container.session_store.get_session(session_id, client_id=client_id)
+    return _to_detail(updated or session, container=container)
 
 
 @router.get("/chat/sessions", response_model=list[ChatSessionSummaryDto])

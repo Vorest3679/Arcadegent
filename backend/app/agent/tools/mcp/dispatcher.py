@@ -13,7 +13,6 @@ from __future__ import annotations
 # - `_parse_polyline()`: 将字符串格式的路径信息解析为 GeoPoint 对象列表。
 # - `_normalize_polyline()`: 将不同格式的路径信息规范化为 Location 对象列表。
 # - `_infer_mode()`: 根据工具的远程名称和输入参数推断出路径规划的模式。
-# - `_fallback_polyline()`: 从输入参数中提取路径信息作为备选方案。
 # - `_extract_route_from_mapping()`: 从工具执行结果的不同层级中提取路径信息并构建 RouteSummaryDto。
 # - `maybe_extract_route_payload()`: 尝试从工具执行结果中提取路径信息。
 # - `pick_route_descriptor()`: 从工具描述符列表中选择一个最适合路径规划的工具描述符。
@@ -184,13 +183,6 @@ def _fallback_point(arguments: dict[str, Any], key: str) -> GeoPoint | None:
         return None
 
 
-def _fallback_polyline(arguments: dict[str, Any]) -> list[GeoPoint]:
-    points: list[GeoPoint] = []
-    for key in ("origin", "destination"):
-        point = _fallback_point(arguments, key)
-        if point is not None:
-            points.append(point)
-    return points
 
 """
 从工具执行结果的不同层级中提取路径信息并构建RouteSummaryDto对象。
@@ -227,7 +219,7 @@ def _extract_route_from_mapping(
             duration_s=duration_s,
             origin=_fallback_point(raw_arguments, "origin"),
             destination=_fallback_point(raw_arguments, "destination"),
-            polyline=polyline or _fallback_polyline(raw_arguments),
+            polyline=polyline,
             hint=hint,
         )
     # 尝试在更深层级中寻找路径信息
@@ -264,7 +256,7 @@ def _extract_route_from_mapping(
                 duration_s=duration_s,
                 origin=_fallback_point(raw_arguments, "origin"),
                 destination=_fallback_point(raw_arguments, "destination"),
-                polyline=points or _fallback_polyline(raw_arguments),
+                polyline=points,
                 hint=hint,
             )
 

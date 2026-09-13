@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +26,12 @@ class LLMConfig:
     prefer_chat_completions: bool = False
     profile_name: str = "default"
     profile_enabled: bool = True
+    api_mode: str = "auto"
+    auth_header: str = "Authorization"
+    send_temperature: bool = True
+    token_limit_parameter: str = "max_tokens"
+    supported_tool_choices: tuple[str, ...] = ("auto", "none", "required")
+    extra_parameters: dict[str, Any] = field(default_factory=dict)
 
     @property
     def enabled(self) -> bool:
@@ -166,4 +172,10 @@ def resolve_llm_config(settings: Settings) -> LLMConfig:
         prefer_chat_completions=_pick_bool(profile, "prefer_chat_completions", False),
         profile_name=settings.agent_provider_profile,
         profile_enabled=enabled,
+        api_mode=_pick_str(profile, "api_mode", "auto"),
+        auth_header=_pick_str(profile, "auth_header", "Authorization"),
+        send_temperature=_pick_bool(profile, "send_temperature", True),
+        token_limit_parameter=_pick_str(profile, "token_limit_parameter", "max_tokens"),
+        supported_tool_choices=tuple(profile.get("supported_tool_choices", ["auto", "none", "required"])),
+        extra_parameters=dict(profile.get("extra_parameters") or {}),
     )

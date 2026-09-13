@@ -17,7 +17,9 @@ router = APIRouter(tags=["stream"])
 
 def _format_sse(*, event: str, data: dict, event_id: int) -> str:
     body = json.dumps(data, ensure_ascii=False)
-    return f"id: {event_id}\nevent: {event}\ndata: {body}\n\n"
+    # Tell native EventSource clients a conservative reconnect delay. The web
+    # client also applies its own bounded retry policy and replays by event id.
+    return f"retry: 1000\nid: {event_id}\nevent: {event}\ndata: {body}\n\n"
 
 
 @router.get("/api/stream/{session_id}")

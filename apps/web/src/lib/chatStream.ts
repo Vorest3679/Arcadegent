@@ -36,7 +36,7 @@ const TOOL_LABEL: Record<string, string> = {
 
 export type StreamProgressItem = {
   id: number;
-  event: ChatStreamEventName;
+  event: ChatStreamEventName | "stream.reconnecting";
   text: string;
   at: string;
 };

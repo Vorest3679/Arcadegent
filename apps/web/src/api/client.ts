@@ -135,6 +135,13 @@ export async function dispatchChatSession(payload: ChatRequest): Promise<ChatSes
   return postJson<ChatSessionDispatch>("/api/chat/sessions", payload);
 }
 
+export async function cancelChatSession(sessionId: string, clientId?: string): Promise<ChatSessionDetail> {
+  return postJson<ChatSessionDetail>(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/cancel${clientId ? `?client_id=${encodeURIComponent(clientId)}` : ""}`,
+    {}
+  );
+}
+
 export function buildChatStreamUrl(sessionId: string, lastEventId?: number, clientId?: string): string {
   return buildUrl(`/api/stream/${encodeURIComponent(sessionId)}`, {
     client_id: clientId,

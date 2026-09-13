@@ -153,7 +153,7 @@ def test_build_worker_memory_snapshot_copies_promotable_artifacts() -> None:
     worker_memory = runtime._build_worker_memory_snapshot(state.working_memory)
 
     assert get_working_memory_artifact(worker_memory, "shops")[0]["name"] == "Alpha"
-    assert get_working_memory_artifact(worker_memory, "route")["mode"] == "walking"
+    assert get_working_memory_artifact(worker_memory, "route") is None
     assert worker_memory["keyword"] == "maimai"
     assert worker_memory["last_db_query"]["keyword"] == "maimai"
 
@@ -214,12 +214,13 @@ def test_promote_worker_artifacts_keeps_last_mcp_result() -> None:
     runtime._promote_worker_artifacts(
         parent_memory=parent_state.working_memory,
         worker_memory=worker_state.working_memory,
+        turn_index=parent_state.turn_index,
     )
 
     assert parent_state.working_memory["last_mcp_result"]["tool"] == "maps_geo"
 
 
-def test_persist_worker_tool_turns_copies_tool_payload_arguments() -> None:
+def test_persist_worker_evidence_turns_copies_tool_payload_arguments() -> None:
     runtime = _runtime()
     parent_state = AgentSessionState(session_id="s_parent")
     worker_state = AgentSessionState(
@@ -242,7 +243,7 @@ def test_persist_worker_tool_turns_copies_tool_payload_arguments() -> None:
         ],
     )
 
-    runtime._persist_worker_tool_turns(
+    runtime._persist_worker_evidence_turns(
         parent_state=parent_state,
         worker_state=worker_state,
     )

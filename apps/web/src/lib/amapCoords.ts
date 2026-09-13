@@ -40,9 +40,7 @@ export function normalizePointToGcj02(point?: GeoPoint | null): GeoPoint | null 
 }
 
 export function normalizeRoutePolyline(route?: RouteSummary | null): Array<[number, number]> {
-  const polyline = route?.polyline?.length
-    ? route.polyline
-    : [route?.origin, route?.destination].filter(Boolean);
+  const polyline = route?.polyline ?? [];
   if (!polyline.length) {
     return [];
   }
@@ -66,7 +64,7 @@ export function normalizeRouteToGcj02(route?: RouteSummary | null): RouteSummary
     ...route,
     origin,
     destination,
-    polyline: normalizedPolyline.length ? normalizedPolyline : [origin, destination].filter(Boolean) as GeoPoint[]
+    polyline: normalizedPolyline
   };
 }
 

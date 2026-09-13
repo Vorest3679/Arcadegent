@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.agent.llm.provider_adapter import ModelResponse
 from app.agent.runtime.session_state import (
     AgentSessionState,
     _client_can_access,
@@ -18,6 +19,21 @@ from app.agent.runtime.session_state import (
     state_from_dict,
 )
 from app.infra.db.protocols import SessionStateRepository
+
+
+def _stub_provider_adapter(client: TestClient, reply: str = "stubbed model reply") -> None:
+    """Replace the provider adapter with a deterministic model response."""
+    adapter = client.app.state.container.react_runtime._provider_adapter
+
+    async def fake_complete(*, instructions, messages, tools, runtime_hints=None):
+        return ModelResponse(
+            text=reply,
+            status="completed",
+            protocol="responses",
+            reported_model="stub-model",
+        )
+
+    adapter.complete = fake_complete  # type: ignore[method-assign]
 
 
 class InMemorySessionStateRepository:
@@ -155,13 +171,17 @@ def _build_client(
     store = session_store or InMemorySessionStateRepository()
     import app.core.container as container_module
 
+    original_build_session_repository = container_module._build_session_repository
     container_module._build_session_repository = lambda _settings: store
 
     from app.main import create_app
 
-    client = TestClient(create_app())
-    client.app.state.container.session_store = store  # type: ignore[attr-defined]
-    client.__enter__()
+    try:
+        client = TestClient(create_app())
+        client.app.state.container.session_store = store  # type: ignore[attr-defined]
+        client.__enter__()
+    finally:
+        container_module._build_session_repository = original_build_session_repository
     return client
 
 
@@ -195,13 +215,17 @@ def _build_client_with_rows(
     store = session_store or InMemorySessionStateRepository()
     import app.core.container as container_module
 
+    original_build_session_repository = container_module._build_session_repository
     container_module._build_session_repository = lambda _settings: store
 
     from app.main import create_app
 
-    client = TestClient(create_app())
-    client.app.state.container.session_store = store  # type: ignore[attr-defined]
-    client.__enter__()
+    try:
+        client = TestClient(create_app())
+        client.app.state.container.session_store = store  # type: ignore[attr-defined]
+        client.__enter__()
+    finally:
+        container_module._build_session_repository = original_build_session_repository
     return client
 
 
@@ -501,6 +525,7 @@ def test_health_reports_mcp_tools_loaded_from_config_directory(tmp_path: Path) -
 
 def test_chat_reuses_session_context(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
+    _stub_provider_adapter(client)
 
     first_resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
     assert first_resp.status_code == 200
@@ -547,12 +572,14 @@ def test_chat_reuses_session_context(tmp_path: Path) -> None:
 def test_chat_sessions_survive_app_restart(tmp_path: Path) -> None:
     shared_store = InMemorySessionStateRepository()
     client = _build_client(tmp_path, session_store=shared_store)
+    _stub_provider_adapter(client)
 
     first_resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
     assert first_resp.status_code == 200
     session_id = first_resp.json()["session_id"]
 
     restarted_client = _build_client(tmp_path, session_store=shared_store)
+    _stub_provider_adapter(restarted_client)
 
     sessions_resp = restarted_client.get("/api/chat/sessions")
     assert sessions_resp.status_code == 200
@@ -568,6 +595,101 @@ def test_chat_sessions_survive_app_restart(tmp_path: Path) -> None:
     assert detail["turn_count"] >= 2
     assert detail["turns"][0]["role"] == "user"
     assert detail["turns"][-1]["role"] == "assistant"
+
+
+def test_chat_records_native_tool_round_trip(tmp_path: Path) -> None:
+    from app.agent.llm.provider_adapter import ModelToolCall
+
+    client = _build_client(tmp_path)
+    adapter = client.app.state.container.react_runtime._provider_adapter
+    captured_messages: list[list[dict[str, object]]] = []
+    calls = {"count": 0}
+
+    async def fake_complete(*, instructions, messages, tools, runtime_hints=None):
+        captured_messages.append(messages)
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return ModelResponse(
+                tool_calls=[
+                    ModelToolCall(
+                        call_id="call_1",
+                        name="db_query_tool",
+                        arguments={"keyword": "Gamma", "page": 1, "page_size": 3},
+                        raw_arguments='{"keyword": "Gamma", "page": 1, "page_size": 3}',
+                    )
+                ],
+                status="completed",
+                protocol="responses",
+                reported_model="stub-model",
+                transcript={
+                    "responses_output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_1",
+                            "name": "db_query_tool",
+                            "arguments": '{"keyword": "Gamma", "page": 1, "page_size": 3}',
+                        }
+                    ]
+                },
+            )
+        return ModelResponse(text="found Gamma", status="completed", protocol="responses")
+
+    adapter.complete = fake_complete  # type: ignore[method-assign]
+
+    resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["reply"] == "found Gamma"
+    assert payload["shops"] and payload["shops"][0]["source_id"] == 10
+
+    # The second model call must receive the native tool round trip:
+    # assistant transcript (responses_output) followed by the paired tool output.
+    assert calls["count"] == 2
+    second_call = captured_messages[1]
+    assistant_message = next(item for item in second_call if item.get("responses_output"))
+    assert assistant_message["responses_output"][0]["call_id"] == "call_1"
+    tool_message = next(item for item in second_call if item.get("role") == "tool")
+    assert tool_message["tool_call_id"] == "call_1"
+
+    detail = client.get(f"/api/chat/sessions/{payload['session_id']}").json()
+    assert detail["status"] == "completed"
+    model_turns = [
+        turn.__dict__ for turn in client.app.state.container.session_store.get_session(payload["session_id"]).turns
+        if turn.role == "assistant" and turn.payload.get("model")
+    ]
+    assert model_turns
+    first_model = model_turns[0]["payload"]["model"]
+    assert first_model["tool_calls"][0]["raw_arguments"] == '{"keyword": "Gamma", "page": 1, "page_size": 3}'
+    tool_turns = [turn.__dict__ for turn in client.app.state.container.session_store.get_session(payload["session_id"]).turns if turn.role == "tool"]
+    assert tool_turns
+    evidence = tool_turns[0].get("payload", {}).get("argument_evidence")
+    assert evidence is not None
+    assert evidence["parsed_arguments"]["keyword"] == "Gamma"
+
+
+def test_chat_marks_session_failed_when_model_errors(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)  # LLM_API_KEY is empty, so the provider errors out
+
+    resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["reply"]  # fallback reply is still returned to the caller
+
+    detail_resp = client.get(f"/api/chat/sessions/{payload['session_id']}")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.json()
+    assert detail["status"] == "failed"
+    assert detail["last_error"]
+
+    replay_buffer = client.app.state.container.replay_buffer
+    events = replay_buffer.list_events(payload["session_id"])
+    assert any(event.event == "session.failed" for event in events)
+    completed = [event for event in events if event.event == "assistant.completed"]
+    assert not completed
+    stream = client.get(f"/api/stream/{payload['session_id']}")
+    assert "event: session.failed" in stream.text
 
 
 def test_chat_sessions_are_scoped_by_client_id(tmp_path: Path) -> None:
@@ -626,6 +748,7 @@ def test_chat_sessions_are_scoped_by_client_id(tmp_path: Path) -> None:
 
 def test_second_turn_resets_stream_replay_buffer(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
+    _stub_provider_adapter(client)
 
     first_resp = client.post("/api/chat", json={"message": "松江区有哪些机厅可以去？", "page_size": 3})
     assert first_resp.status_code == 200
@@ -651,6 +774,7 @@ def test_second_turn_resets_stream_replay_buffer(tmp_path: Path) -> None:
 
 def test_chat_dispatch_runs_in_background(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
+    _stub_provider_adapter(client)
 
     dispatch_resp = client.post("/api/chat/sessions", json={"message": "find Gamma", "page_size": 3})
     assert dispatch_resp.status_code == 202
@@ -674,6 +798,7 @@ def test_chat_dispatch_runs_in_background(tmp_path: Path) -> None:
 
 def test_chat_dispatch_rejects_duplicate_running_session(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
+    _stub_provider_adapter(client)
     runtime = client.app.state.container.react_runtime
     original_run_chat = runtime.run_chat
 
@@ -697,6 +822,54 @@ def test_chat_dispatch_rejects_duplicate_running_session(tmp_path: Path) -> None
     assert second_resp.status_code == 409
 
     _wait_for_session_status(client, session_id, "completed")
+
+
+def test_cancel_running_chat_preserves_context_for_the_next_input(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)
+    adapter = client.app.state.container.react_runtime._provider_adapter
+
+    async def slow_complete(*, instructions, messages, tools, runtime_hints=None):
+        await asyncio.sleep(5)
+        return ModelResponse(text="too late", status="completed", protocol="responses")
+
+    adapter.complete = slow_complete  # type: ignore[method-assign]
+    session_id = "s_cancelled123"
+    first = client.post(
+        "/api/chat/sessions",
+        json={"session_id": session_id, "message": "find Gamma", "page_size": 3},
+    )
+    assert first.status_code == 202
+
+    cancelled = client.post(f"/api/chat/sessions/{session_id}/cancel")
+    assert cancelled.status_code == 200
+    cancelled_detail = cancelled.json()
+    assert cancelled_detail["status"] == "failed"
+    assert "上下文" in cancelled_detail["last_error"]
+    assert [turn["content"] for turn in cancelled_detail["turns"]] == ["find Gamma"]
+
+    _stub_provider_adapter(client, reply="continued from saved context")
+    second = client.post(
+        "/api/chat/sessions",
+        json={"session_id": session_id, "message": "continue", "page_size": 3},
+    )
+    assert second.status_code == 202
+    completed = _wait_for_session_status(client, session_id, "completed")
+    assert [turn["content"] for turn in completed["turns"]] == [
+        "find Gamma",
+        "continue",
+        "continued from saved context",
+    ]
+
+
+def test_session_detail_hides_model_evidence_turns(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)
+    _stub_provider_adapter(client, reply="only show once")
+
+    response = client.post("/api/chat", json={"session_id": "s_visible123", "message": "hello"})
+    assert response.status_code == 200
+    detail = client.get("/api/chat/sessions/s_visible123").json()
+    assert [turn["content"] for turn in detail["turns"]] == ["hello", "only show once"]
+    assert detail["turn_count"] == 2
 
 
 def test_arcades_api_supports_title_quantity_sorting(tmp_path: Path) -> None:
@@ -783,3 +956,96 @@ def test_arcades_api_supports_distance_sorting(tmp_path: Path) -> None:
     assert payload["total"] == 2
     assert [row["source_id"] for row in payload["items"]] == [10, 11]
     assert payload["items"][0]["distance_m"] == 0
+
+
+def test_incomplete_text_fails_without_success_event(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)
+    async def fake_complete(**kwargs):
+        return ModelResponse(text="partial", status="incomplete", error={"type": "incomplete_response", "message": "length"})
+    client.app.state.container.react_runtime._provider_adapter.complete = fake_complete
+    response = client.post("/api/chat", json={"message": "find Gamma"}).json()
+    state = client.app.state.container.session_store.get_session(response["session_id"])
+    assert state.status == "failed"
+    stream = client.get(f"/api/stream/{state.session_id}").text
+    assert "event: session.failed" in stream
+    assert "event: assistant.completed" not in stream
+
+
+def test_invalid_json_cannot_be_hydrated_into_success(tmp_path: Path) -> None:
+    from app.agent.llm.provider_adapter import ModelToolCall
+    client = _build_client(tmp_path)
+    calls = 0
+    async def fake_complete(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return ModelResponse(tool_calls=[ModelToolCall("bad", "summary_tool", {}, raw_arguments="{", parse_error="invalid JSON")])
+        return ModelResponse(text="Unable to summarize")
+    client.app.state.container.react_runtime._provider_adapter.complete = fake_complete
+    response = client.post("/api/chat", json={"message": "find Gamma"}).json()
+    events = client.app.state.container.replay_buffer.list_events(response["session_id"])
+    assert [event.event for event in events if event.event.startswith("tool.")] == ["tool.started", "tool.failed"]
+    state = client.app.state.container.session_store.get_session(response["session_id"])
+    evidence = next(turn.payload["argument_evidence"] for turn in state.turns if turn.role == "tool")
+    assert evidence["parse_error"] == "invalid JSON"
+    assert evidence["hydrated_fields"] == []
+
+
+def test_previous_route_is_not_promoted_as_new_result() -> None:
+    from app.agent.runtime.react_runtime import ReactRuntime
+    from app.agent.runtime.session_state import set_working_memory_artifact
+    runtime = object.__new__(ReactRuntime)
+    memory = {}
+    set_working_memory_artifact(memory, "route", {"distance_m": 100}, turn_index=1)
+    set_working_memory_artifact(memory, "shops", [{"source_id": 10}], turn_index=1)
+    prepared = runtime._prepare_turn_memory(memory)
+    assert "route" not in prepared["artifacts"]
+    worker = runtime._build_worker_memory_snapshot(prepared)
+    assert worker["artifacts"]["shops"] == [{"source_id": 10}]
+    assert runtime._promote_worker_artifacts(parent_memory=memory, worker_memory=worker, turn_index=2) == {}
+    assert memory["artifact_meta"]["shops"]["turn_index"] == 1
+    set_working_memory_artifact(worker, "shops", [], turn_index=2)
+    assert runtime._promote_worker_artifacts(parent_memory=memory, worker_memory=worker, turn_index=2) == {"shops": []}
+
+
+def test_online_route_unavailable_does_not_estimate() -> None:
+    import pytest
+    from app.agent.tools.builtin.route_plan_tool import RoutePlanTool
+    from app.protocol.messages import Location
+    with pytest.raises(RuntimeError, match="route_unavailable"):
+        asyncio.run(RoutePlanTool().plan_route(provider="amap", mode="walking", origin=Location(lng=116, lat=39), destination=Location(lng=117, lat=40)))
+
+
+def test_history_window_keeps_complete_tool_group() -> None:
+    from app.agent.context.context_builder import ContextBuilder
+    from app.agent.runtime.session_state import AgentTurn
+    builder = ContextBuilder(prompt_root=Path("."), history_turn_limit=4)
+    turns = [AgentTurn(role="user", content="query"), AgentTurn(role="assistant", content="", payload={"model": {"transcript": {"responses_output": [{"type": "function_call", "call_id": "c"}]}}})]
+    turns.extend(AgentTurn(role="tool", content="result", call_id=str(i)) for i in range(5))
+    retained = builder._tail_turns(turns, scope="conversation")
+    assert retained == turns
+
+
+def test_incomplete_worker_call_is_not_executed(tmp_path: Path) -> None:
+    from app.agent.llm.provider_adapter import ModelToolCall
+    client = _build_client(tmp_path)
+    async def fake_complete(**kwargs):
+        if kwargs["runtime_hints"]["active_subagent"] == "main_agent":
+            if any(message.get("role") == "tool" for message in kwargs["messages"]):
+                return ModelResponse(text="Worker failed")
+            return ModelResponse(tool_calls=[ModelToolCall("dispatch", "invoke_worker", {"worker": "search_worker", "task": "find Gamma"})])
+        return ModelResponse(text="partial", tool_calls=[ModelToolCall("partial", "db_query_tool", {"page": 1, "page_size": 3})], error={"type": "incomplete_response", "message": "length"})
+    client.app.state.container.react_runtime._provider_adapter.complete = fake_complete
+    response = client.post("/api/chat", json={"message": "find Gamma"}).json()
+    events = client.app.state.container.replay_buffer.list_events(response["session_id"])
+    assert any(event.event == "worker.failed" for event in events)
+    assert not any(event.event == "tool.started" and event.data.get("call_id") == "partial" for event in events)
+    assert any(event.event == "tool.failed" and event.data.get("call_id") == "dispatch" for event in events)
+
+
+def test_route_metrics_without_geometry_does_not_invent_polyline() -> None:
+    from app.agent.tools.mcp.dispatcher import _extract_route_from_mapping
+    route = _extract_route_from_mapping({"distance": 100, "duration": 90}, remote_name="maps_direction_walking", raw_arguments={"origin": "116,39", "destination": "116.01,39.01"}, depth=0)
+    assert route is not None
+    assert route.distance_m == 100
+    assert route.polyline == []
