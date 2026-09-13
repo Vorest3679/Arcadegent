@@ -207,6 +207,7 @@ class ReactRuntime:
                 state.working_memory,
                 "client_location",
                 request.location.model_dump(mode="json", exclude_none=True),
+                turn_index=state.turn_index,
             )
         if request.shop_id is not None:
             state.working_memory["last_shop_id"] = request.shop_id
@@ -245,12 +246,13 @@ class ReactRuntime:
             reason="session.started",
         )
 
-        final_text = await self._run_main_agent(
+        final_text, model_error = await self._run_main_agent(
             request=request,
             session_id=session_id,
             state=state,
         )
 
+        reply_source = "model"
         if not final_text:
             logger.warning(
                 "chat.fallback session_id=%s reason=empty_model_output last_error=%s",
@@ -258,6 +260,7 @@ class ReactRuntime:
                 _short(str(state.working_memory.get("last_error") or ""), limit=180),
             )
             final_text = self._fallback_reply(state, request)
+            reply_source = "fallback"
 
         if not bool(state.working_memory.get("assistant_token_emitted")):
             self._emit_assistant_tokens(
@@ -272,21 +275,32 @@ class ReactRuntime:
                 content=final_text,
                 agent="main_agent",
                 scope="conversation",
-                payload={"final": True},
+                payload={"final": True, "reply_source": reply_source},
             ),
         )
+        response = await self._build_response(session_id=session_id, state=state, final_text=final_text)
         state.active_subagent = "main_agent"
-        state.status = "completed"
-        state.last_error = None
         state.working_memory["reply"] = final_text
         state.updated_at = _utc_now_iso()
+        if model_error is not None:
+            state.status = "failed"
+            state.last_error = _short(
+                str(model_error.get("message") or "model call failed"),
+                limit=280,
+            )
+        else:
+            state.status = "completed"
+            state.last_error = None
         self._session_store.save_session(state)
         self._replay_buffer.append(
             session_id,
-            "assistant.completed",
+            "session.failed" if model_error else "assistant.completed",
             {
                 "reply": final_text,
                 "active_subagent": state.active_subagent,
+                "reply_source": reply_source,
+                "model_error": model_error,
+                "error": state.last_error,
             },
         )
         logger.info(
@@ -296,7 +310,7 @@ class ReactRuntime:
             len(self._memory_shops(state.working_memory)),
             _short(final_text, limit=160),
         )
-        return await self._build_response(session_id=session_id, state=state, final_text=final_text)
+        return response
 
     async def _run_main_agent(
         self,
@@ -304,10 +318,11 @@ class ReactRuntime:
         request: ChatRequest,
         session_id: str,
         state: AgentSessionState,
-    ) -> str | None:
+    ) -> tuple[str | None, dict[str, Any] | None]:
         profile = self._subagent_builder.get("main_agent")
         guard = LoopGuard(self._max_steps)
         final_text: str | None = None
+        model_error: dict[str, Any] | None = None
 
         while not guard.exhausted:
             step = guard.next()
@@ -336,6 +351,12 @@ class ReactRuntime:
                     "memory": state.working_memory,
                 },
             )
+            self._record_model_call(
+                state=state,
+                response=model_response,
+                agent_name=profile.name,
+                step=step,
+            )
             if model_response.response_id:
                 state.previous_response_id = model_response.response_id
             logger.info(
@@ -346,6 +367,21 @@ class ReactRuntime:
                 len(model_response.tool_calls),
                 bool(model_response.text),
             )
+
+            if model_response.error is not None:
+                model_error = dict(model_response.error)
+                state.working_memory["last_error"] = {
+                    "message": model_error.get("message"),
+                    "type": model_error.get("type"),
+                    "source": "model",
+                }
+                logger.warning(
+                    "chat.model_error session_id=%s step=%s error=%s",
+                    session_id,
+                    step,
+                    _short(str(model_error.get("message") or ""), limit=200),
+                )
+                break
 
             if model_response.tool_calls:
                 await self._execute_tool_calls(
@@ -368,7 +404,106 @@ class ReactRuntime:
                 final_text = str(state.working_memory.get("reply"))
                 break
 
-        return final_text
+        if final_text is None and model_error is None:
+            model_error = {"type": "step_limit", "message": "agent exhausted its step budget"}
+        return final_text, model_error
+
+    def _record_model_call(
+        self,
+        *,
+        state: AgentSessionState,
+        response: Any,
+        agent_name: str,
+        step: int,
+        worker_run_id: str | None = None,
+    ) -> None:
+        """Persist per-call model evidence: transcript, usage, status and raw tool-call arguments."""
+        memory = ensure_working_memory_shape(state.working_memory)
+        usage_totals = memory.get("usage_totals")
+        if not isinstance(usage_totals, dict):
+            usage_totals = {
+                "calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cached_input_tokens": 0,
+                "reasoning_tokens": 0,
+                "usage_missing": 0,
+            }
+            memory["usage_totals"] = usage_totals
+        usage_totals["calls"] += 1
+        usage = response.usage if isinstance(response.usage, dict) else {}
+        if any(usage.get(key) is not None for key in ("input_tokens", "output_tokens", "total_tokens")):
+            # cached/reasoning tokens are subsets of input/output; they are tracked
+            # alongside, never added on top of the totals.
+            for key in ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"):
+                value = usage.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    usage_totals[key] += int(value)
+        else:
+            usage_totals["usage_missing"] += 1
+        self._append_turn(
+            state,
+            AgentTurn(
+                role="assistant",
+                content=response.text or "",
+                agent=agent_name,
+                worker_run_id=worker_run_id,
+                scope="worker" if worker_run_id else "conversation",
+                payload={
+                    "model": {
+                        "step": step,
+                        "protocol": response.protocol,
+                        "reported_model": response.reported_model,
+                        "response_id": response.response_id,
+                        "status": response.status,
+                        "finish_reason": response.finish_reason,
+                        "error": deepcopy(response.error),
+                        "usage": deepcopy(response.usage),
+                        "raw_usage": deepcopy(response.raw_usage),
+                        "provider_ttft_ms": response.provider_ttft_ms,
+                        "duration_ms": response.duration_ms,
+                        "stream_mode": response.stream_mode,
+                        "transcript": deepcopy(response.transcript),
+                        "tool_calls": [
+                            {
+                                "call_id": call.call_id,
+                                "name": call.name,
+                                "arguments": deepcopy(call.arguments),
+                                "raw_arguments": deepcopy(call.raw_arguments),
+                                "parse_error": call.parse_error,
+                            }
+                            for call in response.tool_calls
+                        ],
+                    }
+                },
+            ),
+            persist=False,
+        )
+
+    @staticmethod
+    def _merge_usage_totals(
+        *,
+        parent_memory: dict[str, Any],
+        worker_memory: dict[str, Any],
+    ) -> None:
+        worker_totals = worker_memory.get("usage_totals")
+        if not isinstance(worker_totals, dict):
+            return
+        parent_memory = ensure_working_memory_shape(parent_memory)
+        parent_totals = parent_memory.get("usage_totals")
+        if not isinstance(parent_totals, dict):
+            parent_totals = {
+                "calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cached_input_tokens": 0,
+                "reasoning_tokens": 0,
+                "usage_missing": 0,
+            }
+            parent_memory["usage_totals"] = parent_totals
+        for key, value in worker_totals.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                parent_totals[key] = int(parent_totals.get(key) or 0) + int(value)
 
     async def _execute_tool_calls(
         self,
@@ -382,11 +517,70 @@ class ReactRuntime:
         persist: bool = True,
     ) -> None:
         for call in tool_calls:
-            prepared_args, hydrated_fields = await self._tool_registry.prepare_arguments(
-                tool_name=call.name,
-                raw_arguments=call.arguments,
-                runtime_context=session_state.working_memory,
+            # The trace starts when the model proposes the tool, so argument
+            # preparation failures are also captured as a complete tool span.
+            self._replay_buffer.append(
+                session_id,
+                "tool.started",
+                {
+                    "tool": call.name,
+                    "call_id": call.call_id,
+                    "active_subagent": profile.name,
+                    "worker_run_id": worker_run_id,
+                },
             )
+            preparation_error: str | None = None
+            try:
+                if call.parse_error:
+                    raise ValueError(f"invalid tool arguments: {call.parse_error}")
+                prepared_args, hydrated_fields = await self._tool_registry.prepare_arguments(
+                    tool_name=call.name,
+                    raw_arguments=call.arguments,
+                    runtime_context=session_state.working_memory,
+                )
+            except Exception as exc:
+                prepared_args, hydrated_fields = dict(call.arguments), []
+                preparation_error = f"{type(exc).__name__}: {exc}"
+            argument_evidence = {
+                "raw_arguments": deepcopy(call.raw_arguments),
+                "parsed_arguments": deepcopy(call.arguments),
+                "parse_error": call.parse_error,
+                "prepared_arguments": deepcopy(prepared_args),
+                "hydrated_fields": list(hydrated_fields),
+                "preparation_error": preparation_error,
+            }
+            if preparation_error is not None:
+                logger.warning(
+                    "tool.prepare_failed session_id=%s tool=%s call_id=%s agent=%s error=%s",
+                    session_id,
+                    call.name,
+                    call.call_id,
+                    profile.name,
+                    _short(preparation_error, limit=200),
+                )
+                result = ToolExecutionResult(
+                    call_id=call.call_id,
+                    tool_name=call.name,
+                    status="failed",
+                    output={
+                        "error": {
+                            "type": "argument_preparation_error",
+                            "message": preparation_error,
+                        }
+                    },
+                    error_message=preparation_error,
+                )
+                self._record_tool_result(
+                    session_id=session_id,
+                    state=session_state,
+                    result=result,
+                    agent_name=profile.name,
+                    worker_run_id=worker_run_id,
+                    tool_arguments=prepared_args,
+                    argument_evidence=argument_evidence,
+                    persist=persist,
+                )
+                continue
             logger.info(
                 "tool.call session_id=%s tool=%s call_id=%s agent=%s args=%s",
                 session_id,
@@ -403,16 +597,6 @@ class ReactRuntime:
                     call.call_id,
                     hydrated_fields,
                 )
-            self._replay_buffer.append(
-                session_id,
-                "tool.started",
-                {
-                    "tool": call.name,
-                    "call_id": call.call_id,
-                    "active_subagent": profile.name,
-                    "worker_run_id": worker_run_id,
-                },
-            )
             result = await self._tool_registry.execute(
                 call_id=call.call_id,
                 tool_name=call.name,
@@ -430,9 +614,9 @@ class ReactRuntime:
                 result = ToolExecutionResult(
                     call_id=result.call_id,
                     tool_name=result.tool_name,
-                    status="completed",
+                    status="failed" if envelope.get("status") == "failed" else "completed",
                     output=envelope,
-                    error_message=None,
+                    error_message=envelope.get("error"),
                 )
             self._record_tool_result(
                 session_id=session_id,
@@ -441,6 +625,7 @@ class ReactRuntime:
                 agent_name=profile.name,
                 worker_run_id=worker_run_id,
                 tool_arguments=prepared_args,
+                argument_evidence=argument_evidence,
                 persist=persist,
             )
 
@@ -545,6 +730,13 @@ class ReactRuntime:
                     "memory": worker_state.working_memory,
                 },
             )
+            self._record_model_call(
+                state=worker_state,
+                response=model_response,
+                agent_name=worker_name,
+                step=step,
+                worker_run_id=run_id,
+            )
             if model_response.response_id:
                 worker_state.previous_response_id = model_response.response_id
             logger.info(
@@ -556,6 +748,21 @@ class ReactRuntime:
                 len(model_response.tool_calls),
                 bool(model_response.text),
             )
+
+            if model_response.error is not None:
+                failed_error = _short(
+                    str(model_response.error.get("message") or "model call failed"),
+                    limit=240,
+                )
+                logger.warning(
+                    "worker.model_error session_id=%s worker=%s run_id=%s step=%s error=%s",
+                    session_id,
+                    worker_name,
+                    run_id,
+                    step,
+                    failed_error,
+                )
+                break
 
             if model_response.tool_calls:
                 await self._execute_tool_calls(
@@ -572,17 +779,26 @@ class ReactRuntime:
                         str(worker_state.working_memory.get("last_error")),
                         limit=240,
                     )
+                else:
+                    failed_error = None
                 continue
 
             if model_response.text:
                 final_text = model_response.text.strip()
             break
 
+        if final_text is None and guard.exhausted and failed_error is None:
+            failed_error = "worker exhausted its step budget"
         promoted_artifacts = self._promote_worker_artifacts(
             parent_memory=state.working_memory,
             worker_memory=worker_state.working_memory,
+            turn_index=state.turn_index,
         )
-        self._persist_worker_tool_turns(parent_state=state, worker_state=worker_state)
+        self._merge_usage_totals(
+            parent_memory=state.working_memory,
+            worker_memory=worker_state.working_memory,
+        )
+        self._persist_worker_evidence_turns(parent_state=state, worker_state=worker_state)
         envelope = self._build_worker_envelope(
             worker_name=worker_name,
             run_id=run_id,
@@ -592,6 +808,7 @@ class ReactRuntime:
             promoted_artifacts=promoted_artifacts,
             failed_error=failed_error,
         )
+        envelope["usage"] = deepcopy(worker_state.working_memory.get("usage_totals") or {})
         append_worker_run(state.working_memory, envelope)
         if envelope["status"] == "failed":
             state.last_error = envelope["error"]
@@ -643,6 +860,7 @@ class ReactRuntime:
         worker_run_id: str | None,
         tool_arguments: dict[str, Any] | None,
         persist: bool,
+        argument_evidence: dict[str, Any] | None = None,
     ) -> None:
         """Record the result of a tool execution, emitting appropriate events and updating session state."""
         if result.status == "completed":
@@ -698,6 +916,7 @@ class ReactRuntime:
                     "status": result.status,
                     "result": result.output,
                     "arguments": deepcopy(tool_arguments) if isinstance(tool_arguments, dict) else {},
+                    "argument_evidence": deepcopy(argument_evidence) if isinstance(argument_evidence, dict) else None,
                 },
             ),
             persist=persist,
@@ -722,33 +941,33 @@ class ReactRuntime:
             if isinstance(result_payload, dict):
                 destination = result_payload.get("destination")
                 if isinstance(destination, dict):
-                    set_working_memory_artifact(memory, "destination", destination)
+                    set_working_memory_artifact(memory, "destination", destination, turn_index=state.turn_index)
                 route = result_payload.get("route")
                 if isinstance(route, dict):
-                    set_working_memory_artifact(memory, "route", route)
+                    set_working_memory_artifact(memory, "route", route, turn_index=state.turn_index)
                 view_payload = result_payload.get("view_payload")
                 if isinstance(view_payload, dict):
-                    set_working_memory_artifact(memory, "view_payload", view_payload)
+                    set_working_memory_artifact(memory, "view_payload", view_payload, turn_index=state.turn_index)
             return
 
         if result.tool_name == "db_query_tool":
             shop_payload = result.output.get("shop")
             if isinstance(shop_payload, dict):
-                set_working_memory_artifact(memory, "shop", shop_payload)
+                set_working_memory_artifact(memory, "shop", shop_payload, turn_index=state.turn_index)
                 source_id = shop_payload.get("source_id")
                 if source_id is not None:
                     memory["last_shop_id"] = source_id
                 return
             shops = result.output.get("shops")
             if isinstance(shops, list):
-                set_working_memory_artifact(memory, "shops", shops)
+                set_working_memory_artifact(memory, "shops", shops, turn_index=state.turn_index)
                 if shops:
                     first = shops[0] if isinstance(shops[0], dict) else None
                     if isinstance(first, dict) and first.get("source_id") is not None:
                         memory["last_shop_id"] = first.get("source_id")
             total = result.output.get("total")
             if total is not None:
-                set_working_memory_artifact(memory, "total", int(total))
+                set_working_memory_artifact(memory, "total", int(total), turn_index=state.turn_index)
             query_meta = result.output.get("query")
             if isinstance(query_meta, dict):
                 memory["last_db_query"] = query_meta
@@ -768,26 +987,26 @@ class ReactRuntime:
         if result.tool_name == "route_plan_tool":
             route = result.output.get("route")
             if isinstance(route, dict):
-                set_working_memory_artifact(memory, "route", route)
+                set_working_memory_artifact(memory, "route", route, turn_index=state.turn_index)
                 destination = get_working_memory_artifact(memory, "shop")
                 if isinstance(destination, dict):
-                    set_working_memory_artifact(memory, "destination", destination)
+                    set_working_memory_artifact(memory, "destination", destination, turn_index=state.turn_index)
                 state.intent = "navigate"
             return
 
         if result.tool_name.startswith("mcp__"):
             route = result.output.get("route")
             if isinstance(route, dict):
-                set_working_memory_artifact(memory, "route", route)
+                set_working_memory_artifact(memory, "route", route, turn_index=state.turn_index)
                 destination = get_working_memory_artifact(memory, "shop")
                 if isinstance(destination, dict):
-                    set_working_memory_artifact(memory, "destination", destination)
+                    set_working_memory_artifact(memory, "destination", destination, turn_index=state.turn_index)
                 state.intent = "navigate"
             data = result.output.get("data")
             if isinstance(data, dict):
                 locations = data.get("locations")
                 if isinstance(locations, list) and locations:
-                    set_working_memory_artifact(memory, "resolved_locations", locations)
+                    set_working_memory_artifact(memory, "resolved_locations", locations, turn_index=state.turn_index)
             memory["last_mcp_result"] = result.output
             return
 
@@ -807,6 +1026,8 @@ class ReactRuntime:
             value = get_working_memory_artifact(parent_memory, key)
             if value is not None:
                 set_working_memory_artifact(memory, key, value)
+        for key in ("route", "destination", "view_payload"):
+            memory["artifacts"].pop(key, None)
         return memory
 
     def _promote_worker_artifacts(
@@ -814,13 +1035,16 @@ class ReactRuntime:
         *,
         parent_memory: dict[str, Any],
         worker_memory: dict[str, Any],
+        turn_index: int,
     ) -> dict[str, Any]:
         promoted: dict[str, Any] = {}
         for key in ("shop", "shops", "total", "route", "resolved_locations", "client_location", "destination", "view_payload"):
             value = get_working_memory_artifact(worker_memory, key)
+            if key not in worker_memory.get("artifact_meta", {}):
+                continue
             if value is None:
                 continue
-            set_working_memory_artifact(parent_memory, key, value)
+            set_working_memory_artifact(parent_memory, key, value, turn_index=turn_index)
             promoted[key] = deepcopy(value)
         if isinstance(worker_memory.get("last_db_query"), dict):
             parent_memory["last_db_query"] = deepcopy(worker_memory["last_db_query"])
@@ -832,14 +1056,20 @@ class ReactRuntime:
             parent_memory["last_mcp_result"] = deepcopy(worker_memory["last_mcp_result"])
         return promoted
 
-    def _persist_worker_tool_turns(
+    def _persist_worker_evidence_turns(
         self,
         *,
         parent_state: AgentSessionState,
         worker_state: AgentSessionState,
     ) -> None:
+        """Copy worker tool turns and model-call evidence turns into the parent session."""
         for turn in worker_state.turns:
-            if turn.role != "tool":
+            is_model_turn = (
+                turn.role == "assistant"
+                and isinstance(turn.payload, dict)
+                and isinstance(turn.payload.get("model"), dict)
+            )
+            if turn.role != "tool" and not is_model_turn:
                 continue
             self._append_turn(
                 parent_state,
@@ -880,7 +1110,7 @@ class ReactRuntime:
                 missing_fields.append("destination")
             if not isinstance(route, dict) and not missing_fields:
                 missing_fields.append("route")
-            status = "failed" if failed_error and not isinstance(route, dict) else "completed"
+            status = "failed" if failed_error else "completed"
             if missing_fields and status != "failed":
                 status = "needs_input"
             summary = self._build_navigation_worker_summary(
@@ -910,6 +1140,13 @@ class ReactRuntime:
                 "task_preview": _short(task, limit=120),
             }
 
+        fresh_search = any(key in promoted_artifacts for key in ("shop", "shops", "total"))
+        if not fresh_search:
+            worker_memory = deepcopy(worker_memory)
+            for key in ("shop", "shops", "total"):
+                worker_memory.get("artifacts", {}).pop(key, None)
+                worker_memory.pop(key, None)
+            worker_memory.pop("last_db_query", None)
         shops = self._memory_shops(worker_memory)
         selected_shop = get_working_memory_artifact(worker_memory, "shop")
         if not isinstance(selected_shop, dict) and shops:
@@ -918,9 +1155,11 @@ class ReactRuntime:
         total = int(total_raw) if isinstance(total_raw, int) else len(shops)
         query = worker_memory.get("last_db_query") if isinstance(worker_memory.get("last_db_query"), dict) else None
         missing_fields = []
+        if not fresh_search:
+            missing_fields.append("search_result")
         if total <= 0 and not query and not str(worker_memory.get("keyword") or "").strip():
             missing_fields.append("keyword")
-        status = "failed" if failed_error and total <= 0 else "completed"
+        status = "failed" if failed_error else "completed"
         if missing_fields and status != "failed":
             status = "needs_input"
         summary = self._build_search_worker_summary(
@@ -1053,6 +1292,11 @@ class ReactRuntime:
     def _prepare_turn_memory(self, memory: dict[str, Any]) -> dict[str, Any]:
         prepared = ensure_working_memory_shape(memory)
         prepared.pop("reply", None)
+        prepared.pop("last_error", None)
+        for key in ("route", "destination", "view_payload"):
+            prepared["artifacts"].pop(key, None)
+            prepared.pop(key, None)
+            prepared.get("artifact_meta", {}).pop(key, None)
         prepared["assistant_token_emitted"] = False
         return prepared
 
@@ -1100,7 +1344,12 @@ class ReactRuntime:
         text: str,
         active_subagent: str,
     ) -> None:
-        """Emit assistant token events to the replay buffer, splitting the text into chunks if necessary."""
+        """Emit assistant token events to the replay buffer, splitting the text into chunks if necessary.
+
+        These events are chunked locally after the full reply text is available
+        (provider requests are non-streaming), so they must not be read as
+        provider TTFT or real token-throughput measurements.
+        """
         chunks = _chunk_stream_text(text)
         if not chunks:
             return
@@ -1118,5 +1367,6 @@ class ReactRuntime:
                     "total": total,
                     "active_subagent": active_subagent,
                     "text_preview": _short(merged, limit=120),
+                    "stream_mode": "synthetic",
                 },
             )

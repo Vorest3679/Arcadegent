@@ -87,16 +87,27 @@ export function useChatSessionController() {
   } = useStreamReply();
 
   const streamRef = useRef<EventSource | null>(null);
+  const streamSessionIdRef = useRef<string | null>(null);
+  const streamLastEventIdRef = useRef<number | undefined>(undefined);
+  const streamRetryAttemptsRef = useRef(0);
+  const streamRetryTimerRef = useRef<number | null>(null);
   const clientIdRef = useRef("");
   if (!clientIdRef.current) {
     clientIdRef.current = getChatClientId();
   }
 
   const stopStream = useCallback(() => {
+    if (streamRetryTimerRef.current !== null) {
+      window.clearTimeout(streamRetryTimerRef.current);
+      streamRetryTimerRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.close();
       streamRef.current = null;
     }
+    streamSessionIdRef.current = null;
+    streamLastEventIdRef.current = undefined;
+    streamRetryAttemptsRef.current = 0;
     useAppStore.getState().setStreamConnected(false);
   }, []);
 
@@ -149,6 +160,19 @@ export function useChatSessionController() {
     ]);
   }
 
+  function recordStreamReconnect(attempt: number): void {
+    useAppStore.getState().setStreamItems([
+      {
+        // Negative ids are local transport status records. Server event ids are
+        // positive and remain the cursor used for replay.
+        id: -attempt,
+        event: "stream.reconnecting",
+        text: `实时连接中断，正在第 ${attempt}/3 次重连（将从上次事件继续）`,
+        at: new Date().toISOString()
+      }
+    ]);
+  }
+
   function commitStreamReply(reply: string): void {
     const normalized = reply.trim();
     if (!normalized) {
@@ -181,15 +205,26 @@ export function useChatSessionController() {
     });
   }
 
-  function startStream(sessionId: string): void {
-    stopStream();
-    const store = useAppStore.getState();
-    store.setStreamItems([]);
-    store.setActiveSubagent(null);
-    store.setActiveSessionStatus("running");
-    resetStreamReply();
+  function startStream(sessionId: string, options?: { reconnect?: boolean }): void {
+    const reconnect = options?.reconnect ?? false;
+    if (!reconnect) {
+      stopStream();
+      streamSessionIdRef.current = sessionId;
+      streamLastEventIdRef.current = undefined;
+      streamRetryAttemptsRef.current = 0;
+      const store = useAppStore.getState();
+      store.setStreamItems([]);
+      store.setActiveSubagent(null);
+      store.setActiveSessionStatus("running");
+      resetStreamReply();
+    }
+    if (streamSessionIdRef.current !== sessionId) {
+      return;
+    }
 
-    const source = new EventSource(buildChatStreamUrl(sessionId, undefined, clientIdRef.current));
+    const source = new EventSource(
+      buildChatStreamUrl(sessionId, streamLastEventIdRef.current, clientIdRef.current)
+    );
     streamRef.current = source;
 
     const handleEvent = (raw: Event) => {
@@ -220,6 +255,11 @@ export function useChatSessionController() {
       if (typeof envelope.data !== "object" || envelope.data === null) {
         return;
       }
+      streamLastEventIdRef.current = Math.max(streamLastEventIdRef.current ?? 0, envelope.id);
+      // A real event proves this connection delivered data. Count retry
+      // failures between delivered events, rather than merely successful TCP
+      // opens, so a connection that immediately closes remains bounded.
+      streamRetryAttemptsRef.current = 0;
 
       const currentStore = useAppStore.getState();
 
@@ -300,13 +340,25 @@ export function useChatSessionController() {
         return;
       }
       useAppStore.getState().setStreamConnected(false);
-      if (source.readyState === EventSource.CLOSED) {
-        stopStream();
+      source.close();
+      streamRef.current = null;
+      if (streamRetryAttemptsRef.current >= 3) {
+        useAppStore.getState().setChatError("实时连接中断，已尝试重连 3 次；正在读取会话最终状态。");
         void loadSession(sessionId, {
           preserveStreamState: true,
           reconnectStream: false
         });
+        return;
       }
+      streamRetryAttemptsRef.current += 1;
+      recordStreamReconnect(streamRetryAttemptsRef.current);
+      const delayMs = 500 * 2 ** (streamRetryAttemptsRef.current - 1);
+      streamRetryTimerRef.current = window.setTimeout(() => {
+        streamRetryTimerRef.current = null;
+        if (streamSessionIdRef.current === sessionId) {
+          startStream(sessionId, { reconnect: true });
+        }
+      }, delayMs);
     };
 
     STREAM_EVENT_NAMES.forEach((eventName) => {

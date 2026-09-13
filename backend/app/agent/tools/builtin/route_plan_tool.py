@@ -1,27 +1,14 @@
-"""Tool layer: route plan via AMap API with offline fallback."""
+"""Tool layer: route plan via AMap API using online routing only."""
 
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 from urllib import parse
 
 import httpx
 
 from app.protocol.messages import GeoPoint, Location, ProviderType, RouteSummaryDto
-
-
-def _haversine_meters(a: Location, b: Location) -> float:
-    """计算两点间的直线距离（米）"""
-    radius_m = 6371000.0
-    lat1 = math.radians(a.lat)
-    lat2 = math.radians(b.lat)
-    d_lat = lat2 - lat1
-    d_lng = math.radians(b.lng - a.lng)
-    x = math.sin(d_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(d_lng / 2) ** 2
-    c = 2 * math.atan2(math.sqrt(x), math.sqrt(max(1e-12, 1 - x)))
-    return radius_m * c
 
 
 @dataclass(frozen=True)
@@ -72,7 +59,7 @@ def _parse_polyline(polyline: str) -> list[GeoPoint]:
 
 
 class RoutePlanTool:
-    """Route planner using AMap first (if configured), then fallback estimation."""
+    """Route planner requiring an online route result."""
 
     def __init__(self, amap_config: AMapConfig | None = None) -> None:
         self._amap_config = amap_config
@@ -84,7 +71,7 @@ class RoutePlanTool:
         origin: Location,
         destination: Location,
     ) -> RouteSummaryDto | None:
-        """用高德地图API规划路线，失败时返回None以触发离线估算。"""
+        """用高德地图API规划路线，失败时返回 None。"""
         if not self._amap_config or not self._amap_config.api_key.strip():
             return None
 
@@ -116,8 +103,8 @@ class RoutePlanTool:
 
         first = paths[0] if isinstance(paths[0], dict) else {}
         try:
-            distance_m = int(float(first.get("distance", 0)))
-            duration_s = int(float(first.get("duration", 0)))
+            distance_m = int(float(first.get("distance")))
+            duration_s = int(float(first.get("duration")))
         except (TypeError, ValueError):
             return None
 
@@ -130,8 +117,6 @@ class RoutePlanTool:
                 step_polyline = step.get("polyline")
                 if isinstance(step_polyline, str):
                     points.extend(_parse_polyline(step_polyline))
-        if not points:
-            points = [origin, destination]
 
         return RouteSummaryDto(
             provider="amap",
@@ -152,7 +137,7 @@ class RoutePlanTool:
         origin: Location,
         destination: Location,
     ) -> RouteSummaryDto:
-        """规划路线，优先使用高德地图API，失败时返回离线估算结果。"""
+        """规划路线，优先使用高德地图API，失败时报告路线不可用。"""
         amap_result = None
         if provider == "amap":
             amap_result = await self._plan_with_amap(
@@ -163,32 +148,4 @@ class RoutePlanTool:
         if amap_result:
             return amap_result
 
-        distance_m = int(_haversine_meters(origin, destination))
-        speed = 9.0 if mode == "driving" else 1.3
-        duration_s = int(distance_m / speed) if distance_m > 0 else 0
-        hint = "AMap route API unavailable; returned an offline estimate."
-        return RouteSummaryDto(
-            provider=provider,
-            mode=mode,
-            distance_m=distance_m,
-            duration_s=duration_s,
-            origin=GeoPoint(
-                lng=origin.lng,
-                lat=origin.lat,
-                coord_system="wgs84",
-                source="client",
-                precision="approx",
-            ),
-            destination=_route_point_from_location(destination, source="route"),
-            polyline=[
-                GeoPoint(
-                    lng=origin.lng,
-                    lat=origin.lat,
-                    coord_system="wgs84",
-                    source="client",
-                    precision="approx",
-                ),
-                _route_point_from_location(destination, source="route"),
-            ],
-            hint=hint,
-        )
+        raise RuntimeError("route_unavailable: online route service unavailable")

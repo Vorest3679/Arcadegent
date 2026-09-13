@@ -15,6 +15,35 @@ from app.agent.tools.mcp_gateway import MCPToolGateway
 from app.agent.tools.permission import ToolPermissionChecker, ToolPermissionError
 
 
+def _is_strict_compatible(schema: Any) -> bool:
+    """Check whether a JSON Schema satisfies provider strict-mode constraints.
+
+    Strict mode requires every object node to declare
+    ``additionalProperties: false`` and to list all of its properties in
+    ``required``. Business schemas that do not meet these rules must not be
+    projected with ``strict=true``; they keep full local validation instead.
+    """
+    if not isinstance(schema, dict):
+        return True
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        required = schema.get("required")
+        if not isinstance(required, list) or set(required) != set(properties):
+            return False
+        if schema.get("additionalProperties") is not False:
+            return False
+        if any(not _is_strict_compatible(sub) for sub in properties.values()):
+            return False
+    items = schema.get("items")
+    if isinstance(items, dict) and not _is_strict_compatible(items):
+        return False
+    for key in ("anyOf", "oneOf", "allOf"):
+        variants = schema.get(key)
+        if isinstance(variants, list) and any(not _is_strict_compatible(item) for item in variants):
+            return False
+    return True
+
+
 @dataclass(frozen=True)
 class ToolExecutionResult:
     """Normalized tool execution output."""
@@ -219,7 +248,10 @@ class ToolRegistry:
                 "name": descriptor.name,
                 "description": descriptor.description,
                 "parameters": descriptor.input_schema,
-                "strict": self._strict_schema,
+                # Remote strict mode is only claimed when the business schema already
+                # satisfies the provider's strict-subset rules; local validation is
+                # unaffected and still runs against the full business schema.
+                "strict": self._strict_schema and _is_strict_compatible(descriptor.input_schema),
             },
         }
 

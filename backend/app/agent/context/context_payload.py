@@ -148,6 +148,8 @@ class RouteContextDto(BaseModel):
     distance_m: int | None = None
     duration_s: int | None = None
     hint: str | None = None
+    degraded: bool | None = None
+    route_kind: str | None = None
 
 
 class RuntimeContextPayloadDto(BaseModel):

@@ -10,6 +10,79 @@ from app.agent.subagents.subagent_builder import SubAgentProfile
 from app.protocol.messages import ChatRequest
 
 
+def test_context_builder_passes_through_model_transcripts(tmp_path: Path) -> None:
+    prompt_root = tmp_path / "prompts"
+    prompt_root.mkdir()
+    (prompt_root / "system_base.md").write_text("base prompt", encoding="utf-8")
+    (prompt_root / "main_agent.md").write_text("main prompt", encoding="utf-8")
+
+    builder = ContextBuilder(prompt_root=prompt_root, skill_root=None, history_turn_limit=10)
+    state = AgentSessionState(
+        session_id="s_transcript",
+        active_subagent="main_agent",
+        turns=[
+            AgentTurn(role="user", content="find maimai"),
+            AgentTurn(
+                role="assistant",
+                content="",
+                agent="main_agent",
+                payload={
+                    "model": {
+                        "transcript": {
+                            "chat_message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call_1",
+                                        "type": "function",
+                                        "function": {"name": "db_query_tool", "arguments": "{}"},
+                                    }
+                                ],
+                            },
+                            "responses_output": [
+                                {
+                                    "type": "function_call",
+                                    "call_id": "call_1",
+                                    "name": "db_query_tool",
+                                    "arguments": "{}",
+                                }
+                            ],
+                        }
+                    }
+                },
+            ),
+            AgentTurn(
+                role="tool",
+                name="db_query_tool",
+                call_id="call_1",
+                content='{"total": 0}',
+            ),
+        ],
+    )
+
+    context = builder.build(
+        session_state=state,
+        request=ChatRequest(message="find maimai"),
+        subagent=SubAgentProfile(
+            name="main_agent",
+            prompt_file="main_agent.md",
+            allowed_tools=[],
+            skill_files=[],
+        ),
+    )
+
+    assistant_message = context.messages[1]
+    assert assistant_message["chat_message"]["tool_calls"][0]["id"] == "call_1"
+    assert assistant_message["responses_output"][0]["call_id"] == "call_1"
+    assert context.messages[2] == {
+        "role": "tool",
+        "content": '{"total": 0}',
+        "name": "db_query_tool",
+        "tool_call_id": "call_1",
+    }
+
+
 def test_context_builder_injects_directory_and_detail_blocks(tmp_path: Path) -> None:
     prompt_root = tmp_path / "prompts"
     skill_root = tmp_path / "skills"

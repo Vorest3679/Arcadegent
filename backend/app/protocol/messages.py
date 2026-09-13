@@ -168,6 +168,11 @@ class RouteSummaryDto(BaseModel):
     destination: GeoPoint | None = None
     polyline: list[GeoPoint] = Field(default_factory=list)
     hint: str | None = None
+    # `provider` is a route returned by an online navigation provider. The
+    # fields remain for historical trace compatibility; the runtime no longer
+    # emits straight-line estimates as RouteSummaryDto values.
+    degraded: bool = False
+    route_kind: str = "provider"
 
     @model_validator(mode="before")
     @classmethod

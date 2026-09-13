@@ -9,7 +9,7 @@ from app.protocol.messages import Location
 
 
 async def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    """Prefer MCP-based AMap routing when available, otherwise use local fallback."""
+    """Prefer MCP-based AMap routing when available, otherwise call the online REST service."""
     tool = context.require("route_plan_tool")
     origin = Location.model_validate(args["origin"])
     destination = Location.model_validate(args["destination"])
