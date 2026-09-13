@@ -69,6 +69,20 @@ class Orchestrator:
         with self._lock:
             return session_id in self._active_sessions
 
+    async def cancel_chat(self, session_id: str, *, reason: str) -> bool:
+        """Cancel a background run and leave its accumulated context reusable."""
+        with self._lock:
+            task = self._background_tasks.get(session_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        self._react_runtime.cancel_session(session_id, reason=reason)
+        return True
+
     async def _run_chat_in_background(self, request: ChatRequest) -> None:
         """Internal method to run chat in a background task, with error handling and session cleanup.
         在后台任务中运行聊天的内部方法，包含错误处理和会话清理"""

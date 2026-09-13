@@ -146,6 +146,23 @@ class ReactRuntime:
         self._session_store.save_session(state)
         self._replay_buffer.reset(session_id)
 
+    def cancel_session(self, session_id: str, *, reason: str) -> None:
+        """Mark an interrupted background run as terminal without clearing its context."""
+        state = self._session_store.get_or_create_session(session_id)
+        if state.status != "running":
+            return
+        state.status = "failed"
+        state.last_error = reason
+        state.working_memory = ensure_working_memory_shape(state.working_memory)
+        state.working_memory["last_error"] = {"message": reason, "source": "stream"}
+        state.updated_at = _utc_now_iso()
+        self._session_store.save_session(state)
+        self._replay_buffer.append(
+            session_id,
+            "session.failed",
+            {"error": reason, "active_subagent": state.active_subagent},
+        )
+
     async def run_chat(self, request: ChatRequest) -> ChatResponse:
         """Session-aware chat execution with main-agent orchestration."""
         session_id = request.session_id or f"s_{uuid4().hex[:12]}"
@@ -158,6 +175,10 @@ class ReactRuntime:
         self._session_store.save_session(state)
         try:
             return await self._run_chat_session(request=request, session_id=session_id, state=state)
+        except asyncio.CancelledError:
+            # The orchestrator records the terminal state after the task has
+            # stopped. Do not overwrite that preserved session context here.
+            raise
         except Exception as exc:
             error_message = _short(f"{type(exc).__name__}: {exc}", limit=280) if str(exc) else type(exc).__name__
             state.status = "failed"

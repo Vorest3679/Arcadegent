@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef } from "react";
 import {
   buildChatStreamUrl,
+  cancelChatSession,
   deleteChatSession,
   dispatchChatSession,
   getChatSession,
@@ -343,11 +344,18 @@ export function useChatSessionController() {
       source.close();
       streamRef.current = null;
       if (streamRetryAttemptsRef.current >= 3) {
-        useAppStore.getState().setChatError("实时连接中断，已尝试重连 3 次；正在读取会话最终状态。");
-        void loadSession(sessionId, {
-          preserveStreamState: true,
-          reconnectStream: false
-        });
+        useAppStore.getState().setChatError("实时连接中断，已尝试重连 3 次；正在停止本次请求。");
+        void cancelChatSession(sessionId, clientIdRef.current)
+          .then((detail) => applySessionDetail(sessionId, detail, {
+            preserveStreamState: true,
+            reconnectStream: false
+          }))
+          .catch((err) => {
+            useAppStore.getState().setChatError(
+              err instanceof Error ? err.message : "停止中断会话失败，请稍后重试。"
+            );
+            void loadSession(sessionId, { preserveStreamState: true, reconnectStream: false });
+          });
         return;
       }
       streamRetryAttemptsRef.current += 1;

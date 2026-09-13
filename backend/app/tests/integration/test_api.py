@@ -824,6 +824,54 @@ def test_chat_dispatch_rejects_duplicate_running_session(tmp_path: Path) -> None
     _wait_for_session_status(client, session_id, "completed")
 
 
+def test_cancel_running_chat_preserves_context_for_the_next_input(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)
+    adapter = client.app.state.container.react_runtime._provider_adapter
+
+    async def slow_complete(*, instructions, messages, tools, runtime_hints=None):
+        await asyncio.sleep(5)
+        return ModelResponse(text="too late", status="completed", protocol="responses")
+
+    adapter.complete = slow_complete  # type: ignore[method-assign]
+    session_id = "s_cancelled123"
+    first = client.post(
+        "/api/chat/sessions",
+        json={"session_id": session_id, "message": "find Gamma", "page_size": 3},
+    )
+    assert first.status_code == 202
+
+    cancelled = client.post(f"/api/chat/sessions/{session_id}/cancel")
+    assert cancelled.status_code == 200
+    cancelled_detail = cancelled.json()
+    assert cancelled_detail["status"] == "failed"
+    assert "上下文" in cancelled_detail["last_error"]
+    assert [turn["content"] for turn in cancelled_detail["turns"]] == ["find Gamma"]
+
+    _stub_provider_adapter(client, reply="continued from saved context")
+    second = client.post(
+        "/api/chat/sessions",
+        json={"session_id": session_id, "message": "continue", "page_size": 3},
+    )
+    assert second.status_code == 202
+    completed = _wait_for_session_status(client, session_id, "completed")
+    assert [turn["content"] for turn in completed["turns"]] == [
+        "find Gamma",
+        "continue",
+        "continued from saved context",
+    ]
+
+
+def test_session_detail_hides_model_evidence_turns(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)
+    _stub_provider_adapter(client, reply="only show once")
+
+    response = client.post("/api/chat", json={"session_id": "s_visible123", "message": "hello"})
+    assert response.status_code == 200
+    detail = client.get("/api/chat/sessions/s_visible123").json()
+    assert [turn["content"] for turn in detail["turns"]] == ["hello", "only show once"]
+    assert detail["turn_count"] == 2
+
+
 def test_arcades_api_supports_title_quantity_sorting(tmp_path: Path) -> None:
     client = _build_client_with_rows(
         tmp_path,
