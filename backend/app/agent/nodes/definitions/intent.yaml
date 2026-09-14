@@ -12,6 +12,7 @@ allowed_tools:
   - geo_resolve_tool
   - route_plan_tool
   - summary_tool
+  - result_selection_tool
   - mcp__*
 output_schema:
   intent: [search, search_nearby, navigate]

@@ -300,9 +300,9 @@ class ProviderAdapter:
 
         if tool_choice == "required" and not tool_calls:
             return None, "chat completions api returned no tool_calls under required tool_choice"
-        if text is None and not tool_calls:
-            return None, "chat completions api returned no text or tool_calls"
         finish = first.get("finish_reason")
+        if text is None and not tool_calls and finish in (None, "stop", "tool_calls"):
+            finish = "empty_response"
         return ModelResponse(text=text, tool_calls=tool_calls, reasoning_items=reasoning,
             response_id=decoded.get("id"), reported_model=decoded.get("model"), finish_reason=finish,
             status="completed" if finish in (None, "stop", "tool_calls") else "incomplete",

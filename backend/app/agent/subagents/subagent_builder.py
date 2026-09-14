@@ -42,6 +42,7 @@ class SubAgentBuilder:
                     "geo_resolve_tool",
                     "route_plan_tool",
                     "summary_tool",
+                    "result_selection_tool",
                     "mcp__*",
                 ],
                 skill_files=[],
@@ -49,7 +50,7 @@ class SubAgentBuilder:
             "search_worker": SubAgentProfile(
                 name="search_worker",
                 prompt_file="search_worker.md",
-                allowed_tools=["db_query_tool", "mcp__*"],
+                allowed_tools=["db_query_tool", "result_selection_tool", "mcp__*"],
                 skill_files=["search_result_reading.md"],
             ),
             "navigation_worker": SubAgentProfile(

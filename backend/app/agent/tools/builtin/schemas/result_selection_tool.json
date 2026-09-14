@@ -1,0 +1,29 @@
+{
+  "name": "result_selection_tool",
+  "kind": "function",
+  "description": "Commit the ordered shop IDs to show to the user. IDs must come from the current turn's db_query_tool results; use [] when no candidate should be shown.",
+  "executor": "app.agent.tools.builtin.executors.result_selection:execute",
+  "argument_preparer": "app.agent.tools.builtin.executors.result_selection:prepare_arguments",
+  "capabilities": ["builtin", "read_only", "result_selection"],
+  "metadata": {
+    "tool_function": "app.agent.tools.builtin.executors.result_selection:execute"
+  },
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "selected_shop_ids": {
+        "description": "Ordered source_id values from this turn's db_query_tool results. Empty is an explicit empty result.",
+        "items": {"type": "integer"},
+        "type": "array"
+      },
+      "selected_shops": {
+        "description": "Runtime-resolved candidate rows. Ignore this field; it is overwritten before execution.",
+        "items": {"additionalProperties": true, "type": "object"},
+        "type": "array"
+      }
+    },
+    "required": ["selected_shop_ids"],
+    "title": "ResultSelectionArgs",
+    "type": "object"
+  }
+}

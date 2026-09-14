@@ -438,10 +438,27 @@ def test_tool_registry_gettools_aggregates_builtin_and_mcp_tools(tmp_path: Path)
     tools = _run(registry.gettools())
 
     assert "db_query_tool" in tools
+    assert "result_selection_tool" in tools
     assert tools["db_query_tool"].provider == "builtin"
     assert "mcp__amap__maps_direction_walking" in tools
     assert tools["mcp__amap__maps_direction_walking"].provider == "mcp"
     assert tools["summary_tool"].metadata["prompt"].endswith("response_composition.md")
+
+
+def test_result_selection_tool_resolves_only_runtime_candidates(tmp_path: Path) -> None:
+    registry = _build_registry(tmp_path)
+    context = {"artifacts": {"search_candidates": [{"source_id": 1, "name": "Alpha Arcade"}]}}
+    prepared, hydrated = _run(registry.prepare_arguments(
+        tool_name="result_selection_tool", raw_arguments={"selected_shop_ids": [1]}, runtime_context=context,
+    ))
+    result = _run(registry.execute(
+        call_id="selection", tool_name="result_selection_tool", raw_arguments=prepared,
+        allowed_tools=["result_selection_tool"],
+    ))
+    assert hydrated == ["selected_shops"]
+    assert result.status == "completed"
+    assert result.output["selected_shop_ids"] == [1]
+    assert [shop["source_id"] for shop in result.output["shops"]] == [1]
 
 
 def test_tool_registry_can_execute_discovered_mcp_tool(tmp_path: Path) -> None:
