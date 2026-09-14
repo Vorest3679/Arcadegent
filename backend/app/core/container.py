@@ -41,11 +41,17 @@ class AppContainer:
     orchestrator: Orchestrator
 
 
-def build_container(settings: Settings) -> AppContainer:
+def build_container(
+    settings: Settings,
+    *,
+    session_store: SessionStateRepository | None = None,
+    provider_adapter: ProviderAdapter | None = None,
+    mcp_tool_gateway: MCPToolGateway | None = None,
+) -> AppContainer:
     """Construct runtime dependencies in one place."""
     store = _build_arcade_repository(settings)
     replay_buffer = ReplayBuffer(max_events_per_session=settings.replay_buffer_size)
-    provider_adapter = ProviderAdapter(resolve_llm_config(settings))
+    provider_adapter = provider_adapter if provider_adapter is not None else ProviderAdapter(resolve_llm_config(settings))
     reverse_geocoder = AMapReverseGeocoder(
         config=AMapReverseGeocoderConfig(
             api_key=settings.amap_api_key,
@@ -75,13 +81,12 @@ def build_container(settings: Settings) -> AppContainer:
         enable_yaml_overlay=settings.agent_subagent_yaml_overlay_enabled,
     )
     permission_checker = ToolPermissionChecker(policy_file=settings.agent_tool_policy_file)
-    mcp_servers = build_mcp_server_configs(
-        config_dir=settings.mcp_servers_dir,
-        default_timeout_seconds=settings.mcp_default_timeout_seconds,
-    )
-    mcp_tool_gateway = MCPToolGateway(
-        servers=mcp_servers
-    )
+    if mcp_tool_gateway is None:
+        mcp_servers = build_mcp_server_configs(
+            config_dir=settings.mcp_servers_dir,
+            default_timeout_seconds=settings.mcp_default_timeout_seconds,
+        )
+        mcp_tool_gateway = MCPToolGateway(servers=mcp_servers)
     builtin_tool_provider = BuiltinToolProvider(
         runtime_services={
             "store": store,
@@ -95,7 +100,7 @@ def build_container(settings: Settings) -> AppContainer:
         permission_checker=permission_checker,
         strict_schema=True,
     )
-    session_store = _build_session_repository(settings)
+    session_store = session_store if session_store is not None else _build_session_repository(settings)
     react_runtime = ReactRuntime(
         context_builder=context_builder,
         subagent_builder=subagent_builder,

@@ -1,0 +1,44 @@
+# 在线 smoke 也使用口语化任务；完整开发集见 benchmark.yaml。
+- id: hangzhou-east-impressions-hub
+  group: retrieval
+  description: 杭州东站定位消除印象汇同名商场歧义。
+  capabilities: [named-place, client-location, nearby-ranking]
+  turns:
+  - message: 我在杭州东站出来，想看看印象汇里面有没有机厅能玩；说的是我这里附近这家，别把西湖那家也算进来。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 35}
+    required_shop_ids: [910001, 910002]
+    forbidden_shop_ids: [910003]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {sort_by: distance, sort_order: asc, origin_lng: 120.215, origin_lat: 30.289}
+
+- id: here-nearby-maimai
+  group: retrieval
+  description: “这里附近舞萌”使用定位和机种别名。
+  capabilities: [colloquial-title-alias, deictic-location, distance-sort]
+  turns:
+  - message: 这里附近舞萌在哪？我刚下杭州东站，按近到远给我看，远到西湖那边的不用拿来凑数。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 25}
+    required_shop_ids: [910001, 910002, 910005, 910006]
+    forbidden_shop_ids: [910003]
+    ordered_prefix: [910002]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: maimai, sort_by: distance, sort_order: asc}
+
+- id: tianshui-casual-arcades
+  group: retrieval
+  description: 将“天水有没有机厅玩的”离散为城市边界内的音游门店。
+  capabilities: [colloquial-city-query, city-boundary]
+  turns:
+  - message: 天水有没有机厅玩的？今天就想随便打点音游，没有也直说，别把陇南的给我算进来。
+    shop_ids: [920001, 920002, 920003]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {city_name: 天水市, has_arcades: true}
