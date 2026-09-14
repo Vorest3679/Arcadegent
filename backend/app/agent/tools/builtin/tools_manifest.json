@@ -42,6 +42,7 @@
     "schemas/db_query_tool.json",
     "schemas/geo_resolve_tool.json",
     "schemas/route_plan_tool.json",
-    "schemas/summary_tool.json"
+    "schemas/summary_tool.json",
+    "schemas/result_selection_tool.json"
   ]
 }

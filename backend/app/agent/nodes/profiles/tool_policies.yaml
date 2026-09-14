@@ -16,6 +16,9 @@ tool_policies:
   summary_tool:
     read_only: true
     concurrency_safe: true
+  result_selection_tool:
+    read_only: true
+    concurrency_safe: true
 
 mcp_defaults:
   allow_all: true

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from app.infra.db.local import LocalArcadeStore
+from app.infra.db.local.arcade_store import _wgs84_to_gcj02
 
 
 def _write_rows(path: Path) -> None:
@@ -381,3 +382,26 @@ def test_sort_by_distance_adds_distance_and_keeps_unmapped_rows_last(tmp_path: P
         origin_coord_system="wgs84",
     )
     assert [row["source_id"] for row in farthest] == [2, 1, 3]
+
+
+def test_distance_sort_converts_catalog_gcj02_to_browser_wgs84(tmp_path: Path) -> None:
+    data_path = tmp_path / "shops_mixed_coordinate_systems.jsonl"
+    wgs_lng, wgs_lat = 116.397428, 39.90923
+    gcj_lng, gcj_lat = _wgs84_to_gcj02(wgs_lng, wgs_lat)
+    rows = [
+        {"source": "bemanicn", "source_id": 1, "source_url": "https://map.bemanicn.com/s/1", "name": "Same point",
+         "longitude_gcj02": gcj_lng, "latitude_gcj02": gcj_lat, "arcades": [{"title_name": "maimai"}]},
+        {"source": "bemanicn", "source_id": 2, "source_url": "https://map.bemanicn.com/s/2", "name": "Far point",
+         "longitude_gcj02": gcj_lng + 0.02, "latitude_gcj02": gcj_lat, "arcades": [{"title_name": "maimai"}]},
+    ]
+    with data_path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+
+    shops, _ = LocalArcadeStore.from_jsonl(data_path).list_shops(
+        keyword=None, province_code=None, city_code=None, county_code=None, has_arcades=True,
+        page=1, page_size=10, sort_by="distance", sort_order="asc",
+        origin_lng=wgs_lng, origin_lat=wgs_lat, origin_coord_system="wgs84",
+    )
+    assert [shop["source_id"] for shop in shops] == [1, 2]
+    assert shops[0]["distance_m"] < 10
