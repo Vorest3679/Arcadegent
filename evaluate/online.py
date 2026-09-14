@@ -15,6 +15,7 @@ import yaml
 import subprocess
 from time import perf_counter
 from uuid import uuid4
+from xml.sax.saxutils import escape
 
 from app.agent.runtime.session_state import state_to_dict
 from app.protocol.messages import ChatRequest
@@ -56,6 +57,62 @@ def percentage(numerator, denominator):
 
 def failure_counts(rows):
     return Counter(reason for row in rows for turn in row.get("turn_scores", []) for reason in turn.get("failures", []))
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def attempt_timing(attempt):
+    """A compact, chart-friendly row retained for every planned attempt."""
+    complete = attempt.get("hard_pass") is True and attempt.get("quality_pass") is True
+    return {key: attempt.get(key) for key in ["attempt_id", "model_profile", "case_id", "group", "status",
+                                                "started_at", "completed_at", "duration_ms", "hard_pass", "quality_pass"]} | {
+        "complete_score": 100 if complete else 0,
+    }
+
+
+def timing_scatter_svg(rows):
+    """Render all timed attempts: x is completion duration, y is complete-pass percent."""
+    timed = [row for row in rows if isinstance(row.get("duration_ms"), (int, float))]
+    width, height = 840, 480
+    left, right, top, bottom = 82, 30, 54, 66
+    plot_width, plot_height = width - left - right, height - top - bottom
+    maximum = max((row["duration_ms"] for row in timed), default=1) / 1000
+    x_max = max(1, maximum * 1.08)
+    palette = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2"]
+    models = sorted({row["model_profile"] for row in timed})
+    colors = {model: palette[index % len(palette)] for index, model in enumerate(models)}
+    def x(value):
+        return left + (value / 1000) / x_max * plot_width
+    def y(value):
+        return top + (100 - value) / 100 * plot_height
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
+             '<title id="title">完整通过得分与完成耗时</title>',
+             '<desc id="desc">每个点代表一次已运行 attempt。横轴是完成耗时秒数，纵轴是该 attempt 的完整通过得分，100 为硬约束和质量 Judge 都通过，0 为任一层未通过。</desc>',
+             f'<text x="{left}" y="26" font-family="sans-serif" font-size="18">完整通过得分与完成耗时</text>',
+             f'<rect x="{left}" y="{top}" width="{plot_width}" height="{plot_height}" fill="none" stroke="#6b7280"/>']
+    for value in [0, 25, 50, 75, 100]:
+        pos = y(value)
+        parts.append(f'<line x1="{left}" y1="{pos:.1f}" x2="{left + plot_width}" y2="{pos:.1f}" stroke="#d1d5db"/>')
+        parts.append(f'<text x="{left - 10}" y="{pos + 4:.1f}" text-anchor="end" font-family="sans-serif" font-size="12">{value}</text>')
+    for value in range(0, 5):
+        seconds = x_max * value / 4
+        pos = left + plot_width * value / 4
+        parts.append(f'<line x1="{pos:.1f}" y1="{top}" x2="{pos:.1f}" y2="{top + plot_height}" stroke="#e5e7eb"/>')
+        parts.append(f'<text x="{pos:.1f}" y="{top + plot_height + 22}" text-anchor="middle" font-family="sans-serif" font-size="12">{seconds:.0f}</text>')
+    for row in timed:
+        label = escape(f"{row['model_profile']} / {row['case_id']}: {row['duration_ms'] / 1000:.1f}s, {row['complete_score']}/100")
+        parts.append(f'<circle cx="{x(row["duration_ms"]):.1f}" cy="{y(row["complete_score"]):.1f}" r="5" fill="{colors[row["model_profile"]]}" fill-opacity="0.78"><title>{label}</title></circle>')
+    parts += [f'<text x="{left + plot_width / 2:.1f}" y="{height - 15}" text-anchor="middle" font-family="sans-serif" font-size="13">完成耗时（秒）</text>',
+              f'<text x="18" y="{top + plot_height / 2:.1f}" transform="rotate(-90 18 {top + plot_height / 2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="13">单次完整通过得分（百分制）</text>']
+    legend_x = left
+    for model in models:
+        parts.append(f'<circle cx="{legend_x}" cy="{height - 40}" r="5" fill="{colors[model]}"/>')
+        parts.append(f'<text x="{legend_x + 10}" y="{height - 36}" font-family="sans-serif" font-size="12">{escape(model)}</text>')
+        legend_x += 18 + len(model) * 8
+    parts.append("</svg>")
+    return "\n".join(parts)
 
 
 def read_rows(path):
@@ -184,7 +241,8 @@ async def run_attempt(config, model, case, attempt, budget, evidence):
     directory.mkdir(parents=True)
     container, provider = environment(config, model, budget, directory, attempt["attempt_id"], evidence.write)
     session_id = "eval_" + uuid4().hex
-    attempt.update(session_id=session_id, snapshots=[], turn_scores=[], status="completed", hard_pass=False)
+    attempt.update(session_id=session_id, snapshots=[], turn_scores=[], status="completed", hard_pass=False,
+                   started_at=utc_now())
     start = perf_counter()
     try:
         async with asyncio.timeout(config.wall_s):
@@ -214,6 +272,7 @@ async def run_attempt(config, model, case, attempt, budget, evidence):
         attempt["error"] = type(exc).__name__
     finally:
         attempt["duration_ms"] = (perf_counter()-start)*1000
+        attempt["completed_at"] = utc_now()
         attempt["usage"] = usage(provider.records)
         prefix = "EVAL_LLM_" if attempt["model_profile"] == "default" else f"EVAL_{attempt['model_profile'].upper()}_"
         attempt["cost"] = cost(provider.records, config.values, prefix)
@@ -233,6 +292,9 @@ def report(evidence, attempts):
         model_summary["agent_usage"] = usage([c for c in all_calls if c["role"] == "agent" and c["attempt_id"] in ids])
         ran = [a for a in rows if a["status"] != "not_run"]
         model_summary["agent_cost"] = sum(a["cost"] for a in ran) if ran and all(a.get("cost") is not None for a in ran) else None
+    timings = [attempt_timing(attempt) for attempt in attempts]
+    evidence.json("attempt-timings.json", timings)
+    (evidence.directory / "complete-score-vs-duration.svg").write_text(timing_scatter_svg(timings), encoding="utf-8")
     evidence.json("summary.json", summary)
     lines = ["# 在线评测报告", "", "模式：真实模型 + 冻结机厅数据；地图模式见 manifest。未运行和未判分均不当作通过。", "",
              "## 总分与判分口径", "",
@@ -295,7 +357,10 @@ def report(evidence, attempts):
     for name, m in summary["models"].items():
         u = m["agent_usage"]
         lines.append(f"| {name} | {u['input_tokens']} | {u['output_tokens']} | {u['total_tokens']} | {m['agent_cost']} |")
-    lines += ["", "null 表示未知，不表示免费或零 token。cached/reasoning 为子集。详见 attempts.jsonl、calls.jsonl、scores.jsonl 和 snapshots/。"]
+    lines += ["", "## Attempt 耗时与完整通过散点图", "",
+              "`attempt-timings.json` 记录所有计划 attempt 的开始时间、完成时间、耗时和 0/100 的单次完整通过得分；"
+              "`complete-score-vs-duration.svg` 以每个已运行 attempt 为一个点，横轴为完成耗时（秒），纵轴为完整通过得分。", "",
+              "null 表示未知，不表示免费或零 token。cached/reasoning 为子集。详见 attempts.jsonl、calls.jsonl、scores.jsonl 和 snapshots/。"]
     lines += ["", "## 未通过或未完成项目", "", "| Profile / case | 状态 | 失败原因 |", "| --- | --- | --- |"]
     for a in attempts:
         if a.get("hard_pass") is not True or a.get("judge_status") == "error":
@@ -309,7 +374,8 @@ def report(evidence, attempts):
 
 async def run(config, evidence):
     attempts = [{"attempt_id": uuid4().hex, "model_profile": name, "case_id": case.id, "group": case.group,
-                 "repeat_index": repeat, "case": case.model_dump(), "status": "not_run", "quality_pass": None}
+                 "repeat_index": repeat, "case": case.model_dump(), "status": "not_run", "quality_pass": None,
+                 "started_at": None, "completed_at": None}
                 for repeat in range(config.repeat) for case in config.cases for name in config.models]
     evidence.json("plan.json", attempts)
     agent_budget, judge_budget = Budget(config.max_requests), Budget(config.judge_max_requests)
@@ -328,6 +394,7 @@ async def run(config, evidence):
                 reason = "live_map_not_configured"
             if reason:
                 attempt["not_run_reason"] = reason
+                attempt["completed_at"] = utc_now()
             else:
                 await run_attempt(config, model, case, attempt, agent_budget, evidence)
                 quality = await judge(config, attempt, judge_budget, evidence) if attempt["snapshots"] else {"quality_pass": None, "judge_status": "not_run"}
@@ -340,6 +407,8 @@ async def run(config, evidence):
         for attempt in attempts:
             if attempt["attempt_id"] not in completed:
                 attempt.setdefault("not_run_reason", "run_interrupted")
+                if attempt.get("completed_at") is None:
+                    attempt["completed_at"] = utc_now()
                 evidence.write("attempts", attempt)
         report(evidence, attempts)
     return 0 if all(a.get("hard_pass") is True and (config.judge is None or a.get("quality_pass") is True) for a in attempts) else 1

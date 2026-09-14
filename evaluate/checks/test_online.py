@@ -52,6 +52,7 @@ def test_live_runner_uses_real_tools_and_separate_sessions_and_redacts_secrets(t
     rows = [json.loads(line) for line in (tmp_path / "attempts.jsonl").read_text().splitlines()]
     assert len(rows) == 2 and all(row["hard_pass"] for row in rows)
     assert len({row["session_id"] for row in rows}) == 2
+    assert all(row["started_at"] and row["completed_at"] and row["duration_ms"] >= 0 for row in rows)
     assert all(row["quality_pass"] is None for row in rows)
     assert len(requests) == 4
     assert all(len([m for m in request["messages"] if m["role"] == "user"]) == 1 for request in requests)
@@ -59,6 +60,9 @@ def test_live_runner_uses_real_tools_and_separate_sessions_and_redacts_secrets(t
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["agent_usage"]["total_tokens"] == 480
     assert summary["models"]["default"]["fully_passed"] == 0
+    timings = json.loads((tmp_path / "attempt-timings.json").read_text())
+    assert len(timings) == 2 and all(row["complete_score"] == 0 for row in timings)
+    assert "完成耗时（秒）" in (tmp_path / "complete-score-vs-duration.svg").read_text()
 
 
 def test_missing_key_is_not_run_and_does_not_inherit_production_env(tmp_path, monkeypatch):
