@@ -62,7 +62,9 @@ def test_live_runner_uses_real_tools_and_separate_sessions_and_redacts_secrets(t
     assert summary["models"]["default"]["fully_passed"] == 0
     timings = json.loads((tmp_path / "attempt-timings.json").read_text())
     assert len(timings) == 2 and all(row["complete_score"] == 0 for row in timings)
-    assert "完成耗时（秒）" in (tmp_path / "complete-score-vs-duration.svg").read_text()
+    timeline = json.loads((tmp_path / "weighted-complete-timeline.json").read_text())
+    assert [point["weighted_complete_score"] for point in timeline] == [0.0, 0.0, 0.0]
+    assert "累计加权完整通过得分" in (tmp_path / "weighted-complete-score-over-time.svg").read_text()
 
 
 def test_missing_key_is_not_run_and_does_not_inherit_production_env(tmp_path, monkeypatch):

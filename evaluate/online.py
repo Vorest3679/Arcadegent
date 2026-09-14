@@ -72,13 +72,41 @@ def attempt_timing(attempt):
     }
 
 
-def timing_scatter_svg(rows):
-    """Render all timed attempts: x is completion duration, y is complete-pass percent."""
-    timed = [row for row in rows if isinstance(row.get("duration_ms"), (int, float))]
+def weighted_complete_timeline(attempts):
+    """Accumulate each group's planned score weight over a model's own elapsed runtime."""
+    group_weights = {"retrieval": .7, "navigation": .2, "robustness": .1}
+    timeline = []
+    for model in sorted({attempt["model_profile"] for attempt in attempts}):
+        rows = [attempt for attempt in attempts if attempt["model_profile"] == model]
+        planned = Counter(attempt["group"] for attempt in rows)
+        ordered = sorted(enumerate(rows), key=lambda item: (item[1].get("completed_at") or "", item[0]))
+        elapsed_ms = 0.0
+        score = 0.0
+        points = [{"model_profile": model, "elapsed_ms": 0, "weighted_complete_score": 0.0}]
+        for _, attempt in ordered:
+            duration = attempt.get("duration_ms")
+            if isinstance(duration, (int, float)) and not isinstance(duration, bool):
+                elapsed_ms += duration
+            unit_weight = group_weights.get(attempt["group"], 0) / planned[attempt["group"]]
+            complete = attempt.get("hard_pass") is True and attempt.get("quality_pass") is True
+            if complete:
+                score += 100 * unit_weight
+            points.append({"model_profile": model, "attempt_id": attempt["attempt_id"], "case_id": attempt["case_id"],
+                           "group": attempt["group"], "completed_at": attempt.get("completed_at"),
+                           "duration_ms": duration, "elapsed_ms": round(elapsed_ms, 3),
+                           "weight": unit_weight, "complete": complete,
+                           "weighted_complete_score": round(score, 6)})
+        timeline.extend(points)
+    return timeline
+
+
+def weighted_timeline_svg(rows):
+    """Render one monotonic weighted-complete score line per model."""
+    timed = [row for row in rows if row.get("elapsed_ms") is not None]
     width, height = 840, 480
     left, right, top, bottom = 82, 30, 54, 66
     plot_width, plot_height = width - left - right, height - top - bottom
-    maximum = max((row["duration_ms"] for row in timed), default=1) / 1000
+    maximum = max((row["elapsed_ms"] for row in timed), default=1) / 1000
     x_max = max(1, maximum * 1.08)
     palette = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2"]
     models = sorted({row["model_profile"] for row in timed})
@@ -88,9 +116,9 @@ def timing_scatter_svg(rows):
     def y(value):
         return top + (100 - value) / 100 * plot_height
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
-             '<title id="title">完整通过得分与完成耗时</title>',
-             '<desc id="desc">每个点代表一次已运行 attempt。横轴是完成耗时秒数，纵轴是该 attempt 的完整通过得分，100 为硬约束和质量 Judge 都通过，0 为任一层未通过。</desc>',
-             f'<text x="{left}" y="26" font-family="sans-serif" font-size="18">完整通过得分与完成耗时</text>',
+             '<title id="title">累计加权完整通过得分与完成耗时</title>',
+             '<desc id="desc">每条线代表一个模型。横轴是该模型所有 attempt 的累计完成耗时，纵轴是按检索、导航、鲁棒性权重累计得到的完整通过得分。</desc>',
+             f'<text x="{left}" y="26" font-family="sans-serif" font-size="18">累计加权完整通过得分与完成耗时</text>',
              f'<rect x="{left}" y="{top}" width="{plot_width}" height="{plot_height}" fill="none" stroke="#6b7280"/>']
     for value in [0, 25, 50, 75, 100]:
         pos = y(value)
@@ -101,11 +129,15 @@ def timing_scatter_svg(rows):
         pos = left + plot_width * value / 4
         parts.append(f'<line x1="{pos:.1f}" y1="{top}" x2="{pos:.1f}" y2="{top + plot_height}" stroke="#e5e7eb"/>')
         parts.append(f'<text x="{pos:.1f}" y="{top + plot_height + 22}" text-anchor="middle" font-family="sans-serif" font-size="12">{seconds:.0f}</text>')
-    for row in timed:
-        label = escape(f"{row['model_profile']} / {row['case_id']}: {row['duration_ms'] / 1000:.1f}s, {row['complete_score']}/100")
-        parts.append(f'<circle cx="{x(row["duration_ms"]):.1f}" cy="{y(row["complete_score"]):.1f}" r="5" fill="{colors[row["model_profile"]]}" fill-opacity="0.78"><title>{label}</title></circle>')
+    for model in models:
+        points = [row for row in timed if row["model_profile"] == model]
+        path = " ".join(f"{x(row['elapsed_ms']):.1f},{y(row['weighted_complete_score']):.1f}" for row in points)
+        parts.append(f'<polyline points="{path}" fill="none" stroke="{colors[model]}" stroke-width="2.5"/>')
+        for row in points[1:]:
+            label = escape(f"{model} / {row['case_id']}: 累计 {row['elapsed_ms'] / 1000:.1f}s, 加权完整通过 {row['weighted_complete_score']:.1f}/100")
+            parts.append(f'<circle cx="{x(row["elapsed_ms"]):.1f}" cy="{y(row["weighted_complete_score"]):.1f}" r="4" fill="{colors[model]}"><title>{label}</title></circle>')
     parts += [f'<text x="{left + plot_width / 2:.1f}" y="{height - 15}" text-anchor="middle" font-family="sans-serif" font-size="13">完成耗时（秒）</text>',
-              f'<text x="18" y="{top + plot_height / 2:.1f}" transform="rotate(-90 18 {top + plot_height / 2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="13">单次完整通过得分（百分制）</text>']
+              f'<text x="18" y="{top + plot_height / 2:.1f}" transform="rotate(-90 18 {top + plot_height / 2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="13">累计加权完整通过得分（百分制）</text>']
     legend_x = left
     for model in models:
         parts.append(f'<circle cx="{legend_x}" cy="{height - 40}" r="5" fill="{colors[model]}"/>')
@@ -294,7 +326,9 @@ def report(evidence, attempts):
         model_summary["agent_cost"] = sum(a["cost"] for a in ran) if ran and all(a.get("cost") is not None for a in ran) else None
     timings = [attempt_timing(attempt) for attempt in attempts]
     evidence.json("attempt-timings.json", timings)
-    (evidence.directory / "complete-score-vs-duration.svg").write_text(timing_scatter_svg(timings), encoding="utf-8")
+    timeline = weighted_complete_timeline(attempts)
+    evidence.json("weighted-complete-timeline.json", timeline)
+    (evidence.directory / "weighted-complete-score-over-time.svg").write_text(weighted_timeline_svg(timeline), encoding="utf-8")
     evidence.json("summary.json", summary)
     lines = ["# 在线评测报告", "", "模式：真实模型 + 冻结机厅数据；地图模式见 manifest。未运行和未判分均不当作通过。", "",
              "## 总分与判分口径", "",
@@ -357,9 +391,11 @@ def report(evidence, attempts):
     for name, m in summary["models"].items():
         u = m["agent_usage"]
         lines.append(f"| {name} | {u['input_tokens']} | {u['output_tokens']} | {u['total_tokens']} | {m['agent_cost']} |")
-    lines += ["", "## Attempt 耗时与完整通过散点图", "",
-              "`attempt-timings.json` 记录所有计划 attempt 的开始时间、完成时间、耗时和 0/100 的单次完整通过得分；"
-              "`complete-score-vs-duration.svg` 以每个已运行 attempt 为一个点，横轴为完成耗时（秒），纵轴为完整通过得分。", "",
+    lines += ["", "## 模型累计加权完整通过曲线", "",
+              "`attempt-timings.json` 保留所有计划 attempt 的开始时间、完成时间和耗时；"
+              "`weighted-complete-timeline.json` 以模型为单位按完成顺序累计。每个 group 的总分权重为检索 70、导航 20、鲁棒性 10，"
+              "并均分给该 group 的所有计划 attempt；完整通过时才累加该 attempt 的权重。"
+              "`weighted-complete-score-over-time.svg` 将每个模型连成折线：横轴为该模型累计完成耗时（秒），纵轴为累计加权完整通过得分（百分制）。", "",
               "null 表示未知，不表示免费或零 token。cached/reasoning 为子集。详见 attempts.jsonl、calls.jsonl、scores.jsonl 和 snapshots/。"]
     lines += ["", "## 未通过或未完成项目", "", "| Profile / case | 状态 | 失败原因 |", "| --- | --- | --- |"]
     for a in attempts:
