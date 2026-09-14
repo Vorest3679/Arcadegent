@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timezone
 import hashlib
@@ -20,6 +21,41 @@ from app.protocol.messages import ChatRequest
 from evaluate.config import BASE, ROOT, ConfigError, load
 from evaluate.environment import Budget, BudgetExceeded, RecordedProvider, environment
 from evaluate.scoring import aggregate, grade_turn, usage, cost
+
+
+FAILURE_EXPLANATIONS = {
+    "execution_failed": "Agent 回合没有正常完成，工具链或模型调用在结束前中断。",
+    "answer_missing": "没有生成可判定的最终答复。",
+    "required_tool_evidence_missing": "未留下 oracle 要求的成功工具调用证据。",
+    "forbidden_tool": "调用了该 case 明确禁止的工具。",
+    "shop_oracle_mismatch": "展示的门店 ID 与冻结数据中的预期结果不一致。",
+    "shops_stale_or_unproven": "展示门店未能证明来自本轮查询结果。",
+    "required_shop_missing": "漏掉了 oracle 要求展示的门店。",
+    "forbidden_shop_returned": "返回了用户或 oracle 明确排除的门店。",
+    "shop_order_prefix_mismatch": "门店展示顺序没有满足预期优先级。",
+    "tool_argument_constraint_missing": "工具参数没有满足地点、筛选或模式约束。",
+    "route_missing": "最终结果没有路线。",
+    "route_evidence_missing": "路线没有来自成功的 route_plan_tool 调用。",
+    "route_not_online": "返回的不是可验证的在线地图路线。",
+    "route_stale": "路线不是当前轮生成。",
+    "route_mode_or_geometry_invalid": "路线模式或几何信息不符合要求。",
+    "route_destination_mismatch": "路线终点与目标地点不匹配。",
+    "route_origin_mismatch": "路线起点与目标地点不匹配。",
+    "route_metrics_invalid": "路线距离或预计时长无效。",
+    "route_geometry_endpoints_mismatch": "路线折线端点与起终点不匹配。",
+    "route_not_from_tool_result": "最终路线不是工具结果中的路线。",
+    "forbidden_route": "在不应导航的 case 中生成了路线。",
+    "answer_constraint_missing": "最终回答遗漏了要求说明的内容。",
+    "answer_forbidden_claim": "最终回答包含不应作出的断言。",
+}
+
+
+def percentage(numerator, denominator):
+    return "N/A" if not denominator else f"{100 * numerator / denominator:.1f}%"
+
+
+def failure_counts(rows):
+    return Counter(reason for row in rows for turn in row.get("turn_scores", []) for reason in turn.get("failures", []))
 
 
 def read_rows(path):
@@ -71,6 +107,41 @@ def plan(config):
             "case_sha256": hashlib.sha256(json.dumps([c.model_dump() for c in config.cases], sort_keys=True).encode()).hexdigest()}
 
 
+def judge_evidence(attempt):
+    """Keep actual tool facts and final answers, excluding nested model transcripts."""
+    def clean(value):
+        if isinstance(value, dict):
+            return {k: clean(v) for k, v in value.items()
+                    if k not in {"raw", "transcript", "reasoning_items", "image_thumb", "images", "name_pinyin"}}
+        if isinstance(value, list):
+            return [clean(v) for v in value]
+        return value
+
+    snapshots = []
+    for snapshot in attempt["snapshots"]:
+        state = snapshot.get("state", {})
+        facts = []
+        seen = set()
+        for turn in state.get("turns", [])[snapshot.get("turn_start", 0):]:
+            if turn.get("role") != "tool":
+                continue
+            payload = turn.get("payload") or {}
+            result = payload.get("result")
+            # Worker envelopes duplicate tool results and embed model transcripts.
+            if turn.get("name") not in {"db_query_tool", "route_plan_tool", "geo_resolve_tool", "result_selection_tool"}:
+                continue
+            fact = {"tool": turn.get("name"), "status": payload.get("status"), "result": clean(result)}
+            key = json.dumps(fact, sort_keys=True, ensure_ascii=False)
+            if key not in seen:
+                seen.add(key)
+                facts.append(fact)
+        snapshots.append({"evidence_id": snapshot["evidence_id"],
+                          "tool_results": facts, "response": clean(snapshot.get("response")),
+                          "status": state.get("status")})
+    return {"case": attempt["case"],
+            "evidence_ids": [s["evidence_id"] for s in snapshots], "snapshots": snapshots}
+
+
 async def judge(config, attempt, budget, evidence):
     if config.judge is None or not config.ready(config.judge) or budget.used >= budget.limit:
         return {"quality_pass": None, "judge_status": "not_run"}
@@ -84,11 +155,14 @@ async def judge(config, attempt, budget, evidence):
     try:
         async with asyncio.timeout(config.wall_s):
             response = await provider.complete(instructions=rubric, messages=[{"role": "user", "content": json.dumps(
-                {"case": attempt["case"], "evidence_ids": refs, "snapshots": attempt["snapshots"]}, ensure_ascii=False)}], tools=[],
+                judge_evidence(attempt), ensure_ascii=False)}], tools=[],
                 runtime_hints={"tool_choice": "none"})
         if response.error:
-            raise ValueError("judge_provider_failed")
+            return {"quality_pass": None, "judge_status": "error", "error": "judge_provider_failed",
+                    "provider_error": response.error, "finish_reason": response.finish_reason}
         score = json.loads(response.text or "")
+        if not isinstance(score, dict):
+            raise ValueError("invalid_judge_object")
         value = score.get("score")
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 100:
             raise ValueError("invalid_judge_score")
@@ -99,10 +173,10 @@ async def judge(config, attempt, budget, evidence):
             raise ValueError("invalid_judge_evidence")
         return {"quality_pass": value >= config.quality_threshold, "judge_status": "completed",
                 "score": value, "reason": score["reason"], "evidence_refs": references,
-                "rubric_version": "domain-v1", "judge_model": config.judge.model,
+                "rubric_version": "domain-v2", "judge_model": config.judge.model,
                 "judge_cost": cost(provider.records, config.values, "EVAL_JUDGE_")}
     except (ValueError, TypeError, AttributeError, TimeoutError, BudgetExceeded) as exc:
-        return {"quality_pass": None, "judge_status": "error", "error": type(exc).__name__}
+        return {"quality_pass": None, "judge_status": "error", "error": type(exc).__name__, "error_detail": str(exc)}
 
 
 async def run_attempt(config, model, case, attempt, budget, evidence):
@@ -161,12 +235,58 @@ def report(evidence, attempts):
         model_summary["agent_cost"] = sum(a["cost"] for a in ran) if ran and all(a.get("cost") is not None for a in ran) else None
     evidence.json("summary.json", summary)
     lines = ["# 在线评测报告", "", "模式：真实模型 + 冻结机厅数据；地图模式见 manifest。未运行和未判分均不当作通过。", "",
-             "| Profile | 已运行/计划 | 硬约束通过/已运行 | 质量通过/已判分 | 完整通过/已运行 |",
-             "| --- | --- | --- | --- | --- |"]
+             "## 总分与判分口径", "",
+             "**完整通过得分 = 100 ×（硬约束通过且质量 Judge 通过的 attempt 数）÷ 已运行 attempt 数。** "
+             "它是本报告的百分制总分；任一层失败都不能由另一层补偿。", "",
+             "硬约束的诊断权重为：检索 **70%**、导航 **20%**、鲁棒性 **10%**。"
+             "该加权硬通过率用于定位能力短板，不替代上面的完整通过总分。", "",
+             "Hard Pass 检查运行状态、最终答复、必需/禁止工具调用、门店 ID 与顺序、当前轮数据新鲜度、"
+             "工具参数，以及在线路线的来源、模式、坐标、距离、时长和折线。", "",
+             "Judge Pass 由独立 LLM 依据真实工具结果和最终答复评分：准确性 **40**、完整性 **30**、"
+             "清晰度 **20**、无臆造 **10**；分数达到配置阈值（本次为 75/100）才通过。"
+             "Judge 只评回答质量，不能覆盖 Hard Pass 的结构化或工具失败。", "",
+             "| Profile | 已运行/计划 | 完整通过得分 | 硬约束通过 | 质量通过 | Judge 平均分 | 加权硬通过率 |",
+             "| --- | --- | --- | --- | --- | --- |"]
     for name, m in summary["models"].items():
-        lines.append(f"| {name} | {m['started']}/{m['planned']} | {m['hard_passed']}/{m['started']} | "
-                     f"{m['quality_passed']}/{m['quality_scored']} | {m['fully_passed']}/{m['started']} |")
-    lines += ["", "零分母表示 N/A。硬约束与质量均通过才是完整通过。LLM judge 未经人工校准，结果用于诊断。", "",
+        judge_mean = "N/A" if m["judge_score_mean"] is None else f"{m['judge_score_mean']:.1f}/100"
+        weighted_hard = "N/A" if m["weighted_hard_success"] is None else f"{m['weighted_hard_success'] * 100:.1f}%"
+        lines.append(f"| {name} | {m['started']}/{m['planned']} | {percentage(m['fully_passed'], m['started'])} "
+                     f"({m['fully_passed']}/{m['started']}) | {percentage(m['hard_passed'], m['started'])} "
+                     f"({m['hard_passed']}/{m['started']}) | {percentage(m['quality_passed'], m['quality_scored'])} "
+                     f"({m['quality_passed']}/{m['quality_scored']}) | {judge_mean} | {weighted_hard} |")
+    lines += ["", "零分母表示 N/A。Judge 结果应以人工抽样校准；本次只将完成且引用有效证据的 Judge 输出计入统计。", "",
+              "## 分组硬约束表现", "", "| Profile | 检索（70%） | 导航（20%） | 鲁棒性（10%） |", "| --- | --- | --- | --- |"]
+    for name, m in summary["models"].items():
+        groups = m["by_group"]
+        lines.append(f"| {name} | {percentage(groups['retrieval']['hard_passed'], groups['retrieval']['started'])} "
+                     f"({groups['retrieval']['hard_passed']}/{groups['retrieval']['started']}) | "
+                     f"{percentage(groups['navigation']['hard_passed'], groups['navigation']['started'])} "
+                     f"({groups['navigation']['hard_passed']}/{groups['navigation']['started']}) | "
+                     f"{percentage(groups['robustness']['hard_passed'], groups['robustness']['started'])} "
+                     f"({groups['robustness']['hard_passed']}/{groups['robustness']['started']}) |")
+    lines += ["", "## 模型失误分析", ""]
+    for name, m in summary["models"].items():
+        rows = [a for a in attempts if a["model_profile"] == name and a["status"] != "not_run"]
+        counts = failure_counts(rows)
+        lines += [f"### {name}", ""]
+        if counts:
+            lines += ["| Hard 失误信号 | 出现回合数 | 含义 |", "| --- | --- | --- |"]
+            for failure, count in counts.most_common():
+                lines.append(f"| `{failure}` | {count} | {FAILURE_EXPLANATIONS.get(failure, '见 attempts.jsonl 中的原始判分证据。')} |")
+        else:
+            lines.append("所有已运行回合均通过 Hard Pass。")
+        judge_failures = [a for a in rows if a.get("quality_pass") is False]
+        judge_errors = [a for a in rows if a.get("judge_status") == "error"]
+        if judge_failures:
+            lines += ["", "质量 Judge 未通过的回答：", "", "| Case | Judge 分数 | Judge 指出的失误 |", "| --- | --- | --- |"]
+            for row in judge_failures:
+                lines.append(f"| {row['case_id']} | {row.get('score', 'N/A')} | {str(row.get('reason', '')).replace('|', '\\|').replace(chr(10), ' ')} |")
+        if judge_errors:
+            lines += ["", "Judge 未完成的项目：", "", "| Case | 错误 |", "| --- | --- |"]
+            for row in judge_errors:
+                lines.append(f"| {row['case_id']} | {row.get('error', 'unknown')} |")
+        lines.append("")
+    lines += ["## 调用与费用", "",
               "| 用途 | 请求数 | input | output | total | usage 完整请求 |", "| --- | --- | --- | --- | --- | --- |"]
     for role in ["agent", "judge"]:
         u = summary[role + "_usage"]

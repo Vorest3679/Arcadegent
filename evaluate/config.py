@@ -143,7 +143,7 @@ def profile(values, prefix):
         api_key=values.get(prefix + "API_KEY", ""), base_url=url, model=values.get(prefix + "MODEL", ""),
         api_mode=mode, timeout_seconds=number(values, "EVAL_REQUEST_TIMEOUT_S", 45, minimum=0.1),
         temperature=number(values, prefix + "TEMPERATURE", 0.2),
-        max_tokens=number(values, "EVAL_MAX_OUTPUT_TOKENS", 1024, integer=True, minimum=1),
+        max_tokens=number(values, prefix + "MAX_OUTPUT_TOKENS", 4096 if prefix == "EVAL_JUDGE_" else number(values, "EVAL_MAX_OUTPUT_TOKENS", 1024, integer=True, minimum=1), integer=True, minimum=1),
         auth_header=values.get(prefix + "AUTH_HEADER", "Authorization"),
         send_temperature=boolean(values, prefix + "SEND_TEMPERATURE"),
         token_limit_parameter=values.get(prefix + "TOKEN_PARAMETER", "max_tokens"), extra_parameters=extra,

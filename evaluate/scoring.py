@@ -150,12 +150,17 @@ def aggregate(attempts):
     for model in sorted({a["model_profile"] for a in attempts}):
         rows = [a for a in attempts if a["model_profile"] == model]
         ran = [a for a in rows if a["status"] != "not_run"]
+        scored = [a for a in ran if isinstance(a.get("score"), (int, float)) and not isinstance(a.get("score"), bool)]
         groups[model] = {"planned": len(rows), "started": len(ran),
             "hard_passed": sum(a.get("hard_pass") is True for a in ran),
             "quality_passed": sum(a.get("quality_pass") is True for a in ran),
             "quality_scored": sum(a.get("quality_pass") is not None for a in ran),
             "fully_passed": sum(a.get("hard_pass") is True and a.get("quality_pass") is True for a in ran),
-            "duration_ms_p50": median([a["duration_ms"] for a in ran]) if ran else None}
+            "duration_ms_p50": median([a["duration_ms"] for a in ran]) if ran else None,
+            # The headline score is deliberately a percent of complete passes.
+            # It never lets a plausible answer compensate for missing tool evidence.
+            "complete_score": 100 * sum(a.get("hard_pass") is True and a.get("quality_pass") is True for a in ran) / len(ran) if ran else None,
+            "judge_score_mean": sum(a["score"] for a in scored) / len(scored) if scored else None}
         groups[model]["by_group"] = {
             group: {"started": sum(a["group"] == group for a in ran),
                     "hard_passed": sum(a["group"] == group and a.get("hard_pass") is True for a in ran)}

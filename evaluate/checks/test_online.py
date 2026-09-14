@@ -8,7 +8,7 @@ import pytest
 
 from evaluate.config import Case, load, Turn
 from evaluate.environment import MemorySessions, Budget, RecordedProvider
-from evaluate.online import Evidence, run, compatibility, judge, plan
+from evaluate.online import Evidence, run, compatibility, judge, plan, report
 from evaluate.scoring import usage, cost, grade_turn
 from evaluate.review import export_review, import_review, compare
 from evaluate.scoring import aggregate
@@ -222,6 +222,28 @@ def test_judge_high_score_does_not_override_hard_failure(tmp_path, monkeypatch):
     assert aggregate([attempt])["m"]["fully_passed"] == 0
 
 
+def test_detailed_report_explains_percent_score_weights_and_model_failures(tmp_path):
+    attempts = [
+        {"attempt_id": "pass", "model_profile": "m", "case_id": "search", "group": "retrieval",
+         "status": "completed", "hard_pass": True, "quality_pass": True, "score": 88,
+         "duration_ms": 1, "turn_scores": [{"failures": []}], "cost": None},
+        {"attempt_id": "fail", "model_profile": "m", "case_id": "route", "group": "navigation",
+         "status": "completed", "hard_pass": False, "quality_pass": False, "score": 40,
+         "reason": "没有生成路线", "duration_ms": 1,
+         "turn_scores": [{"failures": ["route_missing", "required_tool_evidence_missing"]}], "cost": None},
+        {"attempt_id": "robust", "model_profile": "m", "case_id": "clarify", "group": "robustness",
+         "status": "completed", "hard_pass": True, "quality_pass": True, "score": 90,
+         "duration_ms": 1, "turn_scores": [{"failures": []}], "cost": None},
+    ]
+    report(Evidence(tmp_path, {}), attempts)
+    text = (tmp_path / "summary.md").read_text()
+    assert "完整通过得分 = 100" in text
+    assert "检索 **70%**、导航 **20%**、鲁棒性 **10%**" in text
+    assert "准确性 **40**、完整性 **30**、清晰度 **20**、无臆造 **10**" in text
+    assert "66.7% (2/3)" in text
+    assert "route_missing" in text and "没有生成路线" in text
+
+
 def test_route_oracle_rejects_wrong_origin_and_forged_geometry():
     oracle = Turn(message="route", route_mode="walking", route_origin=[121.47, 31.23],
                   route_destination=[121.49, 31.23], forbid_route=False, required_tools=["route_plan_tool"])
@@ -297,3 +319,20 @@ def test_empty_clarification_does_not_require_a_fake_query_artifact():
     assert grade_turn(Turn(message="附近？", shop_ids=[]), snapshot)["hard_pass"]
     snapshot["state"]["working_memory"]["artifacts"]["shops"] = []
     assert "shops_stale_or_unproven" in grade_turn(Turn(message="附近？", shop_ids=[]), snapshot)["failures"]
+
+
+def test_judge_evidence_removes_recursive_raw_and_model_history():
+    from evaluate.online import judge_evidence
+    result = judge_evidence({"case": {}, "snapshots": [{"evidence_id": "e1", "state": {"turns": [
+        {"role": "assistant", "content": "private reasoning"},
+        {"role": "tool", "name": "db_query_tool", "payload": {"status": "completed", "result": {
+            "shops": [{"source_id": 1, "price": "2", "raw": {"duplicate": "large"}}]}}}
+    ]}, "response": {"reply": "2元"}}]})
+    serialized = json.dumps(result)
+    assert "private reasoning" not in serialized and "duplicate" not in serialized
+    assert result["snapshots"][0]["tool_results"][0]["result"]["shops"][0]["price"] == "2"
+
+
+def test_judge_has_independent_output_budget(tmp_path, monkeypatch):
+    cfg = config(tmp_path, monkeypatch, "EVAL_JUDGE_ENABLED=true\nEVAL_MAX_OUTPUT_TOKENS=1024\n")
+    assert cfg.judge.max_tokens == 4096
