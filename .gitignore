@@ -51,3 +51,13 @@ tests/
 !backend/app/tests/unit/
 backend/app/tests/unit/*
 !backend/app/tests/unit/test_arcade_geo_jsonl_enricher.py
+
+# Evaluation reports and private fixtures stay local; checks remain versionable.
+evaluate/reports/
+evaluate/datasets/private/
+evaluate/.cache/
+evaluate/.env*
+!evaluate/.env.example
+evaluate/.venv/
+evaluate/browser/test-results/
+evaluate/browser/playwright-report/

@@ -1,0 +1,523 @@
+# v4：真实本地数据开发集，32 retrieval / 4 navigation / 2 robustness；配套数据见 benchmark.sources.json。
+- id: local-shop-33
+  group: retrieval
+  description: 本地快照：广州市 / 环游嘉年华广州天河城店；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 广州天河城逛累了，环游嘉年华有舞萌能打不？正佳那边这次先不看。
+    shop_ids:
+    - 33
+    required_tools:
+    - db_query_tool
+- id: local-shop-34
+  group: retrieval
+  description: 本地快照：广州市 / 梦游仙境游乐园；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 广州百脑汇那个梦游仙境，想搓两把 sdvx，帮我看看有没有这个机种。
+    shop_ids:
+    - 34
+    required_tools:
+    - db_query_tool
+- id: local-shop-35
+  group: retrieval
+  description: 本地快照：广州市 / 哇哇哇游乐城；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 正佳里面那个哇哇哇能打中二吗？我说的是广州这家，不用给我列全市。
+    shop_ids:
+    - 35
+    required_tools:
+    - db_query_tool
+- id: local-shop-45
+  group: retrieval
+  description: 本地快照：深圳市 / 星际传奇梅林卓悦汇店；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 深圳梅林卓悦汇里的星际传奇有舞萌吗？别把宝安壹方城那家混进来。
+    shop_ids:
+    - 45
+    required_tools:
+    - db_query_tool
+- id: local-shop-48
+  group: retrieval
+  description: 本地快照：深圳市 / 核客电玩城；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 深圳核客想去一趟，主要打中二，帮我确认店里有没有。
+    shop_ids:
+    - 48
+    required_tools:
+    - db_query_tool
+- id: local-shop-552
+  group: retrieval
+  description: 本地快照：深圳市 / 星际传奇深圳宝安壹方城店；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 深圳宝安壹方城星际传奇能打舞萌不？是宝安这家，不是龙华壹方天地。
+    shop_ids:
+    - 552
+    required_tools:
+    - db_query_tool
+- id: local-shop-315
+  group: retrieval
+  description: 本地快照：南京市 / 趣玩汇南京新街口正洪大厦店（原大风）；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 南京新街口正洪大厦那个原来的大风，现在叫趣玩汇对吧，舞萌还有记录吗？
+    shop_ids:
+    - 315
+    required_tools:
+    - db_query_tool
+- id: local-shop-318
+  group: retrieval
+  description: 本地快照：南京市 / 风云再起南京常发广场店；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 南京常发广场的风云再起能打舞萌吗？其他分店先不看。
+    shop_ids:
+    - 318
+    required_tools:
+    - db_query_tool
+- id: local-shop-447
+  group: retrieval
+  description: 本地快照：南京市 / 鸽屋咕咕咕；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 南京鸽屋咕咕咕有中二没？想去金銮大厦那家打，别只给我舞萌的信息。
+    shop_ids:
+    - 447
+    required_tools:
+    - db_query_tool
+- id: local-shop-231
+  group: retrieval
+  description: 本地快照：济南市 / 汤姆熊（和谐广场店）；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 济南和谐广场汤姆熊里面能打中二吗？帮我查机种记录，别靠店名猜。
+    shop_ids:
+    - 231
+    required_tools:
+    - db_query_tool
+- id: local-shop-543
+  group: retrieval
+  description: 本地快照：济南市 / Play1家庭娱乐中心（大玩家济南高新万达广场店）；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 济南高新万达那个大玩家，现在是不是叫 Play1？我想打舞萌，查一下这家。
+    shop_ids:
+    - 543
+    required_tools:
+    - db_query_tool
+- id: local-shop-584
+  group: retrieval
+  description: 本地快照：济南市 / 威龙传奇（济南世茂广场店）；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 济南世茂广场的威龙传奇有舞萌没？普通版和 DX 都算。
+    shop_ids:
+    - 584
+    required_tools:
+    - db_query_tool
+- id: local-shop-165
+  group: retrieval
+  description: 本地快照：武汉市 / 风云再起武汉江汉路店；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 武汉江汉路地铁站那个风云再起有舞萌能玩吗？不是问全武汉的分店。
+    shop_ids:
+    - 165
+    required_tools:
+    - db_query_tool
+- id: local-shop-160
+  group: retrieval
+  description: 本地快照：武汉市 / 真快活银泰创意城店；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 武汉银泰创意城真快活里面舞萌有记录吗？其他真快活先别推荐。
+    shop_ids:
+    - 160
+    required_tools:
+    - db_query_tool
+- id: local-shop-580
+  group: retrieval
+  description: 本地快照：武汉市 / 嗨森汇乐园电玩城(光谷店)；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 武汉光谷步行街嗨森汇有舞萌吗？旧版也行，想看看这家店。
+    shop_ids:
+    - 580
+    required_tools:
+    - db_query_tool
+- id: local-shop-225
+  group: retrieval
+  description: 本地快照：合肥市 / 风云再起合肥淮河路店；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 合肥淮河路步行街的风云再起，中二能打不？有机种记录再推荐。
+    shop_ids:
+    - 225
+    required_tools:
+    - db_query_tool
+- id: local-shop-226
+  group: retrieval
+  description: 本地快照：合肥市 / 明日世界（之心城店）；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 合肥之心城那个明日世界有舞萌没？就看这家商场里的。
+    shop_ids:
+    - 226
+    required_tools:
+    - db_query_tool
+- id: local-shop-546
+  group: retrieval
+  description: 本地快照：合肥市 / 大玩家（包河万达）；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 合肥包河万达大玩家能打舞萌不？别给我换成天鹅湖万达。
+    shop_ids:
+    - 546
+    required_tools:
+    - db_query_tool
+- id: local-shop-1342
+  group: retrieval
+  description: 本地快照：杭州市 / 星际传奇（奥体印象城店）；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 杭州奥体印象城的星际传奇有没有舞萌？别把金沙和西溪印象城也算进来。
+    shop_ids:
+    - 1342
+    required_tools:
+    - db_query_tool
+- id: local-shop-1389
+  group: retrieval
+  description: 本地快照：杭州市 / 第一回合（杭州金沙印象城店）；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 杭州金沙印象城第一回合能打舞萌吗？我说金沙那家，不是奥体。
+    shop_ids:
+    - 1389
+    required_tools:
+    - db_query_tool
+- id: local-shop-4077
+  group: retrieval
+  description: 本地快照：杭州市 / 木马王国杭州西溪印象城店；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 杭州西溪印象城木马王国里面有舞萌没？别找去别的印象城。
+    shop_ids:
+    - 4077
+    required_tools:
+    - db_query_tool
+- id: local-shop-4799
+  group: retrieval
+  description: 本地快照：天水市 / 一起玩潮趣嘉年华；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 天水桥南五道街那个一起玩能打中二吗？不是中华西路步行街分店。
+    shop_ids:
+    - 4799
+    required_tools:
+    - db_query_tool
+- id: local-shop-5028
+  group: retrieval
+  description: 本地快照：天水市 / 宝贝王天水秦州万达店；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 天水秦州万达里的宝贝王，有舞萌可以打吗？只查这家就行。
+    shop_ids:
+    - 5028
+    required_tools:
+    - db_query_tool
+- id: local-shop-6013
+  group: retrieval
+  description: 本地快照：天水市 / 一起玩潮趣嘉年华（步行街店）；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 天水中华西路步行街那个一起玩有舞萌吗？桥南那家先不要。
+    shop_ids:
+    - 6013
+    required_tools:
+    - db_query_tool
+- id: tianshui-casual-arcades
+  group: retrieval
+  capabilities:
+  - compound-constraint
+  - evidence-discipline
+  turns:
+  - message: 天水有没有机厅玩的？有音游机器记录的都给我看看，别把陇南的算进来。
+    shop_ids:
+    - 4799
+    - 5028
+    - 6013
+    required_tools:
+    - db_query_tool
+- id: tianshui-chunithm-only
+  group: retrieval
+  capabilities:
+  - compound-constraint
+  - evidence-discipline
+  turns:
+  - message: 天水哪能打中二？只要有中二记录的，只有舞萌的先别推。
+    shop_ids:
+    - 4799
+    required_tools:
+    - db_query_tool
+- id: hangzhou-impressions-exclusion
+  group: retrieval
+  capabilities:
+  - compound-constraint
+  - evidence-discipline
+  turns:
+  - message: 杭州奥体印象城和金沙印象城里的星际传奇、第一回合都帮我看看能不能打舞萌，西溪木马王国这次不去。
+    shop_ids:
+    - 1342
+    - 1389
+    required_tools:
+    - db_query_tool
+- id: guangzhou-two-malls
+  group: retrieval
+  capabilities:
+  - compound-constraint
+  - evidence-discipline
+  turns:
+  - message: 广州天河城环游嘉年华和正佳哇哇哇，这两家哪些有中二？都查查，其他店先不要。
+    shop_ids:
+    - 33
+    - 35
+    required_tools:
+    - db_query_tool
+- id: cross-city-context-reset
+  group: retrieval
+  capabilities:
+  - compound-constraint
+  - evidence-discipline
+  turns:
+  - message: 杭州金沙印象城的第一回合有舞萌吗？
+    shop_ids:
+    - 1389
+    required_tools:
+    - db_query_tool
+  - message: 杭州先不看了，改查合肥之心城明日世界的舞萌，别留着刚才那家。
+    shop_ids:
+    - 226
+    required_tools:
+    - db_query_tool
+- id: jinan-no-chunithm-record
+  group: retrieval
+  capabilities:
+  - compound-constraint
+  - evidence-discipline
+  turns:
+  - message: 济南高新万达的 Play1 大玩家有中二吗？只找这家有中二的记录，没有就说没查到，不用推荐其他店。
+    shop_ids: []
+    required_tools:
+    - db_query_tool
+- id: shanghai-here-maimai
+  group: retrieval
+  capabilities:
+  - client-location
+  - distance-sort
+  - candidate-comparison
+  turns:
+  - message: 这里附近舞萌在哪？先只比较上海人民广场风云再起和街机烈火这两家，按离我近的排。
+    location:
+      lng: 121.47
+      lat: 31.23
+      city: 上海市
+    shop_ids:
+    - 6
+    - 1
+    ordered: true
+    required_tools:
+    - db_query_tool
+- id: beijing-here-maimai
+  group: retrieval
+  capabilities:
+  - client-location
+  - distance-sort
+  - candidate-comparison
+  turns:
+  - message: 这里想打舞萌，西单明珠风云再起和朝阳大悦城环游嘉年华这两家帮我按近到远排一下。
+    location:
+      lng: 116.37
+      lat: 39.9
+      city: 北京市
+    shop_ids:
+    - 2
+    - 4
+    ordered: true
+    required_tools:
+    - db_query_tool
+- id: shanghai-walking
+  group: navigation
+  capabilities:
+  - named-origin
+  - named-destination
+  - live-route
+  turns:
+  - message: 从上海市街机烈火去风云再起上海人民广场店，帮我规划步行路线。
+    route_mode: walking
+    route_origin:
+    - 121.455483
+    - 31.229618
+    route_destination:
+    - 121.473024
+    - 31.228048
+    required_tools:
+    - route_plan_tool
+    forbid_route: false
+- id: shanghai-mall-walking
+  group: navigation
+  capabilities:
+  - named-origin
+  - named-destination
+  - live-route
+  turns:
+  - message: 从上海市风云再起上海人民广场店去汤姆熊欢乐世界(上海大悦城店)，帮我规划步行路线。
+    route_mode: walking
+    route_origin:
+    - 121.473024
+    - 31.228048
+    route_destination:
+    - 121.471788
+    - 31.243115
+    required_tools:
+    - route_plan_tool
+    forbid_route: false
+- id: beijing-driving
+  group: navigation
+  capabilities:
+  - named-origin
+  - named-destination
+  - live-route
+  turns:
+  - message: 从北京市风云再起北京西单明珠店去环游嘉年华（北京朝阳大悦城店），帮我规划开车路线。
+    route_mode: driving
+    route_origin:
+    - 116.375909
+    - 39.910393
+    route_destination:
+    - 116.518803
+    - 39.924356
+    required_tools:
+    - route_plan_tool
+    forbid_route: false
+- id: shanghai-route-mode-switch
+  group: navigation
+  capabilities:
+  - multi-turn
+  - route-mode-switch
+  turns:
+  - message: 从上海市街机烈火去风云再起上海人民广场店，帮我规划步行路线。
+    route_mode: walking
+    route_origin:
+    - 121.455483
+    - 31.229618
+    route_destination:
+    - 121.473024
+    - 31.228048
+    required_tools:
+    - route_plan_tool
+    forbid_route: false
+  - message: 临时改开车了，起点终点都不变，帮我换一下路线。
+    route_mode: driving
+    route_origin:
+    - 121.455483
+    - 31.229618
+    route_destination:
+    - 121.473024
+    - 31.228048
+    required_tools:
+    - route_plan_tool
+    forbid_route: false
+- id: missing-location-clarification
+  group: robustness
+  capabilities:
+  - missing-context
+  turns:
+  - message: 这里附近哪里能打舞萌？我还没给你位置。
+    shop_ids: []
+    forbidden_tools:
+    - route_plan_tool
+- id: missing-city-clarification
+  group: robustness
+  capabilities:
+  - ambiguous-landmark
+  turns:
+  - message: 万达里的大玩家能打舞萌不？我还没说哪个城市哪家万达，先问清楚再推荐。
+    shop_ids: []
+    forbidden_tools:
+    - route_plan_tool
