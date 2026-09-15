@@ -321,12 +321,21 @@ def pick_route_descriptor(
                 json.dumps(descriptor.input_schema, ensure_ascii=False).lower(),
             ]
         )
+        has_walking = "walk" in text or "walking" in text or "步行" in text
+        has_driving = "drive" in text or "driving" in text or "驾车" in text or "开车" in text
+        # A mode-specific endpoint cannot safely serve the opposite mode.
+        # Returning a walking result for a driving request is worse than
+        # falling back to the builtin REST planner.
+        if mode == "walking" and has_driving and not has_walking:
+            continue
+        if mode == "driving" and has_walking and not has_driving:
+            continue
         score = 0
         if "route" in text or "direction" in text or "路径" in text or "路线" in text or "导航" in text:
             score += 4
-        if mode == "walking" and ("walk" in text or "walking" in text or "步行" in text):
+        if mode == "walking" and has_walking:
             score += 3
-        if mode == "driving" and ("drive" in text or "driving" in text or "驾车" in text or "开车" in text):
+        if mode == "driving" and has_driving:
             score += 3
         if "origin" in text and "destination" in text:
             score += 1

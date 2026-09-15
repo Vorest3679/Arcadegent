@@ -966,6 +966,7 @@ class ReactRuntime:
                 route = result_payload.get("route")
                 if isinstance(route, dict):
                     set_working_memory_artifact(memory, "route", route, turn_index=state.turn_index)
+                    state.intent = "navigate"
                 view_payload = result_payload.get("view_payload")
                 if isinstance(view_payload, dict):
                     set_working_memory_artifact(memory, "view_payload", view_payload, turn_index=state.turn_index)
@@ -1025,6 +1026,15 @@ class ReactRuntime:
             route = result.output.get("route")
             if isinstance(route, dict):
                 set_working_memory_artifact(memory, "route", route, turn_index=state.turn_index)
+                origin = route.get("origin")
+                destination_point = route.get("destination")
+                if isinstance(origin, dict) and isinstance(destination_point, dict):
+                    memory["last_route_endpoints"] = {
+                        "origin": deepcopy(origin),
+                        "destination": deepcopy(destination_point),
+                        "provider": route.get("provider"),
+                        "mode": route.get("mode"),
+                    }
                 destination = get_working_memory_artifact(memory, "shop")
                 if isinstance(destination, dict):
                     set_working_memory_artifact(memory, "destination", destination, turn_index=state.turn_index)
@@ -1056,7 +1066,7 @@ class ReactRuntime:
     def _build_worker_memory_snapshot(self, parent_memory: dict[str, Any]) -> dict[str, Any]:
         memory = ensure_working_memory_shape({})
         parent_memory = ensure_working_memory_shape(parent_memory)
-        for key in ("last_request", "last_shop_id", "keyword", "last_db_query", "provider"):
+        for key in ("last_request", "last_shop_id", "keyword", "last_db_query", "provider", "last_route_endpoints"):
             if key in parent_memory:
                 memory[key] = deepcopy(parent_memory[key])
         for key in ("shop", "shops", "selected_shops", "total", "route", "resolved_locations", "client_location", "destination", "view_payload"):
@@ -1087,6 +1097,8 @@ class ReactRuntime:
             parent_memory["last_db_query"] = deepcopy(worker_memory["last_db_query"])
         if isinstance(worker_memory.get("provider"), str):
             parent_memory["provider"] = worker_memory["provider"]
+        if isinstance(worker_memory.get("last_route_endpoints"), dict):
+            parent_memory["last_route_endpoints"] = deepcopy(worker_memory["last_route_endpoints"])
         if isinstance(worker_memory.get("keyword"), str):
             parent_memory["keyword"] = worker_memory["keyword"]
         if isinstance(worker_memory.get("last_mcp_result"), dict):
@@ -1278,7 +1290,7 @@ class ReactRuntime:
             if get_working_memory_artifact(state.working_memory, "route"):
                 return "路线已经准备好了，但总结环节没有产出完整文本，请重试一次。"
             if request.shop_id is None and state.working_memory.get("last_shop_id") is None:
-                return "请先提供目标机厅的 shop_id，再继续导航。"
+                return "请再明确一下起点和目标地点，我会继续规划路线。"
             return "导航流程还没有完成，请再试一次。"
 
         shops_payload = self._display_shops(state.working_memory)

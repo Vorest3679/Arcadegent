@@ -523,6 +523,68 @@ def test_health_reports_mcp_tools_loaded_from_config_directory(tmp_path: Path) -
     assert payload["mcp"]["servers"]["amap"]["available_tools"] == ["mcp__amap__maps_direction_walking"]
 
 
+def test_navigation_worker_hydrates_route_strings_and_returns_route(tmp_path: Path) -> None:
+    from app.agent.llm.provider_adapter import ModelToolCall
+
+    mcp_dir = tmp_path / "navigation_mcp"
+    mcp_dir.mkdir()
+    fixture_server = Path(__file__).resolve().parents[1] / "fixtures" / "mock_amap_mcp_server.py"
+    (mcp_dir / "amap.json").write_text(json.dumps({
+        "command": sys.executable,
+        "args": [str(fixture_server)],
+        "route_tool_name": "maps_direction_walking",
+    }), encoding="utf-8")
+    client = _build_client(tmp_path, mcp_servers_dir=mcp_dir)
+    adapter = client.app.state.container.react_runtime._provider_adapter
+    main_calls = 0
+    worker_calls = 0
+
+    async def fake_complete(**kwargs):
+        nonlocal main_calls, worker_calls
+        if kwargs["runtime_hints"]["active_subagent"] == "main_agent":
+            main_calls += 1
+            if main_calls == 1:
+                return ModelResponse(tool_calls=[ModelToolCall(
+                    "dispatch-route", "invoke_worker",
+                    {"worker": "navigation_worker", "task": "从起点步行到 Gamma Arcade"},
+                )])
+            return ModelResponse(text="步行路线已经规划完成。")
+
+        worker_calls += 1
+        if worker_calls == 1:
+            return ModelResponse(tool_calls=[ModelToolCall(
+                "destination", "db_query_tool", {"shop_id": 10, "page": 1, "page_size": 1},
+            )])
+        if worker_calls == 2:
+            return ModelResponse(tool_calls=[ModelToolCall(
+                "provider", "geo_resolve_tool", {"province_code": "110000000000"},
+            )])
+        if worker_calls == 3:
+            return ModelResponse(tool_calls=[ModelToolCall(
+                "route", "route_plan_tool", {
+                    "provider": "amap",
+                    "mode": "walking",
+                    "origin": "116.3,39.9",
+                    "destination": "116.32,39.905",
+                },
+            )])
+        return ModelResponse(text="route ready")
+
+    adapter.complete = fake_complete  # type: ignore[method-assign]
+    response = client.post("/api/chat", json={"message": "从起点走到 Gamma Arcade"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["intent"] == "navigate"
+    assert payload["route"]["mode"] == "walking"
+    assert payload["route"]["origin"]["lng"] == 116.3
+    assert payload["route"]["destination"]["lng"] == 116.32
+    state = client.app.state.container.session_store.get_session(payload["session_id"])
+    assert state.working_memory["last_route_endpoints"]["destination"]["lng"] == 116.32
+    route_turn = next(turn for turn in state.turns if turn.name == "route_plan_tool")
+    assert route_turn.payload["argument_evidence"]["hydrated_fields"] == ["origin", "destination"]
+
+
 def test_chat_reuses_session_context(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
     _stub_provider_adapter(client)
@@ -998,10 +1060,15 @@ def test_previous_route_is_not_promoted_as_new_result() -> None:
     memory = {}
     set_working_memory_artifact(memory, "route", {"distance_m": 100}, turn_index=1)
     set_working_memory_artifact(memory, "shops", [{"source_id": 10}], turn_index=1)
+    memory["last_route_endpoints"] = {
+        "origin": {"lng": 116.3, "lat": 39.9},
+        "destination": {"lng": 116.4, "lat": 39.91},
+    }
     prepared = runtime._prepare_turn_memory(memory)
     assert "route" not in prepared["artifacts"]
     worker = runtime._build_worker_memory_snapshot(prepared)
     assert worker["artifacts"]["shops"] == [{"source_id": 10}]
+    assert worker["last_route_endpoints"] == memory["last_route_endpoints"]
     assert runtime._promote_worker_artifacts(parent_memory=memory, worker_memory=worker, turn_index=2) == {}
     assert memory["artifact_meta"]["shops"]["turn_index"] == 1
     set_working_memory_artifact(worker, "shops", [], turn_index=2)

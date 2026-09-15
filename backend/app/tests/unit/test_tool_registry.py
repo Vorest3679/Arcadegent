@@ -500,3 +500,70 @@ def test_route_plan_tool_prefers_amap_mcp_when_available(tmp_path: Path) -> None
     assert result.output["route"]["provider"] == "amap"
     assert result.output["route"]["distance_m"] == 1234
     assert result.output["route"]["duration_s"] == 678
+
+
+def test_amap_mcp_does_not_use_walking_tool_for_driving() -> None:
+    gateway = _build_mcp_gateway()
+    route = _run(gateway.plan_amap_route(
+        mode="driving",
+        origin=Location(lng=116.3, lat=39.9),
+        destination=Location(lng=116.4, lat=39.91),
+    ))
+    assert route is None
+
+
+def test_route_plan_arguments_bind_named_shop_candidates(tmp_path: Path) -> None:
+    registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
+    memory = {
+        "provider": "amap",
+        "artifacts": {
+            "search_candidates": [
+                {"source_id": 1, "name": "街机烈火", "longitude_gcj02": 121.455483, "latitude_gcj02": 31.229618},
+                {"source_id": 6, "name": "风云再起上海人民广场店", "longitude_gcj02": 121.473024, "latitude_gcj02": 31.228048},
+            ]
+        },
+    }
+
+    prepared, hydrated = _run(registry.prepare_arguments(
+        tool_name="route_plan_tool",
+        raw_arguments={
+            "provider": "amap",
+            "mode": "walking",
+            "origin": "上海市街机烈火机厅",
+            "destination": "风云再起上海人民广场店",
+        },
+        runtime_context=memory,
+    ))
+
+    assert hydrated == ["origin", "destination"]
+    assert prepared["origin"] == {"lng": 121.455483, "lat": 31.229618}
+    assert prepared["destination"] == {"lng": 121.473024, "lat": 31.228048}
+    result = _run(registry.execute(
+        call_id="named-route",
+        tool_name="route_plan_tool",
+        raw_arguments=prepared,
+        allowed_tools=["route_plan_tool"],
+    ))
+    assert result.status == "completed"
+    assert result.output["route"]["origin"]["lng"] == 121.455483
+    assert result.output["route"]["destination"]["lng"] == 121.473024
+
+
+def test_route_plan_arguments_reuse_endpoints_for_mode_switch(tmp_path: Path) -> None:
+    registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
+    prepared, hydrated = _run(registry.prepare_arguments(
+        tool_name="route_plan_tool",
+        raw_arguments={"provider": "amap", "mode": "driving"},
+        runtime_context={
+            "last_request": {"message": "临时改开车了，起点终点都不变，帮我换一下路线。"},
+            "last_route_endpoints": {
+                "origin": {"lng": 121.455483, "lat": 31.229618},
+                "destination": {"lng": 121.473024, "lat": 31.228048},
+            },
+        },
+    ))
+
+    assert hydrated == ["origin", "destination"]
+    assert prepared["mode"] == "driving"
+    assert prepared["origin"]["lng"] == 121.455483
+    assert prepared["destination"]["lng"] == 121.473024

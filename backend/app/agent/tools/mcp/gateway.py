@@ -35,7 +35,7 @@ from app.agent.tools.mcp.models import (
 )
 from app.agent.tools.schemas import load_json_schema
 from app.infra.observability.logger import get_logger
-from app.protocol.messages import Location, RouteSummaryDto
+from app.protocol.messages import GeoPoint, Location, RouteSummaryDto
 
 logger = get_logger(__name__)
 
@@ -436,9 +436,27 @@ class MCPToolGateway:
         if not isinstance(route_payload, dict):
             return None
         try:
-            return RouteSummaryDto.model_validate(route_payload)
+            route = RouteSummaryDto.model_validate(route_payload)
         except Exception:
             return None
+        updates: dict[str, object] = {}
+        if route.origin is None:
+            updates["origin"] = GeoPoint(
+                lng=origin.lng,
+                lat=origin.lat,
+                coord_system="gcj02",
+                source="client",
+                precision="approx",
+            )
+        if route.destination is None:
+            updates["destination"] = GeoPoint(
+                lng=destination.lng,
+                lat=destination.lat,
+                coord_system="gcj02",
+                source="route",
+                precision="approx",
+            )
+        return route.model_copy(update=updates) if updates else route
 
     def health(self) -> dict[str, Any]:
         return {
