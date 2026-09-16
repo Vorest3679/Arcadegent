@@ -55,6 +55,10 @@ def percentage(numerator, denominator):
     return "N/A" if not denominator else f"{100 * numerator / denominator:.1f}%"
 
 
+def format_price(value, currency):
+    return "N/A" if value is None else f"{currency} {value:.6f}"
+
+
 def failure_counts(rows):
     return Counter(reason for row in rows for turn in row.get("turn_scores", []) for reason in turn.get("failures", []))
 
@@ -72,6 +76,33 @@ def attempt_timing(attempt):
     }
 
 
+def priced_usage(records, values, prefix):
+    """Keep known token use separate from a confirmed price when a provider omits usage."""
+    u = usage(records)
+    priced = [cost([record], values, prefix) for record in records]
+    confirmed = [value for value in priced if value is not None]
+    return {**u, "confirmed_cost": sum(confirmed) if confirmed else None,
+            "priced_requests": len(confirmed), "unpriced_requests": len(records) - len(confirmed)}
+
+
+def attach_attempt_accounting(attempts, calls, values):
+    """Attach agent and judge token/cost attribution to each attempt for report timelines."""
+    by_attempt = {}
+    for call in calls:
+        by_attempt.setdefault(call.get("attempt_id"), []).append(call)
+    for attempt in attempts:
+        calls_for_attempt = by_attempt.get(attempt["attempt_id"], [])
+        prefix = "EVAL_LLM_" if attempt["model_profile"] == "default" else f"EVAL_{attempt['model_profile'].upper()}_"
+        agent = priced_usage([call for call in calls_for_attempt if call.get("role") == "agent"], values, prefix)
+        judge = priced_usage([call for call in calls_for_attempt if call.get("role") == "judge"], values, "EVAL_JUDGE_")
+        confirmed = [value for value in [agent["confirmed_cost"], judge["confirmed_cost"]] if value is not None]
+        attempt["accounting"] = {"agent": agent, "judge": judge,
+            "known_total_tokens": sum(value or 0 for value in [agent["known_total_tokens"], judge["known_total_tokens"]]),
+            "confirmed_cost": sum(confirmed) if confirmed else None,
+            "priced_requests": agent["priced_requests"] + judge["priced_requests"],
+            "unpriced_requests": agent["unpriced_requests"] + judge["unpriced_requests"]}
+
+
 def weighted_complete_timeline(attempts):
     """Accumulate each group's planned score weight over a model's own elapsed runtime."""
     group_weights = {"retrieval": .7, "navigation": .2, "robustness": .1}
@@ -82,7 +113,13 @@ def weighted_complete_timeline(attempts):
         ordered = sorted(enumerate(rows), key=lambda item: (item[1].get("completed_at") or "", item[0]))
         elapsed_ms = 0.0
         score = 0.0
-        points = [{"model_profile": model, "elapsed_ms": 0, "weighted_complete_score": 0.0}]
+        tokens = 0
+        price = 0.0
+        priced_requests = 0
+        unpriced_requests = 0
+        points = [{"model_profile": model, "elapsed_ms": 0, "weighted_complete_score": 0.0,
+                   "cumulative_known_total_tokens": 0, "cumulative_confirmed_cost": 0.0,
+                   "cumulative_priced_requests": 0, "cumulative_unpriced_requests": 0}]
         for _, attempt in ordered:
             duration = attempt.get("duration_ms")
             if isinstance(duration, (int, float)) and not isinstance(duration, bool):
@@ -91,11 +128,20 @@ def weighted_complete_timeline(attempts):
             complete = attempt.get("hard_pass") is True and attempt.get("quality_pass") is True
             if complete:
                 score += 100 * unit_weight
+            accounting = attempt.get("accounting") or {}
+            tokens += accounting.get("known_total_tokens") or 0
+            price += accounting.get("confirmed_cost") or 0
+            priced_requests += accounting.get("priced_requests") or 0
+            unpriced_requests += accounting.get("unpriced_requests") or 0
             points.append({"model_profile": model, "attempt_id": attempt["attempt_id"], "case_id": attempt["case_id"],
                            "group": attempt["group"], "completed_at": attempt.get("completed_at"),
                            "duration_ms": duration, "elapsed_ms": round(elapsed_ms, 3),
                            "weight": unit_weight, "complete": complete,
-                           "weighted_complete_score": round(score, 6)})
+                           "weighted_complete_score": round(score, 6),
+                           "cumulative_known_total_tokens": tokens,
+                           "cumulative_confirmed_cost": round(price, 8),
+                           "cumulative_priced_requests": priced_requests,
+                           "cumulative_unpriced_requests": unpriced_requests})
         timeline.extend(points)
     return timeline
 
@@ -134,7 +180,7 @@ def weighted_timeline_svg(rows):
         path = " ".join(f"{x(row['elapsed_ms']):.1f},{y(row['weighted_complete_score']):.1f}" for row in points)
         parts.append(f'<polyline points="{path}" fill="none" stroke="{colors[model]}" stroke-width="2.5"/>')
         for row in points[1:]:
-            label = escape(f"{model} / {row['case_id']}: 累计 {row['elapsed_ms'] / 1000:.1f}s, 加权完整通过 {row['weighted_complete_score']:.1f}/100")
+            label = escape(f"{model} / {row['case_id']}: 累计 {row['elapsed_ms'] / 1000:.1f}s, 加权完整通过 {row['weighted_complete_score']:.1f}/100, 已知 token {row['cumulative_known_total_tokens']}, 已确认价格 {row['cumulative_confirmed_cost']:.6f}, 未定价请求 {row['cumulative_unpriced_requests']}")
             parts.append(f'<circle cx="{x(row["elapsed_ms"]):.1f}" cy="{y(row["weighted_complete_score"]):.1f}" r="4" fill="{colors[model]}"><title>{label}</title></circle>')
     parts += [f'<text x="{left + plot_width / 2:.1f}" y="{height - 15}" text-anchor="middle" font-family="sans-serif" font-size="13">完成耗时（秒）</text>',
               f'<text x="18" y="{top + plot_height / 2:.1f}" transform="rotate(-90 18 {top + plot_height / 2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="13">累计加权完整通过得分（百分制）</text>']
@@ -154,6 +200,7 @@ def read_rows(path):
 class Evidence:
     def __init__(self, directory, values):
         self.directory = Path(directory)
+        self.values = values
         self.secrets = [v for k, v in values.items() if v and any(word in k for word in ["KEY", "SECRET", "PASSWORD"])]
         self.sequence = 0
 
@@ -318,10 +365,22 @@ def report(evidence, attempts):
     all_calls = read_rows(evidence.directory / "calls.jsonl") if (evidence.directory / "calls.jsonl").exists() else []
     summary["agent_usage"] = usage([c for c in all_calls if c["role"] == "agent"])
     summary["judge_usage"] = usage([c for c in all_calls if c["role"] == "judge"])
+    attach_attempt_accounting(attempts, all_calls, evidence.values)
     for name, model_summary in summary["models"].items():
         rows = [a for a in attempts if a["model_profile"] == name]
         ids = {a["attempt_id"] for a in rows}
-        model_summary["agent_usage"] = usage([c for c in all_calls if c["role"] == "agent" and c["attempt_id"] in ids])
+        agent_calls = [c for c in all_calls if c["role"] == "agent" and c["attempt_id"] in ids]
+        judge_calls = [c for c in all_calls if c["role"] == "judge" and c["attempt_id"] in ids]
+        prefix = "EVAL_LLM_" if name == "default" else f"EVAL_{name.upper()}_"
+        model_summary["agent_usage"] = usage(agent_calls)
+        model_summary["judge_usage"] = usage(judge_calls)
+        model_summary["agent_priced_usage"] = priced_usage(agent_calls, evidence.values, prefix)
+        model_summary["judge_priced_usage"] = priced_usage(judge_calls, evidence.values, "EVAL_JUDGE_")
+        confirmed = [value for value in [model_summary["agent_priced_usage"]["confirmed_cost"],
+                                         model_summary["judge_priced_usage"]["confirmed_cost"]] if value is not None]
+        model_summary["confirmed_total_cost"] = sum(confirmed) if confirmed else None
+        model_summary["unpriced_requests"] = (model_summary["agent_priced_usage"]["unpriced_requests"]
+                                                + model_summary["judge_priced_usage"]["unpriced_requests"])
         ran = [a for a in rows if a["status"] != "not_run"]
         model_summary["agent_cost"] = sum(a["cost"] for a in ran) if ran and all(a.get("cost") is not None for a in ran) else None
     timings = [attempt_timing(attempt) for attempt in attempts]
@@ -391,12 +450,26 @@ def report(evidence, attempts):
     for name, m in summary["models"].items():
         u = m["agent_usage"]
         lines.append(f"| {name} | {u['input_tokens']} | {u['output_tokens']} | {u['total_tokens']} | {m['agent_cost']} |")
-    lines += ["", "## 模型累计加权完整通过曲线", "",
+    currency = evidence.values.get("EVAL_CURRENCY", "unspecified")
+    lines += ["", "## 模型累计加权完整通过、耗时与成本", "",
               "`attempt-timings.json` 保留所有计划 attempt 的开始时间、完成时间和耗时；"
               "`weighted-complete-timeline.json` 以模型为单位按完成顺序累计。每个 group 的总分权重为检索 70、导航 20、鲁棒性 10，"
               "并均分给该 group 的所有计划 attempt；完整通过时才累加该 attempt 的权重。"
               "`weighted-complete-score-over-time.svg` 将每个模型连成折线：横轴为该模型累计完成耗时（秒），纵轴为累计加权完整通过得分（百分制）。", "",
-              "null 表示未知，不表示免费或零 token。cached/reasoning 为子集。详见 attempts.jsonl、calls.jsonl、scores.jsonl 和 snapshots/。"]
+              "| Profile | 曲线终点分 | 累计耗时 | Agent 已知 token | Judge 已知 token | 已知总 token | 已确认价格 | 未定价请求 |",
+              "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for name, model in summary["models"].items():
+        points = [point for point in timeline if point["model_profile"] == name]
+        final = points[-1] if points else {"weighted_complete_score": 0, "elapsed_ms": 0}
+        agent = model["agent_priced_usage"]
+        judge_usage = model["judge_priced_usage"]
+        lines.append(f"| {name} | {final['weighted_complete_score']:.2f}/100 | {final['elapsed_ms'] / 1000:.1f}s | "
+                     f"{agent['known_total_tokens']} | {judge_usage['known_total_tokens']} | "
+                     f"{(agent['known_total_tokens'] or 0) + (judge_usage['known_total_tokens'] or 0)} | "
+                     f"{format_price(model['confirmed_total_cost'], currency)} | {model['unpriced_requests']} |")
+    lines += ["", "已确认价格按已返回完整 usage 的请求和环境变量中的每百万 token 单价计算；"
+              "未定价请求表示 provider 没有返回完整 usage 或没有填写对应单价，因此不把它们误记为免费。"
+              "cached/reasoning 为 total 的子集。详见 attempts.jsonl、calls.jsonl、scores.jsonl 和 snapshots/。"]
     lines += ["", "## 未通过或未完成项目", "", "| Profile / case | 状态 | 失败原因 |", "| --- | --- | --- |"]
     for a in attempts:
         if a.get("hard_pass") is not True or a.get("judge_status") == "error":
