@@ -1,0 +1,19 @@
+# Retest only the Kimi attempt that emitted `finish_reason=length` in
+# 20260916T-agent-architecture-full-networkretry.
+- id: shanghai-walking
+  group: navigation
+  capabilities:
+  - navigation
+  - live-route
+  turns:
+  - message: 从上海市街机烈火去风云再起上海人民广场店，帮我规划步行路线。
+    required_tools:
+    - route_plan_tool
+    route_mode: walking
+    route_origin:
+    - 121.455483
+    - 31.229618
+    route_destination:
+    - 121.473024
+    - 31.228048
+    forbid_route: false

@@ -1,0 +1,64 @@
+# Retest only GLM attempts that failed after `finish_reason=length` in
+# 20260916T-agent-architecture-full-networkretry. The case definitions are
+# copied from benchmark.yaml; this file deliberately excludes non-length
+# failures such as local-shop-4799.
+- id: local-shop-33
+  group: retrieval
+  description: 本地快照：广州市 / 环游嘉年华广州天河城店；不假设实时营业状态或距离。
+  capabilities: [colloquial-title-alias, named-place, entity-disambiguation]
+  turns:
+  - message: 广州天河城逛累了，环游嘉年华有舞萌能打不？正佳那边这次先不看。
+    shop_ids: [33]
+    required_tools: [db_query_tool]
+- id: local-shop-584
+  group: retrieval
+  description: 本地快照：济南市 / 威龙传奇（济南世茂广场店）；不假设实时营业状态或距离。
+  capabilities: [colloquial-title-alias, named-place, entity-disambiguation]
+  turns:
+  - message: 济南世茂广场的威龙传奇有舞萌没？普通版和 DX 都算。
+    shop_ids: [584]
+    required_tools: [db_query_tool]
+- id: local-shop-160
+  group: retrieval
+  description: 本地快照：武汉市 / 真快活银泰创意城店；不假设实时营业状态或距离。
+  capabilities: [colloquial-title-alias, named-place, entity-disambiguation]
+  turns:
+  - message: 武汉银泰创意城真快活里面舞萌有记录吗？其他真快活先别推荐。
+    shop_ids: [160]
+    required_tools: [db_query_tool]
+- id: hangzhou-impressions-exclusion
+  group: retrieval
+  capabilities: [compound-constraint, evidence-discipline]
+  turns:
+  - message: 杭州奥体印象城和金沙印象城里的星际传奇、第一回合都帮我看看能不能打舞萌，西溪木马王国这次不去。
+    shop_ids: [1342, 1389]
+    required_tools: [db_query_tool]
+- id: cross-city-context-reset
+  group: retrieval
+  capabilities: [compound-constraint, evidence-discipline]
+  turns:
+  - message: 杭州金沙印象城的第一回合有舞萌吗？
+    shop_ids: [1389]
+    required_tools: [db_query_tool]
+  - message: 杭州先不看了，改查合肥之心城明日世界的舞萌，别留着刚才那家。
+    shop_ids: [226]
+    required_tools: [db_query_tool]
+- id: jinan-no-chunithm-record
+  group: retrieval
+  capabilities: [compound-constraint, evidence-discipline]
+  turns:
+  - message: 济南高新万达的 Play1 大玩家有中二吗？只找这家有中二的记录，没有就说没查到，不用推荐其他店。
+    shop_ids: []
+    required_tools: [db_query_tool]
+- id: beijing-here-maimai
+  group: retrieval
+  capabilities: [client-location, distance-sort, candidate-comparison]
+  turns:
+  - message: 这里想打舞萌，西单明珠风云再起和朝阳大悦城环游嘉年华这两家帮我按近到远排一下。
+    location:
+      lng: 116.37
+      lat: 39.9
+      city: 北京市
+    shop_ids: [2, 4]
+    ordered: true
+    required_tools: [db_query_tool]

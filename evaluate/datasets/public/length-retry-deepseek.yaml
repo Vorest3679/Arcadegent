@@ -1,0 +1,15 @@
+# Retest only the DeepSeek attempt that emitted `finish_reason=length` in
+# 20260916T-agent-architecture-full-networkretry.
+- id: local-shop-543
+  group: retrieval
+  description: 本地快照：济南市 / Play1家庭娱乐中心（大玩家济南高新万达广场店）；不假设实时营业状态或距离。
+  capabilities:
+  - colloquial-title-alias
+  - named-place
+  - entity-disambiguation
+  turns:
+  - message: 济南高新万达那个大玩家，现在是不是叫 Play1？我想打舞萌，查一下这家。
+    shop_ids:
+    - 543
+    required_tools:
+    - db_query_tool
