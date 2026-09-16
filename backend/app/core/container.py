@@ -13,6 +13,7 @@ from app.agent.runtime.react_runtime import ReactRuntime
 from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.runtime.orchestrator import Orchestrator
 from app.agent.tools.builtin import BuiltinToolProvider
+from app.agent.tools.builtin.route_plan_tool import AMapConfig
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.mcp_gateway import MCPToolGateway, build_mcp_server_configs
 from app.agent.tools.registry import ToolRegistry
@@ -86,6 +87,11 @@ def build_container(settings: Settings) -> AppContainer:
         runtime_services={
             "store": store,
             "settings": settings,
+            "amap_config": AMapConfig(
+                api_key=settings.amap_api_key,
+                base_url=settings.amap_base_url,
+                timeout_seconds=settings.amap_timeout_seconds,
+            ),
             "mcp_tool_gateway": mcp_tool_gateway,
             "project_root": project_root,
         }

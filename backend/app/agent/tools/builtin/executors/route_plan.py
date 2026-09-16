@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -26,6 +27,11 @@ def _number(value: Any) -> float | None:
 
 
 def _point(value: Any) -> dict[str, float] | None:
+    if isinstance(value, str) and value.lstrip().startswith("{"):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
     if isinstance(value, dict):
         lng = _number(value.get("lng", value.get("longitude")))
         lat = _number(value.get("lat", value.get("latitude")))
