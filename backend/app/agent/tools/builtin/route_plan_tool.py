@@ -73,7 +73,7 @@ class RoutePlanTool:
     ) -> RouteSummaryDto | None:
         """用高德地图API规划路线，失败时返回 None。"""
         if not self._amap_config or not self._amap_config.api_key.strip():
-            return None
+            raise RuntimeError("route_unavailable: amap_key_missing")
 
         endpoint = "/v3/direction/driving" if mode == "driving" else "/v3/direction/walking"
         query = parse.urlencode(
@@ -88,13 +88,21 @@ class RoutePlanTool:
             async with httpx.AsyncClient(timeout=self._amap_config.timeout_seconds) as client:
                 response = await client.get(url)
                 response.raise_for_status()
-        except (httpx.HTTPError, TimeoutError):
-            return None
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(f"route_unavailable: amap_http_{exc.response.status_code}") from None
+        except (httpx.HTTPError, TimeoutError) as exc:
+            # HTTP exception messages may contain the URL and its API key.
+            raise RuntimeError(f"route_unavailable: amap_transport_{type(exc).__name__}") from None
 
         try:
             payload = response.json()
         except json.JSONDecodeError:
-            return None
+            raise RuntimeError("route_unavailable: amap_invalid_json") from None
+
+        if isinstance(payload, dict) and str(payload.get("status", "1")) != "1":
+            code = str(payload.get("infocode", ""))
+            safe_code = code if code.isdigit() and len(code) <= 8 else "unknown"
+            raise RuntimeError(f"route_unavailable: amap_api_error_{safe_code}")
 
         route_obj = payload.get("route") if isinstance(payload, dict) else None
         paths = route_obj.get("paths") if isinstance(route_obj, dict) else None

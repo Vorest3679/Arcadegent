@@ -24,6 +24,7 @@ def test_subagent_builder_loads_executable_fields_from_definitions() -> None:
         "geo_resolve_tool",
         "route_plan_tool",
         "summary_tool",
+        "result_selection_tool",
         "mcp__*",
     ]
     assert main_profile.skill_files == [
@@ -33,7 +34,7 @@ def test_subagent_builder_loads_executable_fields_from_definitions() -> None:
     ]
 
     assert search_profile.prompt_file == "search_worker.md"
-    assert search_profile.allowed_tools == ["db_query_tool", "mcp__*"]
+    assert search_profile.allowed_tools == ["db_query_tool", "result_selection_tool", "mcp__*"]
     assert search_profile.skill_files == ["search_result_reading.md"]
 
     assert nav_profile.prompt_file == "navigation_worker.md"

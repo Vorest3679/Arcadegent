@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.agent.tools.builtin.executors import db_query as db_query_executor
 from app.agent.tools.builtin.executors import summary as summary_executor
+from app.agent.tools.builtin.executors import result_selection as result_selection_executor
 from app.agent.runtime.react_runtime import ReactRuntime, _chunk_stream_text
 from app.agent.runtime.session_state import (
     AgentTurn,
@@ -31,6 +32,69 @@ def test_prepare_tool_arguments_hydrates_search_summary_from_memory() -> None:
     assert isinstance(args["shops"], list)
     assert args["keyword"] == "shanghai huangpu"
     assert hydrated == ["total", "shops", "keyword"]
+
+
+def test_result_selection_commits_only_ordered_current_candidates() -> None:
+    state = AgentSessionState(session_id="s_selection")
+    set_working_memory_artifact(
+        state.working_memory,
+        "search_candidates",
+        [{"source_id": 2, "name": "near"}, {"source_id": 1, "name": "far"}, {"source_id": 3, "name": "excluded"}],
+        turn_index=1,
+    )
+
+    args, hydrated = result_selection_executor.prepare_arguments(
+        {"selected_shop_ids": [2, 1]}, state.working_memory
+    )
+    output = result_selection_executor.execute(None, args)  # type: ignore[arg-type]
+
+    assert hydrated == ["selected_shops"]
+    assert output["selected_shop_ids"] == [2, 1]
+    assert [shop["source_id"] for shop in output["shops"]] == [2, 1]
+
+
+def test_result_selection_rejects_stale_or_duplicate_ids_and_allows_empty() -> None:
+    state = AgentSessionState(session_id="s_empty_selection")
+    set_working_memory_artifact(state.working_memory, "search_candidates", [{"source_id": 1}], turn_index=1)
+
+    import pytest
+    with pytest.raises(ValueError, match="current-turn candidates"):
+        result_selection_executor.prepare_arguments({"selected_shop_ids": [2]}, state.working_memory)
+    with pytest.raises(ValueError, match="duplicates"):
+        result_selection_executor.prepare_arguments({"selected_shop_ids": [1, 1]}, state.working_memory)
+    args, _ = result_selection_executor.prepare_arguments({"selected_shop_ids": []}, state.working_memory)
+    assert result_selection_executor.execute(None, args)["shops"] == []  # type: ignore[arg-type]
+
+
+def test_explicit_selection_overrides_candidates_and_detail_for_display() -> None:
+    runtime = _runtime()
+    memory: dict = {}
+    set_working_memory_artifact(memory, "shops", [{"source_id": 1}, {"source_id": 2}, {"source_id": 3}], turn_index=1)
+    set_working_memory_artifact(memory, "shop", {"source_id": 3}, turn_index=1)
+    set_working_memory_artifact(memory, "selected_shops", [{"source_id": 2}, {"source_id": 1}], turn_index=1)
+
+    assert [row["source_id"] for row in runtime._display_shops(memory)] == [2, 1]
+
+
+def test_query_replaces_old_selection_and_selection_commits_new_cards() -> None:
+    runtime = _runtime()
+    state = AgentSessionState(session_id="s_new_query")
+    set_working_memory_artifact(state.working_memory, "selected_shops", [{"source_id": 99}], turn_index=1)
+    state.turn_index = 2
+    runtime._apply_tool_memory(
+        state=state,
+        result=ToolExecutionResult(call_id="query", tool_name="db_query_tool", status="completed", output={
+            "shops": [{"source_id": 1}, {"source_id": 2}, {"source_id": 3}], "total": 3,
+        }),
+    )
+    assert get_working_memory_artifact(state.working_memory, "selected_shops") is None
+    runtime._apply_tool_memory(
+        state=state,
+        result=ToolExecutionResult(call_id="select", tool_name="result_selection_tool", status="completed", output={
+            "selected_shop_ids": [2, 1], "shops": [{"source_id": 2}, {"source_id": 1}],
+        }),
+    )
+    assert [row["source_id"] for row in runtime._display_shops(state.working_memory)] == [2, 1]
 
 
 def test_prepare_tool_arguments_hydrates_navigation_summary_from_memory() -> None:

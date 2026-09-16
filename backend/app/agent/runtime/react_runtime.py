@@ -966,15 +966,23 @@ class ReactRuntime:
                 route = result_payload.get("route")
                 if isinstance(route, dict):
                     set_working_memory_artifact(memory, "route", route, turn_index=state.turn_index)
+                    state.intent = "navigate"
                 view_payload = result_payload.get("view_payload")
                 if isinstance(view_payload, dict):
                     set_working_memory_artifact(memory, "view_payload", view_payload, turn_index=state.turn_index)
             return
 
         if result.tool_name == "db_query_tool":
+            # A fresh query changes the answer context. Keep its candidates for
+            # selection, but never carry a previous turn's displayed cards into it.
+            selected_meta = memory.get("artifact_meta", {}).get("selected_shops", {})
+            if selected_meta.get("turn_index") != state.turn_index:
+                memory["artifacts"].pop("selected_shops", None)
+                memory.get("artifact_meta", {}).pop("selected_shops", None)
             shop_payload = result.output.get("shop")
             if isinstance(shop_payload, dict):
                 set_working_memory_artifact(memory, "shop", shop_payload, turn_index=state.turn_index)
+                self._append_search_candidates(memory, [shop_payload], turn_index=state.turn_index)
                 source_id = shop_payload.get("source_id")
                 if source_id is not None:
                     memory["last_shop_id"] = source_id
@@ -982,6 +990,7 @@ class ReactRuntime:
             shops = result.output.get("shops")
             if isinstance(shops, list):
                 set_working_memory_artifact(memory, "shops", shops, turn_index=state.turn_index)
+                self._append_search_candidates(memory, shops, turn_index=state.turn_index)
                 if shops:
                     first = shops[0] if isinstance(shops[0], dict) else None
                     if isinstance(first, dict) and first.get("source_id") is not None:
@@ -999,6 +1008,14 @@ class ReactRuntime:
                 )
             return
 
+        if result.tool_name == "result_selection_tool":
+            selected = result.output.get("shops")
+            if isinstance(selected, list):
+                set_working_memory_artifact(memory, "selected_shops", selected, turn_index=state.turn_index)
+                if selected:
+                    memory["last_shop_id"] = selected[0].get("source_id")
+            return
+
         if result.tool_name == "geo_resolve_tool":
             provider = result.output.get("provider")
             if isinstance(provider, str):
@@ -1009,6 +1026,15 @@ class ReactRuntime:
             route = result.output.get("route")
             if isinstance(route, dict):
                 set_working_memory_artifact(memory, "route", route, turn_index=state.turn_index)
+                origin = route.get("origin")
+                destination_point = route.get("destination")
+                if isinstance(origin, dict) and isinstance(destination_point, dict):
+                    memory["last_route_endpoints"] = {
+                        "origin": deepcopy(origin),
+                        "destination": deepcopy(destination_point),
+                        "provider": route.get("provider"),
+                        "mode": route.get("mode"),
+                    }
                 destination = get_working_memory_artifact(memory, "shop")
                 if isinstance(destination, dict):
                     set_working_memory_artifact(memory, "destination", destination, turn_index=state.turn_index)
@@ -1040,10 +1066,10 @@ class ReactRuntime:
     def _build_worker_memory_snapshot(self, parent_memory: dict[str, Any]) -> dict[str, Any]:
         memory = ensure_working_memory_shape({})
         parent_memory = ensure_working_memory_shape(parent_memory)
-        for key in ("last_request", "last_shop_id", "keyword", "last_db_query", "provider"):
+        for key in ("last_request", "last_shop_id", "keyword", "last_db_query", "provider", "last_route_endpoints"):
             if key in parent_memory:
                 memory[key] = deepcopy(parent_memory[key])
-        for key in ("shop", "shops", "total", "route", "resolved_locations", "client_location", "destination", "view_payload"):
+        for key in ("shop", "shops", "selected_shops", "total", "route", "resolved_locations", "client_location", "destination", "view_payload"):
             value = get_working_memory_artifact(parent_memory, key)
             if value is not None:
                 set_working_memory_artifact(memory, key, value)
@@ -1059,7 +1085,7 @@ class ReactRuntime:
         turn_index: int,
     ) -> dict[str, Any]:
         promoted: dict[str, Any] = {}
-        for key in ("shop", "shops", "total", "route", "resolved_locations", "client_location", "destination", "view_payload"):
+        for key in ("shop", "shops", "selected_shops", "total", "route", "resolved_locations", "client_location", "destination", "view_payload"):
             value = get_working_memory_artifact(worker_memory, key)
             if key not in worker_memory.get("artifact_meta", {}):
                 continue
@@ -1071,6 +1097,8 @@ class ReactRuntime:
             parent_memory["last_db_query"] = deepcopy(worker_memory["last_db_query"])
         if isinstance(worker_memory.get("provider"), str):
             parent_memory["provider"] = worker_memory["provider"]
+        if isinstance(worker_memory.get("last_route_endpoints"), dict):
+            parent_memory["last_route_endpoints"] = deepcopy(worker_memory["last_route_endpoints"])
         if isinstance(worker_memory.get("keyword"), str):
             parent_memory["keyword"] = worker_memory["keyword"]
         if isinstance(worker_memory.get("last_mcp_result"), dict):
@@ -1122,7 +1150,7 @@ class ReactRuntime:
         if worker_name == "navigation_worker":
             destination = get_working_memory_artifact(worker_memory, "shop")
             if not isinstance(destination, dict):
-                shops = get_working_memory_artifact(worker_memory, "shops")
+                shops = self._display_shops(worker_memory)
                 if isinstance(shops, list) and shops and isinstance(shops[0], dict):
                     destination = shops[0]
             route = get_working_memory_artifact(worker_memory, "route")
@@ -1168,12 +1196,11 @@ class ReactRuntime:
                 worker_memory.get("artifacts", {}).pop(key, None)
                 worker_memory.pop(key, None)
             worker_memory.pop("last_db_query", None)
-        shops = self._memory_shops(worker_memory)
-        selected_shop = get_working_memory_artifact(worker_memory, "shop")
-        if not isinstance(selected_shop, dict) and shops:
-            selected_shop = shops[0]
+        candidate_shops = self._memory_shops(worker_memory)
+        displayed_shops = self._display_shops(worker_memory)
+        selected_shop = displayed_shops[0] if displayed_shops else None
         total_raw = get_working_memory_artifact(worker_memory, "total")
-        total = int(total_raw) if isinstance(total_raw, int) else len(shops)
+        total = int(total_raw) if isinstance(total_raw, int) else len(candidate_shops)
         query = worker_memory.get("last_db_query") if isinstance(worker_memory.get("last_db_query"), dict) else None
         missing_fields = []
         if not fresh_search:
@@ -1185,14 +1212,16 @@ class ReactRuntime:
             status = "needs_input"
         summary = self._build_search_worker_summary(
             total=total,
-            shops=shops,
+            shops=displayed_shops,
             final_text=final_text,
             error=failed_error,
         )
         result = {
             "summary": summary,
             "total": total,
-            "shops": shops,
+            "shops": displayed_shops,
+            "candidates": candidate_shops,
+            "selected_shops": displayed_shops,
             "selected_shop": selected_shop if isinstance(selected_shop, dict) else None,
             "query": query,
             "needs_clarification": bool(missing_fields),
@@ -1261,10 +1290,10 @@ class ReactRuntime:
             if get_working_memory_artifact(state.working_memory, "route"):
                 return "路线已经准备好了，但总结环节没有产出完整文本，请重试一次。"
             if request.shop_id is None and state.working_memory.get("last_shop_id") is None:
-                return "请先提供目标机厅的 shop_id，再继续导航。"
+                return "请再明确一下起点和目标地点，我会继续规划路线。"
             return "导航流程还没有完成，请再试一次。"
 
-        shops_payload = self._memory_shops(state.working_memory)
+        shops_payload = self._display_shops(state.working_memory)
         if shops_payload:
             top = shops_payload[0]
             return f"我已经找到匹配机厅，先看 {top.get('name') or 'unknown arcade'}。"
@@ -1280,7 +1309,7 @@ class ReactRuntime:
 
     async def _build_response(self, *, session_id: str, state: AgentSessionState, final_text: str) -> ChatResponse:
         """Build API response from memory-level shop and route payloads."""
-        raw_shops = self._memory_shops(state.working_memory)[:20]
+        raw_shops = self._display_shops(state.working_memory)[:20]
         shops = await asyncio.to_thread(self._arcade_payload_mapper.summaries_from_rows, raw_shops)
         route_obj = self._arcade_payload_mapper.route_from_payload(
             get_working_memory_artifact(state.working_memory, "route")
@@ -1310,10 +1339,51 @@ class ReactRuntime:
                 shops_raw.append(memory_shop)
         return shops_raw
 
+    def _display_shops(self, memory: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return explicitly committed cards, with legacy candidate fallback.
+
+        `selected_shops` is authoritative even when it is an empty list. The
+        fallback keeps direct/legacy callers functional while all worker search
+        paths now commit selection through result_selection_tool.
+        """
+        selected = get_working_memory_artifact(memory, "selected_shops")
+        if isinstance(selected, list):
+            return [item for item in selected if isinstance(item, dict)]
+        return self._memory_shops(memory)
+
+    def _append_search_candidates(
+        self,
+        memory: dict[str, Any],
+        rows: list[Any],
+        *,
+        turn_index: int,
+    ) -> None:
+        """Accumulate deduplicated candidates only for the active search turn."""
+        existing = get_working_memory_artifact(memory, "search_candidates")
+        candidates = existing if isinstance(existing, list) else []
+        by_id = {
+            row.get("source_id"): row
+            for row in candidates
+            if isinstance(row, dict) and type(row.get("source_id")) is int
+        }
+        ordered = [row for row in candidates if isinstance(row, dict) and type(row.get("source_id")) is int]
+        for row in rows:
+            if not isinstance(row, dict) or type(row.get("source_id")) is not int:
+                continue
+            source_id = row["source_id"]
+            if source_id not in by_id:
+                ordered.append(row)
+                by_id[source_id] = row
+        set_working_memory_artifact(memory, "search_candidates", ordered, turn_index=turn_index)
+
     def _prepare_turn_memory(self, memory: dict[str, Any]) -> dict[str, Any]:
         prepared = ensure_working_memory_shape(memory)
         prepared.pop("reply", None)
         prepared.pop("last_error", None)
+        for key in ("search_candidates",):
+            prepared["artifacts"].pop(key, None)
+            prepared.pop(key, None)
+            prepared.get("artifact_meta", {}).pop(key, None)
         for key in ("route", "destination", "view_payload"):
             prepared["artifacts"].pop(key, None)
             prepared.pop(key, None)

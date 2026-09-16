@@ -3,6 +3,7 @@
   "kind": "function",
   "description": "Plan a route from origin to destination.",
   "executor": "app.agent.tools.builtin.executors.route_plan:execute",
+  "argument_preparer": "app.agent.tools.builtin.executors.route_plan:prepare_arguments",
   "capabilities": ["builtin", "read_only", "navigation"],
   "metadata": {
     "tool_function": "app.agent.tools.builtin.executors.route_plan:execute",

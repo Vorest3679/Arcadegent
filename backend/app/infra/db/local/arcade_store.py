@@ -100,6 +100,8 @@ def _keyword_terms(keyword: str | None) -> list[str]:
 _SORT_BY_VALUES = {"default", "updated_at", "source_id", "arcade_count", "title_quantity", "distance"}
 _SORT_ORDER_VALUES = {"asc", "desc"}
 _COORD_SYSTEM_VALUES = {"wgs84", "gcj02"}
+_EARTH_RADIUS = 6378245.0
+_EE = 0.00669342162296594323
 
 
 def _normalize_title_name(value: str | None) -> str:
@@ -153,6 +155,44 @@ def _haversine_meters(origin_lng: float, origin_lat: float, dest_lng: float, des
     return radius_m * c
 
 
+def _outside_china(lng: float, lat: float) -> bool:
+    return not (72.004 <= lng <= 137.8347 and 0.8293 <= lat <= 55.8271)
+
+
+def _transform_lat(lng: float, lat: float) -> float:
+    value = -100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat + 0.1 * lng * lat + 0.2 * math.sqrt(abs(lng))
+    value += (20.0 * math.sin(6.0 * lng * math.pi) + 20.0 * math.sin(2.0 * lng * math.pi)) * 2.0 / 3.0
+    value += (20.0 * math.sin(lat * math.pi) + 40.0 * math.sin(lat / 3.0 * math.pi)) * 2.0 / 3.0
+    return value + (160.0 * math.sin(lat / 12.0 * math.pi) + 320.0 * math.sin(lat * math.pi / 30.0)) * 2.0 / 3.0
+
+
+def _transform_lng(lng: float, lat: float) -> float:
+    value = 300.0 + lng + 2.0 * lat + 0.1 * lng * lng + 0.1 * lng * lat + 0.1 * math.sqrt(abs(lng))
+    value += (20.0 * math.sin(6.0 * lng * math.pi) + 20.0 * math.sin(2.0 * lng * math.pi)) * 2.0 / 3.0
+    value += (20.0 * math.sin(lng * math.pi) + 40.0 * math.sin(lng / 3.0 * math.pi)) * 2.0 / 3.0
+    return value + (150.0 * math.sin(lng / 12.0 * math.pi) + 300.0 * math.sin(lng / 30.0 * math.pi)) * 2.0 / 3.0
+
+
+def _wgs84_to_gcj02(lng: float, lat: float) -> tuple[float, float]:
+    if _outside_china(lng, lat):
+        return lng, lat
+    d_lat = _transform_lat(lng - 105.0, lat - 35.0)
+    d_lng = _transform_lng(lng - 105.0, lat - 35.0)
+    rad_lat = lat / 180.0 * math.pi
+    magic = 1 - _EE * math.sin(rad_lat) ** 2
+    sqrt_magic = math.sqrt(magic)
+    d_lat = (d_lat * 180.0) / ((_EARTH_RADIUS * (1 - _EE)) / (magic * sqrt_magic) * math.pi)
+    d_lng = (d_lng * 180.0) / (_EARTH_RADIUS / sqrt_magic * math.cos(rad_lat) * math.pi)
+    return lng + d_lng, lat + d_lat
+
+
+def _gcj02_to_wgs84(lng: float, lat: float) -> tuple[float, float]:
+    if _outside_china(lng, lat):
+        return lng, lat
+    converted_lng, converted_lat = _wgs84_to_gcj02(lng, lat)
+    return lng * 2.0 - converted_lng, lat * 2.0 - converted_lat
+
+
 def _row_coordinates(row: dict[str, Any], coord_system: str) -> tuple[float, float] | None:
     preferred = coord_system if coord_system in _COORD_SYSTEM_VALUES else "wgs84"
     fallbacks = (preferred, "gcj02" if preferred == "wgs84" else "wgs84")
@@ -160,7 +200,9 @@ def _row_coordinates(row: dict[str, Any], coord_system: str) -> tuple[float, flo
         lng = _as_float(row.get(f"longitude_{system}"))
         lat = _as_float(row.get(f"latitude_{system}"))
         if _valid_lng_lat(lng, lat):
-            return lng, lat
+            if system == preferred:
+                return lng, lat
+            return _gcj02_to_wgs84(lng, lat) if system == "gcj02" else _wgs84_to_gcj02(lng, lat)
     return None
 
 
