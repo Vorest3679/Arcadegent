@@ -1,0 +1,265 @@
+{
+  "version": 4,
+  "data_path": "data/local/arcades.geocoded.sample.jsonl",
+  "targets": [
+    {
+      "case_id": "local-shop-33",
+      "source_id": 33,
+      "name": "环游嘉年华广州天河城店",
+      "city": "广州市",
+      "address": "天河路208号天河城6层616",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/33"
+    },
+    {
+      "case_id": "local-shop-34",
+      "source_id": 34,
+      "name": "梦游仙境游乐园",
+      "city": "广州市",
+      "address": "天河路598号百脑汇4层401",
+      "title": "SOUND VOLTEX",
+      "source_url": "https://map.bemanicn.com/s/34"
+    },
+    {
+      "case_id": "local-shop-35",
+      "source_id": 35,
+      "name": "哇哇哇游乐城",
+      "city": "广州市",
+      "address": "天河路228号正佳广场7层7A001、7B002",
+      "title": "CHUNITHM",
+      "source_url": "https://map.bemanicn.com/s/35"
+    },
+    {
+      "case_id": "local-shop-45",
+      "source_id": 45,
+      "name": "星际传奇梅林卓悦汇店",
+      "city": "深圳市",
+      "address": "中康路126号卓悦汇购物中心3L",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/45"
+    },
+    {
+      "case_id": "local-shop-48",
+      "source_id": 48,
+      "name": "核客电玩城",
+      "city": "深圳市",
+      "address": "深南东路3020号百货广场大厦B-1-1",
+      "title": "CHUNITHM",
+      "source_url": "https://map.bemanicn.com/s/48"
+    },
+    {
+      "case_id": "local-shop-552",
+      "source_id": 552,
+      "name": "星际传奇深圳宝安壹方城店",
+      "city": "深圳市",
+      "address": "宝安中心壹方城购物中心三楼星际传奇",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/552"
+    },
+    {
+      "case_id": "local-shop-315",
+      "source_id": 315,
+      "name": "趣玩汇南京新街口正洪大厦店（原大风）",
+      "city": "南京市",
+      "address": "洪武路38号正洪大厦102栋",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/315"
+    },
+    {
+      "case_id": "local-shop-318",
+      "source_id": 318,
+      "name": "风云再起南京常发广场店",
+      "city": "南京市",
+      "address": "红山南路88-1号常发广场（三楼）",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/318"
+    },
+    {
+      "case_id": "local-shop-447",
+      "source_id": 447,
+      "name": "鸽屋咕咕咕",
+      "city": "南京市",
+      "address": "中山南路101号 金銮大厦24楼 出电梯右转",
+      "title": "CHUNITHM",
+      "source_url": "https://map.bemanicn.com/s/447"
+    },
+    {
+      "case_id": "local-shop-231",
+      "source_id": 231,
+      "name": "汤姆熊（和谐广场店）",
+      "city": "济南市",
+      "address": "经十路22799号和谐广场3层322室（与纬十二路交叉），和谐广场南门侧3楼",
+      "title": "CHUNITHM",
+      "source_url": "https://map.bemanicn.com/s/231"
+    },
+    {
+      "case_id": "local-shop-543",
+      "source_id": 543,
+      "name": "Play1家庭娱乐中心（大玩家济南高新万达广场店）",
+      "city": "济南市",
+      "address": "工业南路57号万达广场济南高新店2号楼F3层",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/543"
+    },
+    {
+      "case_id": "local-shop-584",
+      "source_id": 584,
+      "name": "威龙传奇（济南世茂广场店）",
+      "city": "济南市",
+      "address": "泉城路26号世茂国际广场西座3层",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/584"
+    },
+    {
+      "case_id": "local-shop-165",
+      "source_id": 165,
+      "name": "风云再起武汉江汉路店",
+      "city": "武汉市",
+      "address": "地铁二号线江汉路站JH2-009(江汉路地铁站C、D出口直达)",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/165"
+    },
+    {
+      "case_id": "local-shop-160",
+      "source_id": 160,
+      "name": "真快活银泰创意城店",
+      "city": "武汉市",
+      "address": "珞喻路35号银泰创意城3F",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/160"
+    },
+    {
+      "case_id": "local-shop-580",
+      "source_id": 580,
+      "name": "嗨森汇乐园电玩城(光谷店)",
+      "city": "武汉市",
+      "address": "东湖高新技术开发区珞喻路726号世界城光谷步行街一期3楼",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/580"
+    },
+    {
+      "case_id": "local-shop-225",
+      "source_id": 225,
+      "name": "风云再起合肥淮河路店",
+      "city": "合肥市",
+      "address": "淮河路步行街风云再起（北含山路东侧 百盛隔壁）",
+      "title": "CHUNITHM",
+      "source_url": "https://map.bemanicn.com/s/225"
+    },
+    {
+      "case_id": "local-shop-226",
+      "source_id": 226,
+      "name": "明日世界（之心城店）",
+      "city": "合肥市",
+      "address": "长江西路187号之心城7F层7F-12",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/226"
+    },
+    {
+      "case_id": "local-shop-546",
+      "source_id": 546,
+      "name": "大玩家（包河万达）",
+      "city": "合肥市",
+      "address": "马鞍山路130号万达广场(包河店)2F层2F-25",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/546"
+    },
+    {
+      "case_id": "local-shop-1342",
+      "source_id": 1342,
+      "name": "星际传奇（奥体印象城店）",
+      "city": "杭州市",
+      "address": "盈丰街道飞虹路1408号奥体印象城",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/1342"
+    },
+    {
+      "case_id": "local-shop-1389",
+      "source_id": 1389,
+      "name": "第一回合（杭州金沙印象城店）",
+      "city": "杭州市",
+      "address": "金沙大道97号杭州金沙印象城4楼",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/1389"
+    },
+    {
+      "case_id": "local-shop-4077",
+      "source_id": 4077,
+      "name": "木马王国杭州西溪印象城店",
+      "city": "杭州市",
+      "address": "余杭区五常大道一号西溪印象城三楼木马王国",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/4077"
+    },
+    {
+      "case_id": "local-shop-4799",
+      "source_id": 4799,
+      "name": "一起玩潮趣嘉年华",
+      "city": "天水市",
+      "address": "桥南五道街商业街区2楼一起玩潮趣嘉年华（桥南建材市场内）",
+      "title": "CHUNITHM",
+      "source_url": "https://map.bemanicn.com/s/4799"
+    },
+    {
+      "case_id": "local-shop-5028",
+      "source_id": 5028,
+      "name": "宝贝王天水秦州万达店",
+      "city": "天水市",
+      "address": "秦州万达广场三楼",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/5028"
+    },
+    {
+      "case_id": "local-shop-6013",
+      "source_id": 6013,
+      "name": "一起玩潮趣嘉年华（步行街店）",
+      "city": "天水市",
+      "address": "中华西路步行街阳光饭店对面西北20米",
+      "title": "maimai",
+      "source_url": "https://map.bemanicn.com/s/6013"
+    }
+  ],
+  "source_sha256": {
+    "data/local/arcades.geocoded.sample.jsonl": "b127ac8296425d3d5fc7420e3cebac7621cc970a508b6c39804d471ad618f6c3",
+    "data/processed/bemanicn/arcade_shops.jsonl": "635513702162513048acd320961cbdb7ab21f4751a34c5df297ebbab73ebddb7",
+    "data/processed/bemanicn/arcade_titles.jsonl": "637ddf5787909084b255952845aa822b02ce62cfd81c7e83f7f895988c01d9ac"
+  },
+  "geocoded_targets": [
+    {
+      "source_id": 1,
+      "name": "街机烈火",
+      "city_name": "上海市",
+      "longitude_gcj02": 121.455483,
+      "latitude_gcj02": 31.229618
+    },
+    {
+      "source_id": 2,
+      "name": "风云再起北京西单明珠店",
+      "city_name": "北京市",
+      "longitude_gcj02": 116.375909,
+      "latitude_gcj02": 39.910393
+    },
+    {
+      "source_id": 4,
+      "name": "环游嘉年华（北京朝阳大悦城店）",
+      "city_name": "北京市",
+      "longitude_gcj02": 116.518803,
+      "latitude_gcj02": 39.924356
+    },
+    {
+      "source_id": 6,
+      "name": "风云再起上海人民广场店",
+      "city_name": "上海市",
+      "longitude_gcj02": 121.473024,
+      "latitude_gcj02": 31.228048
+    },
+    {
+      "source_id": 9,
+      "name": "汤姆熊欢乐世界(上海大悦城店)",
+      "city_name": "上海市",
+      "longitude_gcj02": 121.471788,
+      "latitude_gcj02": 31.243115
+    }
+  ],
+  "notes": "Local snapshot evidence, not current opening/availability. Route endpoints use local GCJ02; client location uses WGS84. Nearby comparison only covers the named candidates."
+}

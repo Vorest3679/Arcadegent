@@ -1,0 +1,482 @@
+# 合成开发集 v3：26 retrieval / 4 navigation / 2 robustness。
+# 文本模仿真实用户口语；商户、地址、坐标均为合成数据，不能用于实际推荐。
+# 这是开发集：允许迭代 prompt、工具和 rubric；正式排名应另建人工审核的私有 holdout。
+
+- id: hangzhou-east-impressions-hub
+  group: retrieval
+  description: 用户只说商场名，定位用于消除杭州两个“印象汇”的歧义。
+  capabilities: [named-place, client-location, nearby-ranking, entity-disambiguation]
+  turns:
+  - message: 我在杭州东站出来，想看看印象汇里面有没有机厅能玩；说的是我这里附近这家，别把西湖那家也算进来。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 35}
+    required_shop_ids: [910001, 910002]
+    forbidden_shop_ids: [910003]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {sort_by: distance, sort_order: asc, origin_lng: 120.215, origin_lat: 30.289}
+
+- id: here-nearby-maimai
+  group: retrieval
+  description: “这里附近”“舞萌”需要映射到浏览器定位、距离排序和 title filter。
+  capabilities: [colloquial-title-alias, deictic-location, distance-sort]
+  turns:
+  - message: 这里附近舞萌在哪？我刚下南京南站，按近到远给我看。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 25}
+    required_shop_ids: [910001, 910002, 910005, 910006]
+    forbidden_shop_ids: [910003]
+    ordered_prefix: [910002]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: maimai, sort_by: distance, sort_order: asc}
+
+- id: hangzhou-east-chunithm
+  group: retrieval
+  description: 将“中二”理解为 CHUNITHM，并使用定位筛掉异地门店。
+  capabilities: [title-alias, nearby-ranking, distractor-rejection]
+  turns:
+  - message: 东站附近想打中二，最好别走太远；有的店列出来就行，不要把只有舞萌的店混进来。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 25}
+    required_shop_ids: [910001, 910002, 910005, 910007]
+    forbidden_shop_ids: [910003, 910006]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: CHUNITHM, sort_by: distance, sort_order: asc}
+
+- id: east-station-not-a-mall
+  group: retrieval
+  description: 地标附近有无机种地点，不能把“候车区娱乐中心”当机厅。
+  capabilities: [nearby-search, has-arcades-filter, negative-distractor]
+  turns:
+  - message: 杭州东站旁边有没有正经机厅？候车区那种没有音游机器的就别推荐给我。
+    location: {lng: 120.2170, lat: 30.2880, city: 杭州市, accuracy_m: 30}
+    required_shop_ids: [910001, 910002, 910005, 910006, 910007]
+    forbidden_shop_ids: [910004]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {has_arcades: true, sort_by: distance}
+
+- id: tianshui-casual-arcades
+  group: retrieval
+  description: “天水有没有机厅玩的”必须离散为天水市内有机种记录的门店，而不是查省级或相邻城市。
+  capabilities: [colloquial-city-query, city-boundary, broad-search]
+  turns:
+  - message: 天水有没有机厅玩的？今天就想随便打点音游，没有也直说，别把陇南的给我算进来。
+    shop_ids: [920001, 920002, 920003]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {city_name: 天水市, has_arcades: true}
+
+- id: tianshui-south-station-maimai
+  group: retrieval
+  description: 站名通过客户端定位消歧，评测最近的舞萌而非全市或另一城区。
+  capabilities: [nearby-search, title-alias, station-context]
+  turns:
+  - message: 我现在在天水南站，最近能打舞萌的是哪？只要最近的一家就好。
+    location: {lng: 105.8680, lat: 34.5530, city: 天水市, accuracy_m: 45}
+    required_shop_ids: [920003]
+    ordered_prefix: [920003]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: maimai, sort_by: distance, sort_order: asc}
+
+- id: tianshui-wanda-chunithm-ambiguity
+  group: retrieval
+  description: 同一城市有两个“万达”，用户要求同时覆盖秦州和麦积。
+  capabilities: [ambiguous-landmark, candidate-coverage, title-filter]
+  turns:
+  - message: 天水万达能打中二吗？我还没想好去秦州还是麦积，两个地方都帮我看看。
+    shop_ids: [920002, 920003]
+    required_tools: [db_query_tool]
+    answer_contains: [秦州, 麦积]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {city_name: 天水市, title_name: CHUNITHM}
+
+- id: no-arcade-record-is-not-an-arcade
+  group: retrieval
+  description: 名字像娱乐场所但数据中无机种记录，必须返回空而不是以名称猜测。
+  capabilities: [negative-result, evidence-discipline]
+  turns:
+  - message: 天水欢乐天地里面有舞萌吗？没有记录就告诉我没有，别猜它大概会有。
+    shop_ids: []
+    required_tools: [db_query_tool]
+    answer_not_contains: [肯定]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {shop_name: 天水欢乐天地, title_name: maimai}
+
+- id: cross-city-context-reset
+  group: retrieval
+  description: 第二轮切换城市和定位，不能复用第一轮杭州候选。
+  capabilities: [multi-turn, context-reset, nearby-search]
+  turns:
+  - message: 杭州东站附近舞萌在哪？
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 25}
+    required_shop_ids: [910001, 910002]
+    forbidden_shop_ids: [910003]
+    required_tools: [db_query_tool]
+  - message: 不看杭州了，我已经到天水南站；这边最近的舞萌是哪家？
+    location: {lng: 105.8680, lat: 34.5530, city: 天水市, accuracy_m: 45}
+    required_shop_ids: [920003]
+    forbidden_shop_ids: [910001, 910002, 910003]
+    ordered_prefix: [920003]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: maimai, sort_by: distance}
+
+- id: same-brand-ambiguous-store
+  group: retrieval
+  description: 同品牌同商圈的两家门店不能只凭名称返回错误详情。
+  capabilities: [shop-name-ambiguity, location-disambiguation]
+  turns:
+  - message: 我人在国贸商城里面，乐游那家有舞萌吗？是商城里，不是国贸桥边那家。
+    location: {lng: 116.4610, lat: 39.9080, city: 北京市, accuracy_m: 30}
+    required_shop_ids: [940001]
+    forbidden_shop_ids: [940002]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {shop_name: 乐游, title_name: maimai, sort_by: distance}
+
+- id: people-square-machine-count
+  group: retrieval
+  description: 将“机器多一点”落到指定机种数量排序，而非总机种数量。
+  capabilities: [title-quantity-sort, colloquial-preference]
+  turns:
+  - message: 人民广场附近想打舞萌，优先给我舞萌机器多的；静安那家普通版不用优先推荐。
+    location: {lng: 121.4730, lat: 31.2320, city: 上海市, accuracy_m: 20}
+    required_shop_ids: [930001]
+    ordered_prefix: [930001]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: maimai, sort_by: title_quantity, sort_title_name: maimai, sort_order: desc}
+
+- id: page-request-in-conversation
+  group: retrieval
+  description: 用户要求“只先看两家”，不能忽略 page_size。
+  capabilities: [result-limit, nearby-ranking]
+  turns:
+  - message: 东站附近有舞萌的先给我两家就够了，按距离排，后面的别一次性全倒出来。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 25}
+    required_shop_ids: [910002, 910001]
+    ordered_prefix: [910002, 910001]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: maimai, sort_by: distance, sort_order: asc, page_size: 2}
+
+- id: hangzhou-impressions-chunithm
+  group: retrieval
+  description: 商场名与机种条件组合，排除同名西湖店和只含舞萌的候选。
+  capabilities: [compound-constraint, named-place, title-filter]
+  turns:
+  - message: 杭州东站那边的印象汇，里面有中二的机厅有哪些？不要给我西湖印象汇，也不要只有舞萌的店。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 25}
+    shop_ids: [910001, 910002]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {shop_name: 印象汇, title_name: CHUNITHM, sort_by: distance}
+
+- id: tianshui-south-station-chunithm
+  group: retrieval
+  description: 同城不同城区下，定位优先级应高于较早或较热门的秦州门店。
+  capabilities: [nearby-search, city-within-district, title-filter]
+  turns:
+  - message: 天水南站这边想打中二，最近的给我一个就行，别默认跑去秦州区。
+    location: {lng: 105.8680, lat: 34.5530, city: 天水市, accuracy_m: 45}
+    required_shop_ids: [920003]
+    ordered_prefix: [920003]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: CHUNITHM, sort_by: distance, sort_order: asc}
+
+- id: oral-navigation-after-selection
+  group: navigation
+  description: 先口语检索，再用“第一家”触发步行导航；只在 EVAL_MAP_MODE=live 时运行。
+  capabilities: [multi-turn-selection, walking-route, artifact-freshness]
+  turns:
+  - message: 我在杭州东站，附近印象汇里面有没有机厅？按近到远给我看。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 25}
+    required_shop_ids: [910001, 910002]
+    forbidden_shop_ids: [910003]
+    required_tools: [db_query_tool]
+  - message: 就去第一家，帮我走路过去。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 25}
+    route_mode: walking
+    route_origin: [120.2150, 30.2890]
+    route_destination: [120.2143, 30.2895]
+    required_tools: [route_plan_tool]
+    forbid_route: false
+
+- id: oral-navigation-mode-switch
+  group: navigation
+  description: 同一目的地由“步行”改“开车”，路线 artifact 必须是当前轮的 driving 结果。
+  capabilities: [multi-turn, route-mode-switch, stale-route-prevention]
+  turns:
+  - message: 从杭州东站去印象汇店，先给我步行路线。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 25}
+    route_mode: walking
+    route_origin: [120.2150, 30.2890]
+    route_destination: [120.2143, 30.2895]
+    required_tools: [route_plan_tool]
+    forbid_route: false
+  - message: 临时要开车了，还是去刚才那家，换成驾车路线。
+    location: {lng: 120.2150, lat: 30.2890, city: 杭州市, accuracy_m: 25}
+    route_mode: driving
+    route_origin: [120.2150, 30.2890]
+    route_destination: [120.2143, 30.2895]
+    required_tools: [route_plan_tool]
+    forbid_route: false
+
+- id: oral-navigation-tianshui-after-search
+  group: navigation
+  description: 先查天水南站附近舞萌，再根据“就那家”导航，检查跨轮选店来源。
+  capabilities: [multi-turn-selection, named-city, walking-route]
+  turns:
+  - message: 天水南站旁边有没有舞萌？最近的一家是哪？
+    location: {lng: 105.8680, lat: 34.5530, city: 天水市, accuracy_m: 45}
+    required_shop_ids: [920003]
+    ordered_prefix: [920003]
+    required_tools: [db_query_tool]
+  - message: 就那家，走路过去怎么走？
+    location: {lng: 105.8680, lat: 34.5530, city: 天水市, accuracy_m: 45}
+    route_mode: walking
+    route_origin: [105.8680, 34.5530]
+    route_destination: [105.8940, 34.5590]
+    required_tools: [route_plan_tool]
+    forbid_route: false
+
+- id: oral-navigation-direct-destination
+  group: navigation
+  description: 用户明确目的地和当前定位时，不应错误沿用其他城市历史候选。
+  capabilities: [direct-navigation, explicit-location, city-isolation]
+  turns:
+  - message: 我在北京国贸商城，导航到商城里的乐游，开车去。
+    location: {lng: 116.4610, lat: 39.9080, city: 北京市, accuracy_m: 30}
+    route_mode: driving
+    route_origin: [116.4610, 39.9080]
+    route_destination: [116.4610, 39.9080]
+    required_tools: [route_plan_tool]
+    forbid_route: false
+
+- id: missing-location-clarification
+  group: robustness
+  description: “这里附近”没有定位和城市时，先澄清，不得把默认城市或旧数据当位置。
+  capabilities: [missing-context, clarification, no-hallucinated-search]
+  turns:
+  - message: 这里附近哪里能打舞萌？
+    forbidden_tools: [db_query_tool, route_plan_tool, geo_resolve_tool, invoke_worker]
+    answer_contains: [位置]
+
+- id: price-hours-evidence-boundary
+  group: robustness
+  description: 数据没有营业时间或价格时，模型需承认未知，不能编造。
+  capabilities: [unsupported-fact, evidence-discipline]
+  turns:
+  - message: 杭州东站印象汇那家几点关门，舞萌多少钱一局？数据没有就直接说不知道。
+    required_shop_ids: [910001, 910002]
+    required_tools: [db_query_tool]
+    answer_not_contains: [24小时]
+
+- id: guangzhou-tianhe-maimai
+  group: retrieval
+  description: 天河体育中心口语定位，排除同城较远的珠江新城与大学城。
+  capabilities: [colloquial-title-alias, landmark-location, distance-sort]
+  turns:
+  - message: 我在天河体育中心这边，附近舞萌想打几把；珠江新城和大学城太远就别给我了。
+    location: {lng: 113.3280, lat: 23.1350, city: 广州市, accuracy_m: 40}
+    required_shop_ids: [950001]
+    forbidden_shop_ids: [950002, 950003]
+    ordered_prefix: [950001]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {sort_by: distance, sort_order: asc}
+
+- id: guangzhou-university-city-chunithm
+  group: retrieval
+  description: 大学城“中二”需要转成机种检索，不能返回只有同类商圈的门店。
+  capabilities: [title-alias, landmark-location, city-isolation]
+  turns:
+  - message: 大学城下课想打中二，附近有能玩的机厅吗？
+    location: {lng: 113.3940, lat: 23.0500, city: 广州市, accuracy_m: 45}
+    required_shop_ids: [950003]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: CHUNITHM, sort_by: distance}
+
+- id: shenzhen-futian-cbd-maimai
+  group: retrieval
+  description: 福田 CBD 下班后的“舞萌”查询结合当前位置排序。
+  capabilities: [deictic-location, colloquial-title-alias, distance-sort]
+  turns:
+  - message: 福田CBD写字楼刚下班，这附近还有舞萌吗？按最近的来。
+    location: {lng: 114.0580, lat: 22.5430, city: 深圳市, accuracy_m: 35}
+    required_shop_ids: [960001]
+    ordered_prefix: [960001]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {sort_by: distance, sort_order: asc}
+
+- id: shenzhen-science-park-sdvx
+  group: retrieval
+  description: 英文缩写 SDVX 与科技园地标的组合查询。
+  capabilities: [title-alias, landmark-location, distance-sort]
+  turns:
+  - message: 科技园加班完想打 sdvx，离我近的店有吗？
+    location: {lng: 113.9550, lat: 22.5400, city: 深圳市, accuracy_m: 40}
+    required_shop_ids: [960002]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: SOUND VOLTEX, sort_by: distance}
+
+- id: nanjing-xinjiekou-maimai
+  group: retrieval
+  description: 地铁站附近的省略式表达需要以新街口定位。
+  capabilities: [landmark-location, colloquial-title-alias, distance-sort]
+  turns:
+  - message: 新街口地铁站出来，附近舞萌在哪？
+    location: {lng: 118.7890, lat: 32.0420, city: 南京市, accuracy_m: 30}
+    required_shop_ids: [970001]
+    ordered_prefix: [970001]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {sort_by: distance, sort_order: asc}
+
+- id: nanjing-south-station-no-long-detour
+  group: retrieval
+  description: 南京南站的附近约束不能扩展到仙林大学城。
+  capabilities: [nearby-ranking, negative-distance-constraint, city-isolation]
+  turns:
+  - message: 南京南站候车，附近能打舞萌就行，别给我推仙林那边的。
+    location: {lng: 118.7980, lat: 31.9680, city: 南京市, accuracy_m: 35}
+    required_shop_ids: [970002]
+    forbidden_shop_ids: [970003]
+    ordered_prefix: [970002]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {sort_by: distance, sort_order: asc}
+
+- id: jinan-quancheng-square-maimai
+  group: retrieval
+  description: 泉城广场附近的口语化机种查询。
+  capabilities: [landmark-location, colloquial-title-alias, distance-sort]
+  turns:
+  - message: 泉城广场逛完了，附近哪能打舞萌？
+    location: {lng: 117.0210, lat: 36.6630, city: 济南市, accuracy_m: 35}
+    required_shop_ids: [980001]
+    ordered_prefix: [980001]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {sort_by: distance, sort_order: asc}
+
+- id: jinan-high-tech-chunithm
+  group: retrieval
+  description: 高新万达与“中二”的组合，避免将城市名当成唯一约束。
+  capabilities: [title-alias, landmark-location, distance-sort]
+  turns:
+  - message: 济南高新万达这儿有中二能玩吗？
+    location: {lng: 117.1530, lat: 36.6720, city: 济南市, accuracy_m: 40}
+    required_shop_ids: [980003]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: CHUNITHM, sort_by: distance}
+
+- id: wuhan-optics-valley-arcades
+  group: retrieval
+  description: “能打音游”是泛机厅需求，要求筛掉无机种记录的地点。
+  capabilities: [broad-search, landmark-location, has-arcades-filter]
+  turns:
+  - message: 光谷广场附近还有能打音游的吗？
+    location: {lng: 114.4050, lat: 30.5100, city: 武汉市, accuracy_m: 40}
+    required_shop_ids: [990001]
+    ordered_prefix: [990001]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {has_arcades: true, sort_by: distance}
+
+- id: wuhan-wuchang-station-chunithm
+  group: retrieval
+  description: 武昌站位置下的“中二”精确机种检索。
+  capabilities: [title-alias, landmark-location, distance-sort]
+  turns:
+  - message: 我在武昌站，走路能到的中二机厅有吗？
+    location: {lng: 114.3240, lat: 30.5280, city: 武汉市, accuracy_m: 35}
+    required_shop_ids: [990003]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {title_name: CHUNITHM, sort_by: distance}
+
+- id: hefei-swan-lake-maimai
+  group: retrieval
+  description: 天鹅湖万达的“舞萌”查询，测试地标与当前定位共同约束。
+  capabilities: [landmark-location, colloquial-title-alias, distance-sort]
+  turns:
+  - message: 天鹅湖万达这边，附近舞萌还开着能打吗？
+    location: {lng: 117.2300, lat: 31.8100, city: 合肥市, accuracy_m: 40}
+    required_shop_ids: [1000001]
+    ordered_prefix: [1000001]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {sort_by: distance, sort_order: asc}
+
+- id: hefei-south-station-maimai
+  group: retrieval
+  description: 合肥南站短时间候车场景，要求提供近点而非大学城。
+  capabilities: [nearby-ranking, station-location, negative-distance-constraint]
+  turns:
+  - message: 合肥南站还有一个小时，附近有舞萌的话推荐近点，大学城别算。
+    location: {lng: 117.3090, lat: 31.7930, city: 合肥市, accuracy_m: 35}
+    required_shop_ids: [1000002]
+    forbidden_shop_ids: [1000003]
+    ordered_prefix: [1000002]
+    required_tools: [db_query_tool]
+    tool_argument_assertions:
+    - tool: db_query_tool
+      stage: prepared
+      contains: {sort_by: distance, sort_order: asc}

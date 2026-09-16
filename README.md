@@ -12,6 +12,7 @@ Arcadegent 是一个面向音游机厅检索、Agent 问答和路线建议的全
 - 会话管理：支持历史会话列表、详情加载、运行中重连和删除会话。
 - 地理能力：支持浏览器定位缓存、高德逆地理编码、机厅坐标缓存、无坐标机厅的区域级地图回退。
 - Agent 工具系统：内置 DB 查询、地理解析、路线规划、总结工具，同时支持启动时发现 MCP 工具并投影为 `mcp__*`。
+- 评测工作台：`evaluate/` 提供离线契约回归和真实模型在线评测，硬约束判分与 LLM judge 质量判分分离，证据全量落盘。
 
 ## 技术栈
 
@@ -35,6 +36,9 @@ apps/web/tests/e2e/              Playwright 端到端测试
 deploy/nginx/                    生产 Nginx 示例配置
 docs/guidings/                   对外指南文档
 docs/dev-details/                对外开发细节文档
+evaluate/                        评测工作台：离线契约回归、在线模型评测、判分与报告
+evaluate/checks/                 禁网的确定性契约测试
+evaluate/datasets/public/        公开 benchmark 用例与来源清单
 scripts/                         数据采集、ETL、Supabase 同步和素材补全脚本
 docker-compose.yml               本地或服务器 compose 编排
 ```
@@ -424,7 +428,17 @@ Agent 配置分为几层：
 
 当前主流程是 `main_agent` 识别意图并调度 worker。`search_worker` 负责机厅查询，`navigation_worker` 负责目标解析和路线规划，最终再由 summary 流程生成用户可见回复。
 
-路线规划优先尝试可用的高德 MCP 路线工具；不可用时使用内置 `route_plan_tool`，该工具会先请求高德 REST 路线 API，失败后退化为离线直线距离和估算时间。
+路线规划优先尝试可用的高德 MCP 路线工具；不可用时使用内置 `route_plan_tool` 请求高德 REST 路线 API。两者都不可用时工具调用以失败告终，不再生成离线直线估算，避免把不可验证的路线展示给用户。
+
+## 评测与回归
+
+`evaluate/` 是独立的评测工作台，与应用运行配置隔离：密钥只从 `evaluate/.env` 或 `EVAL_*` 环境变量读取，不加载根目录 `.env`，也不修改生产配置。
+
+- 离线契约回归：`python -m evaluate check` 运行禁网的 pytest 契约套件，输出 JUnit / JSON / Markdown 证据。这些是确定性检查，不产生模型排名。
+- 在线评测：`python -m evaluate run` 用真实模型在冻结机厅数据上执行 benchmark case，按 model profile 并发、profile 内串行，全量记录请求、事件与会话快照；硬约束判分（工具证据、门店 ID、路线来源等）与 LLM judge 质量判分分离，报告包含加权完整通过得分、耗时与成本图表。
+- 其他子命令：`validate` 校验配置、`compatibility` 冒烟工具调用契约、`grade` 对已有运行重跑 judge、`review export/import` 人工质量复核、`compare` 按 profile/case/repeat 配对比较两次运行、`init-env` 生成配置模板。
+
+配置项、判分口径和数据集说明见 [evaluate/README.md](evaluate/README.md) 与 [evaluate/ONLINE.md](evaluate/ONLINE.md)。
 
 ## 数据说明
 
@@ -544,7 +558,7 @@ npm run test:e2e
 - 高德 MCP 没有路线：访问 `/health`，查看 `mcp.servers.amap.available_tools`、`selected_route_tool`、`last_error`，必要时配置 `route_tool_name`。
 - 浏览器不弹定位授权：确认线上页面是 `https://` 打开，外层 Nginx 或 CDN 没有设置禁止定位的 `Permissions-Policy`，并在浏览器地址栏站点设置里清除旧的定位拒绝记录。
 - 前端地图不可用：检查 `VITE_AMAP_WEB_KEY` 是否是 Web JS API key，必要时配置 `VITE_AMAP_SECURITY_JS_CODE`。
-- 路线只有直线估算：通常是高德 MCP 和 REST 都不可用，检查 `AMAP_API_KEY`、额度、网络和 `/health`。
+- 路线不可用或报错：通常是高德 MCP 和 REST 都不可用，检查 `AMAP_API_KEY`、额度、网络和 `/health`。
 - 前端跨域错误：确认 `.env` 里的 `CORS_ALLOW_ORIGINS` 包含当前 Vite 地址。
 
 ## 当前限制
