@@ -85,6 +85,15 @@ def priced_usage(records, values, prefix):
             "priced_requests": len(confirmed), "unpriced_requests": len(records) - len(confirmed)}
 
 
+def price_tier_values(values, prefix, tier):
+    """Apply an optional profile-specific price tier without changing model requests."""
+    keys = ["INPUT_PRICE", "CACHED_INPUT_PRICE", "OUTPUT_PRICE"]
+    tiered = {key: values.get(prefix + tier + "_" + key) for key in keys}
+    if not all(tiered.values()):
+        return None
+    return {**values, **{prefix + key: value for key, value in tiered.items()}}
+
+
 def attach_attempt_accounting(attempts, calls, values):
     """Attach agent and judge token/cost attribution to each attempt for report timelines."""
     by_attempt = {}
@@ -195,14 +204,17 @@ def weighted_timeline_svg(rows):
 
 def score_cost_scatter_svg(models, currency):
     """Compare the final weighted outcome against confirmed mean spend per task."""
-    rows = [(name, model) for name, model in models.items() if model.get("average_task_cost") is not None]
+    rows = [(name, model, "主档", model["average_task_cost"]) for name, model in models.items()
+            if model.get("average_task_cost") is not None]
+    rows += [(name, model, "闲时", model["offpeak_average_task_cost"]) for name, model in models.items()
+             if model.get("offpeak_average_task_cost") is not None]
     width, height = 840, 480
     left, right, top, bottom = 82, 30, 54, 66
     plot_width, plot_height = width - left - right, height - top - bottom
-    maximum = max((model["average_task_cost"] for _, model in rows), default=1)
+    maximum = max((cost_value for _, _, _, cost_value in rows), default=1)
     x_max = max(0.000001, maximum * 1.12)
     palette = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2"]
-    colors = {name: palette[index % len(palette)] for index, (name, _) in enumerate(rows)}
+    colors = {name: palette[index % len(palette)] for index, name in enumerate(sorted({name for name, _, _, _ in rows}))}
     def x(value):
         return left + value / x_max * plot_width
     def y(value):
@@ -221,10 +233,11 @@ def score_cost_scatter_svg(models, currency):
         pos = left + plot_width * value / 4
         parts += [f'<line x1="{pos:.1f}" y1="{top}" x2="{pos:.1f}" y2="{top + plot_height}" stroke="#e5e7eb"/>',
                   f'<text x="{pos:.1f}" y="{top + plot_height + 22}" text-anchor="middle" font-family="sans-serif" font-size="12">{amount:.3f}</text>']
-    for name, model in rows:
-        label = escape(f"{name}: 加权完整通过 {model['weighted_complete_score']:.2f}/100，每 task 已确认均价 {currency} {model['average_task_cost']:.6f}，未定价请求 {model['unpriced_requests']}")
-        parts += [f'<circle cx="{x(model["average_task_cost"]):.1f}" cy="{y(model["weighted_complete_score"]):.1f}" r="6" fill="{colors[name]}"><title>{label}</title></circle>',
-                  f'<text x="{x(model["average_task_cost"]) + 8:.1f}" y="{y(model["weighted_complete_score"]) - 8:.1f}" font-family="sans-serif" font-size="12">{escape(name)}</text>']
+    for name, model, tier, cost_value in rows:
+        label = escape(f"{name}（{tier}）: 加权完整通过 {model['weighted_complete_score']:.2f}/100，每 task 已确认均价 {currency} {cost_value:.6f}，未定价请求 {model['unpriced_requests']}")
+        fill = "none" if tier == "闲时" else colors[name]
+        parts += [f'<circle cx="{x(cost_value):.1f}" cy="{y(model["weighted_complete_score"]):.1f}" r="6" fill="{fill}" stroke="{colors[name]}" stroke-width="2"><title>{label}</title></circle>',
+                  f'<text x="{x(cost_value) + 8:.1f}" y="{y(model["weighted_complete_score"]) - 8:.1f}" font-family="sans-serif" font-size="12">{escape(name + "（" + tier + "）")}</text>']
     parts += [f'<text x="{left + plot_width / 2:.1f}" y="{height - 15}" text-anchor="middle" font-family="sans-serif" font-size="13">每 task 已确认均价（{escape(currency)}）</text>',
               f'<text x="18" y="{top + plot_height / 2:.1f}" transform="rotate(-90 18 {top + plot_height / 2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="13">加权完整通过得分（百分制）</text>',
               '</svg>']
@@ -419,6 +432,12 @@ def report(evidence, attempts):
         confirmed = [value for value in [model_summary["agent_priced_usage"]["confirmed_cost"],
                                          model_summary["judge_priced_usage"]["confirmed_cost"]] if value is not None]
         model_summary["confirmed_total_cost"] = sum(confirmed) if confirmed else None
+        offpeak_values = price_tier_values(evidence.values, prefix, "OFFPEAK")
+        if offpeak_values:
+            offpeak_agent = priced_usage(agent_calls, offpeak_values, prefix)
+            offpeak_confirmed = [value for value in [offpeak_agent["confirmed_cost"],
+                                                      model_summary["judge_priced_usage"]["confirmed_cost"]] if value is not None]
+            model_summary["offpeak_confirmed_total_cost"] = sum(offpeak_confirmed) if offpeak_confirmed else None
         model_summary["unpriced_requests"] = (model_summary["agent_priced_usage"]["unpriced_requests"]
                                                 + model_summary["judge_priced_usage"]["unpriced_requests"])
         ran = [a for a in rows if a["status"] != "not_run"]
@@ -433,6 +452,8 @@ def report(evidence, attempts):
         model["weighted_complete_score"] = points[-1]["weighted_complete_score"] if points else 0.0
         model["average_task_cost"] = (model["confirmed_total_cost"] / model["started"]
                                       if model["confirmed_total_cost"] is not None and model["started"] else None)
+        model["offpeak_average_task_cost"] = (model["offpeak_confirmed_total_cost"] / model["started"]
+                                              if model.get("offpeak_confirmed_total_cost") is not None and model["started"] else None)
     currency = evidence.values.get("EVAL_CURRENCY", "unspecified")
     evidence.json("model-cost-summary.json", {"currency": currency, "models": summary["models"]})
     (evidence.directory / "weighted-score-vs-average-task-cost.svg").write_text(
@@ -504,8 +525,8 @@ def report(evidence, attempts):
               "`weighted-complete-timeline.json` 以模型为单位按完成顺序累计。每个 group 的总分权重为检索 70、导航 20、鲁棒性 10，"
               "并均分给该 group 的所有计划 attempt；完整通过时才累加该 attempt 的权重。"
               "`weighted-complete-score-over-time.svg` 将每个模型连成折线：横轴为该模型累计完成耗时（秒），纵轴为累计加权完整通过得分（百分制）。", "",
-              "| Profile | 曲线终点分 | 累计耗时 | Agent 已知 token | Judge 已知 token | 已知总 token | 已确认价格 | 每 task 均价 | 未定价请求 |",
-              "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+              "| Profile | 曲线终点分 | 累计耗时 | Agent 已知 token | Judge 已知 token | 已知总 token | 主档已确认价格 | 主档每 task 均价 | 闲时已确认价格 | 闲时每 task 均价 | 未定价请求 |",
+              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for name, model in summary["models"].items():
         points = [point for point in timeline if point["model_profile"] == name]
         final = points[-1] if points else {"weighted_complete_score": 0, "elapsed_ms": 0}
@@ -515,10 +536,12 @@ def report(evidence, attempts):
                      f"{agent['known_total_tokens']} | {judge_usage['known_total_tokens']} | "
                      f"{(agent['known_total_tokens'] or 0) + (judge_usage['known_total_tokens'] or 0)} | "
                      f"{format_price(model['confirmed_total_cost'], currency)} | {format_price(model['average_task_cost'], currency)} | "
-                     f"{model['unpriced_requests']} |")
+                     f"{format_price(model.get('offpeak_confirmed_total_cost'), currency)} | "
+                     f"{format_price(model.get('offpeak_average_task_cost'), currency)} | {model['unpriced_requests']} |")
     lines += ["", "已确认价格按已返回完整 usage 的请求和环境变量中的每百万 token 单价计算；"
               "未定价请求表示 provider 没有返回完整 usage 或没有填写对应单价，因此不把它们误记为免费。"
-              "每 task 均价 = 已确认价格 ÷ 已运行 attempt 数。`weighted-score-vs-average-task-cost.svg` 用横轴表示每 task 均价、纵轴表示加权完整通过得分。"
+              "每 task 均价 = 已确认价格 ÷ 已运行 attempt 数。`weighted-score-vs-average-task-cost.svg` 用横轴表示每 task 均价、纵轴表示加权完整通过得分；"
+              "配置了 `EVAL_<PROFILE>_OFFPEAK_*_PRICE` 的模型会额外以空心点显示闲时价格。"
               "cached/reasoning 为 total 的子集。详见 attempts.jsonl、calls.jsonl、scores.jsonl 和 snapshots/。"]
     lines += ["", "## 未通过或未完成项目", "", "| Profile / case | 状态 | 失败原因 |", "| --- | --- | --- |"]
     for a in attempts:

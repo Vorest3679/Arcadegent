@@ -284,11 +284,13 @@ def test_report_attributes_known_tokens_and_priced_calls_to_timeline(tmp_path):
                "turn_scores": [{"failures": []}], "cost": None}
     call = {"attempt_id": "a", "role": "agent", "response": {"usage": {"input_tokens": 100, "output_tokens": 20}}}
     (tmp_path / "calls.jsonl").write_text(json.dumps(call) + "\n")
-    values = {"EVAL_M_INPUT_PRICE": "1", "EVAL_M_OUTPUT_PRICE": "2", "EVAL_CURRENCY": "USD"}
+    values = {"EVAL_M_INPUT_PRICE": "1", "EVAL_M_OUTPUT_PRICE": "2", "EVAL_M_OFFPEAK_INPUT_PRICE": ".5",
+              "EVAL_M_OFFPEAK_CACHED_INPUT_PRICE": ".5", "EVAL_M_OFFPEAK_OUTPUT_PRICE": "1", "EVAL_CURRENCY": "USD"}
     report(Evidence(tmp_path, values), [attempt])
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["models"]["m"]["confirmed_total_cost"] == pytest.approx(0.00014)
     assert summary["models"]["m"]["average_task_cost"] == pytest.approx(0.00014)
+    assert summary["models"]["m"]["offpeak_average_task_cost"] == pytest.approx(0.00007)
     timeline = json.loads((tmp_path / "weighted-complete-timeline.json").read_text())
     assert timeline[-1]["cumulative_known_total_tokens"] == 120
     assert timeline[-1]["cumulative_confirmed_cost"] == pytest.approx(0.00014)
