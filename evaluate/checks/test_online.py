@@ -69,6 +69,31 @@ def test_live_runner_uses_real_tools_and_separate_sessions_and_redacts_secrets(t
     assert "累计加权完整通过得分" in (tmp_path / "weighted-complete-score-over-time.svg").read_text()
 
 
+def test_model_queues_run_concurrently_but_keep_their_own_attempt_order(tmp_path, monkeypatch):
+    cfg = config(tmp_path, monkeypatch)
+    cfg.models = {"alpha": cfg.models["default"], "beta": cfg.models["default"]}
+    cfg.cases = [Case(id="parallel-models", group="retrieval", turns=[Turn(message="直接回答即可。")])]
+    cfg.max_requests = 4
+    active = peak = 0
+
+    async def handle(request):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(.03)
+            return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": "完成"},
+                "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 2}})
+        finally:
+            active -= 1
+
+    transport(monkeypatch, handle)
+    assert asyncio.run(run(cfg, Evidence(tmp_path, cfg.values))) == 0
+    rows = [json.loads(line) for line in (tmp_path / "attempts.jsonl").read_text().splitlines()]
+    assert {row["model_profile"] for row in rows} == {"alpha", "beta"}
+    assert peak == 2
+
+
 def test_missing_key_is_not_run_and_does_not_inherit_production_env(tmp_path, monkeypatch):
     cfg = config(tmp_path, monkeypatch, "EVAL_LLM_API_KEY=\n")
     monkeypatch.setenv("LLM_API_KEY", "production-key")

@@ -239,6 +239,8 @@ def plan(config):
             "map_mode": config.map_mode, "judge_enabled": config.judge is not None,
             "judge_ready": bool(config.judge and config.ready(config.judge)),
             "max_judge_requests": config.judge_max_requests,
+            "model_execution": "parallel_by_profile_ordered_within_profile",
+            "max_model_concurrency": len(config.models),
             "mode": "live_model_frozen_catalog", "data_sha256": hashlib.sha256(config.data.read_bytes()).hexdigest(),
             "case_sha256": hashlib.sha256(json.dumps([c.model_dump() for c in config.cases], sort_keys=True).encode()).hexdigest()}
 
@@ -490,9 +492,11 @@ async def run(config, evidence):
     agent_budget, judge_budget = Budget(config.max_requests), Budget(config.judge_max_requests)
     cases = {c.id: c for c in config.cases}
     completed = set()
-    try:
-        for attempt in attempts:
-            model = config.models[attempt["model_profile"]]
+
+    async def run_model_queue(name, queue):
+        """Keep one model ordered while allowing independent providers to run together."""
+        model = config.models[name]
+        for attempt in queue:
             case = cases[attempt["case_id"]]
             reason = None
             if not config.ready(model):
@@ -512,6 +516,10 @@ async def run(config, evidence):
             evidence.write("attempts", attempt)
             completed.add(attempt["attempt_id"])
             print(f"{attempt['model_profile']} / {case.id}: {attempt['status']}, hard_pass={attempt.get('hard_pass')}", flush=True)
+
+    queues = {name: [attempt for attempt in attempts if attempt["model_profile"] == name] for name in config.models}
+    try:
+        await asyncio.gather(*(run_model_queue(name, queue) for name, queue in queues.items()))
     finally:
         for attempt in attempts:
             if attempt["attempt_id"] not in completed:
