@@ -288,10 +288,12 @@ def test_report_attributes_known_tokens_and_priced_calls_to_timeline(tmp_path):
     report(Evidence(tmp_path, values), [attempt])
     summary = json.loads((tmp_path / "summary.json").read_text())
     assert summary["models"]["m"]["confirmed_total_cost"] == pytest.approx(0.00014)
+    assert summary["models"]["m"]["average_task_cost"] == pytest.approx(0.00014)
     timeline = json.loads((tmp_path / "weighted-complete-timeline.json").read_text())
     assert timeline[-1]["cumulative_known_total_tokens"] == 120
     assert timeline[-1]["cumulative_confirmed_cost"] == pytest.approx(0.00014)
     assert "USD 0.000140" in (tmp_path / "summary.md").read_text()
+    assert "每 task 已确认均价" in (tmp_path / "weighted-score-vs-average-task-cost.svg").read_text()
 
 
 def test_route_oracle_rejects_wrong_origin_and_forged_geometry():

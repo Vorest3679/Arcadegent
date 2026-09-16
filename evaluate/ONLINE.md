@@ -48,6 +48,7 @@ python -m evaluate run
 - `events.jsonl`：独立追加事件，不受业务 ReplayBuffer 重置/容量影响。
 - `snapshots/`：各轮公共 DTO、会话状态与未完成会话的部分证据。
 - `scores.jsonl`、`summary.json`、`summary.md`：硬约束、质量评分与按模型 token/费用汇总。
+- `model-cost-summary.json`：每模型的已知 token、已确认价格和每 task 均价；`weighted-score-vs-average-task-cost.svg`：加权完整通过分与每 task 均价的散点图。
 
 报告保存必要提示词、工具结果和回答供复核；如果换成私有案例，这些本地报告也是私有数据。API key、认证字段和 URL query key 会脱敏。报告与私有数据目录被 Git 忽略。
 
