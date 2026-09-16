@@ -15,6 +15,7 @@
 4. [浏览器定位与逆地理编码](./dev-details/browser-location-reverse-geocoding.md)：定位、逆地理和 agent 上下文注入链路。
 5. [Agent Context Payload Design](./dev-details/agent-context-payload-design.md)：agent 上下文 payload 的结构和约束。
 6. [动态工具注册实现说明](./dev-details/dynamic-tool-registry-implementation.md)：builtin 与 MCP 工具注册链路。
+7. [Evaluate 评测工作台架构](./dev-details/evaluation-workbench-architecture.md)：离线契约、在线模型评测、证据、判分与报告边界。
 
 ## 公开边界
 
