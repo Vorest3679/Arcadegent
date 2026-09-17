@@ -429,7 +429,42 @@ def test_chat_session_detail_supports_legacy_route_payload(tmp_path: Path) -> No
                             {
                                 "role": "assistant",
                                 "content": "route ready",
-                                "payload": {"final": True},
+                                "payload": {
+                                    "final": True,
+                                    "map_artifacts": {
+                                        "shops": [
+                                            {
+                                                "source": "bemanicn",
+                                                "source_id": 10,
+                                                "source_url": "https://map.bemanicn.com/s/10",
+                                                "name": "Gamma Arcade",
+                                                "address": "Test Address",
+                                                "longitude_wgs84": 116.397428,
+                                                "latitude_wgs84": 39.90923,
+                                                "arcade_count": 1,
+                                            }
+                                        ],
+                                        "route": {
+                                            "provider": "amap",
+                                            "mode": "walking",
+                                            "distance_m": 1200,
+                                            "duration_s": 900,
+                                            "polyline": [
+                                                {"lng": 116.397428, "lat": 39.90923},
+                                                {"lng": 116.407428, "lat": 39.91923},
+                                            ],
+                                        },
+                                        "destination": {
+                                            "source": "bemanicn",
+                                            "source_id": 10,
+                                            "source_url": "https://map.bemanicn.com/s/10",
+                                            "name": "Gamma Arcade",
+                                            "address": "Test Address",
+                                            "arcade_count": 1,
+                                        },
+                                        "view_payload": {"version": 1, "scene": "agent_route"},
+                                    },
+                                },
                                 "created_at": "2026-04-13T00:00:10Z",
                             },
                         ],
@@ -492,6 +527,8 @@ def test_chat_session_detail_supports_legacy_route_payload(tmp_path: Path) -> No
     body = resp.json()
     assert body["route"]["origin"]["lng"] == 116.397428
     assert body["destination"]["source_id"] == 10
+    assert body["turns"][-1]["map_artifacts"]["route"]["distance_m"] == 1200
+    assert body["turns"][-1]["map_artifacts"]["destination"]["source_id"] == 10
     assert "client_location" in body
     assert "view_payload" in body
 

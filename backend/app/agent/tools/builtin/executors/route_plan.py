@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any
 
 from app.agent.tools.builtin.provider import BuiltinToolContext
 from app.protocol.messages import Location
+from app.services.coordinate_transform import wgs84_to_gcj02
 
 
 def _memory_artifact(memory: dict[str, Any], key: str) -> Any:
@@ -58,6 +60,32 @@ def _shop_point(shop: dict[str, Any]) -> dict[str, float] | None:
         if point is not None:
             return point
     return _point({"lng": shop.get("longitude_gcj02"), "lat": shop.get("latitude_gcj02")})
+
+
+def _distance_meters(a: dict[str, float], b: dict[str, float]) -> float:
+    radius_m = 6371000.0
+    lat1 = math.radians(a["lat"])
+    lat2 = math.radians(b["lat"])
+    delta_lat = lat2 - lat1
+    delta_lng = math.radians(b["lng"] - a["lng"])
+    value = math.sin(delta_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lng / 2) ** 2
+    return radius_m * 2 * math.atan2(math.sqrt(value), math.sqrt(max(1e-12, 1 - value)))
+
+
+def _client_origin_gcj02(runtime_context: dict[str, Any], point: dict[str, float]) -> dict[str, float] | None:
+    """Convert a route origin only when it is the browser's WGS84 location."""
+    client_location = _memory_artifact(runtime_context, "client_location")
+    browser_point = _point(client_location)
+    if browser_point is None:
+        return None
+
+    accuracy_m = _number(client_location.get("accuracy_m")) if isinstance(client_location, dict) else None
+    tolerance_m = max(150.0, accuracy_m or 0.0)
+    if _distance_meters(point, browser_point) > tolerance_m:
+        return None
+
+    lng, lat = wgs84_to_gcj02(browser_point["lng"], browser_point["lat"])
+    return {"lng": lng, "lat": lat}
 
 
 def _candidate_shops(memory: dict[str, Any]) -> list[dict[str, Any]]:
@@ -126,6 +154,8 @@ def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, 
         resolved = _point(raw) or _named_shop_point(raw, runtime_context)
         if resolved is None and can_reuse:
             resolved = _point(previous.get(key))
+        if key == "origin" and resolved is not None:
+            resolved = _client_origin_gcj02(runtime_context, resolved) or resolved
         if resolved is not None and resolved != raw:
             args[key] = resolved
             hydrated.append(key)

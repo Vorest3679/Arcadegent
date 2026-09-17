@@ -93,7 +93,7 @@ function routeDestinationPoint(route: RouteSummary | null, destination?: ArcadeS
 }
 
 function hasMapContent(artifacts: ChatMapArtifacts): boolean {
-  return Boolean(artifacts.route || artifacts.shops.length || artifacts.view_payload);
+  return Boolean(artifacts.route || artifacts.shops.length || artifacts.view_payload || artifacts.route_pending);
 }
 
 export function AgentMapCard({ artifacts }: AgentMapCardProps) {
@@ -105,7 +105,9 @@ export function AgentMapCard({ artifacts }: AgentMapCardProps) {
 
   const normalizedRoute = useMemo(() => normalizeRouteToGcj02(artifacts.route), [artifacts.route]);
   const scene = readPayloadScene(artifacts.view_payload) ?? (normalizedRoute ? "agent_route" : "agent_candidates");
-  const hasRoute = scene === "agent_route" && Boolean(normalizedRoute);
+  const isRouteScene = scene === "agent_route";
+  const hasRoute = isRouteScene && Boolean(normalizedRoute);
+  const isRoutePending = isRouteScene && artifacts.route_pending && !normalizedRoute;
   const destination = artifacts.destination ?? findShop(artifacts.shops, selectedSourceId) ?? artifacts.shops[0] ?? null;
   const selectedShop = findShop(artifacts.shops, selectedSourceId) ?? destination ?? firstShopWithGeo(artifacts.shops);
   const selectedPoint = getArcadeGcjPoint(selectedShop);
@@ -115,13 +117,17 @@ export function AgentMapCard({ artifacts }: AgentMapCardProps) {
   const fallbackShop = destination ?? selectedShop;
   const title =
     readPayloadString(artifacts.view_payload, "title")
-    ?? (hasRoute
+    ?? (isRoutePending
+      ? "正在规划路线"
+      : hasRoute
       ? `前往 ${destination?.name ?? "目标机厅"}`
       : artifacts.shops.length
         ? "候选机厅地图"
         : "地图卡片");
   const subtitle = hasRoute
     ? `${routeModeLabel(normalizedRoute?.mode)} · ${formatDistance(normalizedRoute?.distance_m)} · ${formatDuration(normalizedRoute?.duration_s)}`
+    : isRoutePending
+      ? "正在确认起点、终点并计算导航路径"
     : `${artifacts.shops.length} 个候选机厅，${artifacts.shops.filter((shop) => getArcadeGcjPoint(shop)).length} 个可定位`;
   const mapCenter = hasRoute
     ? destinationPoint ?? routeOrigin ?? selectedPoint
@@ -148,7 +154,7 @@ export function AgentMapCard({ artifacts }: AgentMapCardProps) {
   }, []);
 
   const actions = useMemo<MapAction[]>(() => {//定义地图操作按钮，优先展示路线相关操作，其次是候选机厅相关操作
-    if (hasRoute) {
+    if (isRouteScene) {
       const target = destinationPoint;
       if (!target) {
         return [];
@@ -206,7 +212,7 @@ export function AgentMapCard({ artifacts }: AgentMapCardProps) {
     artifacts.client_location?.region_text,
     destination?.name,
     destinationPoint,
-    hasRoute,
+    isRouteScene,
     normalizedRoute?.mode,
     routeOrigin,
     selectedPoint,
@@ -223,6 +229,9 @@ export function AgentMapCard({ artifacts }: AgentMapCardProps) {
     if (mapStatus.state === "loading") {
       return "地图加载中...";
     }
+    if (isRoutePending) {
+      return "路线规划中...";
+    }
     if (hasRoute && artifacts.route_pending) {
       return "路线事件已到达，正在等待最终回复补全文本。";
     }
@@ -233,7 +242,7 @@ export function AgentMapCard({ artifacts }: AgentMapCardProps) {
       return "候选机厅暂时没有可地图定位的坐标。";
     }
     return "";
-  }, [artifacts.route_pending, artifacts.shops, destinationPoint, hasRoute, mapStatus]);
+  }, [artifacts.route_pending, artifacts.shops, destinationPoint, hasRoute, isRoutePending, mapStatus]);
 
   if (!hasMapContent(artifacts)) {
     return null;
@@ -241,12 +250,12 @@ export function AgentMapCard({ artifacts }: AgentMapCardProps) {
 
   return (
     <section
-      className={`agent-map-card ${hasRoute ? "is-route" : "is-candidates"}`}
-      data-testid={hasRoute ? "agent-route-card" : "agent-candidates-card"}
+      className={`agent-map-card ${isRouteScene ? "is-route" : "is-candidates"}`}
+      data-testid={isRouteScene ? "agent-route-card" : "agent-candidates-card"}
     >
       <div className="agent-map-head">
         <div>
-          <p className="agent-map-kicker">{hasRoute ? "路线卡片" : "候选地图"}</p>
+          <p className="agent-map-kicker">{isRouteScene ? "路线卡片" : "候选地图"}</p>
           <h3>{title}</h3>
           <span>{subtitle}</span>
         </div>
@@ -255,37 +264,45 @@ export function AgentMapCard({ artifacts }: AgentMapCardProps) {
 
       <div className="agent-map-grid">
         <div className="agent-map-canvas-wrap">
-          <AmapMapCanvas
-            center={mapCenter}
-            zoom={mapZoom}
-            fallbackRegionName={getFallbackRegionName(fallbackShop)}
-            emptyMessage={hasRoute ? "路线地图" : "候选机厅地图"}
-            onRuntimeChange={handleMapRuntimeChange}
-            onStatusChange={handleMapStatusChange}
-          />
+          {isRoutePending ? (
+            <div className="amap-canvas-shell browser-map-placeholder" data-testid="agent-route-pending">
+              <div className="amap-empty-copy">正在计算导航路线...</div>
+            </div>
+          ) : (
+            <AmapMapCanvas
+              center={mapCenter}
+              zoom={mapZoom}
+              fallbackRegionName={getFallbackRegionName(fallbackShop)}
+              emptyMessage={hasRoute ? "路线地图" : "候选机厅地图"}
+              onRuntimeChange={handleMapRuntimeChange}
+              onStatusChange={handleMapStatusChange}
+            />
+          )}
           {hasRoute ? (
             <AmapRouteOverlay runtime={mapRuntime} route={normalizedRoute} />
-          ) : (
+          ) : !isRouteScene ? (
             <AmapShopMarkers
               runtime={mapRuntime}
               shops={artifacts.shops}
               selectedSourceId={selectedSourceId}
               onSelectShop={(shop) => setSelectedSourceId(shop.source_id)}
             />
-          )}
+          ) : null}
           {mapStatusText ? <div className="agent-map-state">{mapStatusText}</div> : null}
         </div>
 
         <div className="agent-map-side">
-          {hasRoute ? (
+          {isRouteScene ? (
             <div className="agent-route-summary">
-              <strong>{destination?.name ?? "目标机厅"}</strong>
-              <p>{destination?.address ?? "终点地址待补充"}</p>
-              <div className="agent-route-metrics">
-                <span>{formatDistance(normalizedRoute?.distance_m)}</span>
-                <span>{formatDuration(normalizedRoute?.duration_s)}</span>
-                <span>{normalizedRoute?.provider ?? "provider 待确认"}</span>
-              </div>
+              <strong>{isRoutePending ? "正在准备导航" : destination?.name ?? "目标机厅"}</strong>
+              <p>{isRoutePending ? "路线结果生成后会自动更新此卡片。" : destination?.address ?? "终点地址待补充"}</p>
+              {hasRoute ? (
+                <div className="agent-route-metrics">
+                  <span>{formatDistance(normalizedRoute?.distance_m)}</span>
+                  <span>{formatDuration(normalizedRoute?.duration_s)}</span>
+                  <span>{normalizedRoute?.provider ?? "provider 待确认"}</span>
+                </div>
+              ) : null}
               {normalizedRoute?.hint ? <small>{normalizedRoute.hint}</small> : null}
             </div>
           ) : (

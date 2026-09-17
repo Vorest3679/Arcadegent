@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from urllib import error, parse, request
 
 from app.protocol.messages import ReverseGeocodeRequest, ReverseGeocodeResponse
+from app.services.coordinate_transform import wgs84_to_gcj02
 
 
 def _string_or_none(value: object) -> str | None:
@@ -65,10 +66,13 @@ class AMapReverseGeocoder:
         if not self._config or not self._config.api_key.strip():
             return ReverseGeocodeResponse(**base_payload, resolved=False)
 
+        # Browser Geolocation coordinates are WGS84; AMap's REST API requires GCJ-02.
+        amap_lng, amap_lat = wgs84_to_gcj02(lookup.lng, lookup.lat)
+
         query = parse.urlencode(
             {
                 "key": self._config.api_key,
-                "location": f"{lookup.lng},{lookup.lat}",
+                "location": f"{amap_lng},{amap_lat}",
                 "extensions": "base",
                 "roadlevel": 0,
             }

@@ -107,6 +107,11 @@
   transition: transform 0.18s ease, box-shadow 0.22s ease, border-color 0.22s ease;
 }
 
+.sidebar-session-row {
+  content-visibility: auto;
+  contain-intrinsic-size: 76px;
+}
+
 .sidebar-session-wrap:hover {
   transform: translateY(-1px);
   box-shadow: 0 10px 18px rgba(21, 56, 49, 0.08);
@@ -152,8 +157,11 @@
 }
 
 .sidebar-session-delete {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
   width: 36px;
-  height: 52px;
+  height: 36px;
   align-self: center;
   margin: 0 8px 0 0;
   border: 1px solid var(--line);
@@ -161,8 +169,41 @@
   background: #fff3ef;
   color: #9c3a2c;
   cursor: pointer;
+  padding: 0;
   font: inherit;
   line-height: 1;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.sidebar-session-delete svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sidebar-session-delete:hover:not(:disabled) {
+  border-color: #e5b6aa;
+  background: #ffe8e2;
+  color: #842f23;
+}
+
+.sidebar-session-delete:focus-visible {
+  outline: 2px solid #c96a56;
+  outline-offset: 2px;
+}
+
+.sidebar-session-delete:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.sidebar-session-delete-pending {
+  font-size: 12px;
 }
 
 .sidebar-backdrop {

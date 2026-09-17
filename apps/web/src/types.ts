@@ -163,6 +163,7 @@ export type ChatHistoryTurn = {
   content: string;
   name?: string | null;
   call_id?: string | null;
+  map_artifacts?: ChatMapArtifacts | null;
   created_at: string;
 };
 

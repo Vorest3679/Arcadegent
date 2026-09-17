@@ -16,6 +16,7 @@ from app.protocol.messages import (
     ChatSessionDispatchDto,
     ChatSessionDetailDto,
     ChatSessionSummaryDto,
+    ChatTurnMapArtifactsDto,
     ClientLocationContext,
     IntentType,
 )
@@ -71,12 +72,41 @@ def _visible_turns(turns: list[AgentTurn]) -> list[AgentTurn]:
     ]
 
 
-def _to_turn(turn: AgentTurn) -> ChatHistoryTurnDto:
+def _turn_map_artifacts(turn: AgentTurn, *, container: AppContainer) -> ChatTurnMapArtifactsDto | None:
+    raw = turn.payload.get("map_artifacts") if isinstance(turn.payload, dict) else None
+    if not isinstance(raw, dict):
+        return None
+    shop_rows = raw.get("shops")
+    shops = container.arcade_payload_mapper.summaries_from_rows(
+        [item for item in shop_rows if isinstance(item, dict)] if isinstance(shop_rows, list) else []
+    )
+    destination_raw = raw.get("destination")
+    destination = (
+        container.arcade_payload_mapper.summary_from_row(destination_raw)
+        if isinstance(destination_raw, dict)
+        else None
+    )
+    route = container.arcade_payload_mapper.route_from_payload(raw.get("route"))
+    client_location = container.arcade_payload_mapper.client_location_from_payload(raw.get("client_location"))
+    view_payload = raw.get("view_payload") if isinstance(raw.get("view_payload"), dict) else None
+    if not (shops or destination or route or view_payload):
+        return None
+    return ChatTurnMapArtifactsDto(
+        shops=shops,
+        route=route,
+        client_location=client_location,
+        destination=destination,
+        view_payload=view_payload,
+    )
+
+
+def _to_turn(turn: AgentTurn, *, container: AppContainer) -> ChatHistoryTurnDto:
     return ChatHistoryTurnDto(
         role=turn.role,
         content=turn.content,
         name=turn.name,
         call_id=turn.call_id,
+        map_artifacts=_turn_map_artifacts(turn, container=container),
         created_at=turn.created_at,
     )
 
@@ -150,7 +180,7 @@ def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSess
         turn_count=len(visible_turns),
         created_at=state.created_at,
         updated_at=state.updated_at,
-        turns=[_to_turn(turn) for turn in visible_turns],
+        turns=[_to_turn(turn, container=container) for turn in visible_turns],
     )
 
 

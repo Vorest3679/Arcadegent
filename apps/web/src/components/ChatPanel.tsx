@@ -49,7 +49,7 @@ export function ChatPanel({
     }
 
     const hasStreamingContext =
-      awaitingAssistant || sending || streamConnected || streamReplyActive || streamReplyTarget.trim().length > 0;
+      awaitingAssistant || sending || streamConnected || streamReplyActive;
     if (!hasStreamingContext) {
       return turns;
     }
@@ -89,8 +89,13 @@ export function ChatPanel({
     (streamReplyActive || !lastAssistantReply || !lastAssistantReply.startsWith(streamReply));
   const showStreamStage = streamItems.length > 0 || sending || streamConnected || streamReplyActive || awaitingAssistant;
   const showStreamingBubble = showStreamReply || awaitingAssistant;
+  // While the final text is still flushing, its history row is hidden for
+  // deduplication. Keep that row's archived card with the streaming bubble.
+  const streamingArtifacts = mapArtifacts ?? (turnsForRender.length < turns.length
+    ? turns[turns.length - 1]?.map_artifacts ?? null
+    : null);
   const showMapCard = Boolean(
-    mapArtifacts && (mapArtifacts.route || mapArtifacts.shops.length > 0 || mapArtifacts.view_payload)
+    streamingArtifacts && (streamingArtifacts.route || streamingArtifacts.shops.length > 0 || streamingArtifacts.view_payload)
   );
   const showEmptyState = turns.length === 0 && !showStreamingBubble && !showStreamStage && !showMapCard;
   const latestStreamItem = streamItems.length ? streamItems[streamItems.length - 1] : null;
@@ -105,22 +110,26 @@ export function ChatPanel({
           ? "等待会话继续..."
           : "阶段已结束");
   const stageStatusMeta = latestStreamItem ? formatTimeLabel(latestStreamItem.at) : "实时同步中...";
+  const lastUserIndex = turnsForRender.reduce(
+    (lastIndex, turn, index) => turn.role === "user" ? index : lastIndex,
+    -1
+  );
+  const stageStatus = showStreamStage ? (
+    <li key="streaming-stage-status" className="chat-message assistant stream-event">
+      <div className="chat-bubble chat-event-bubble">
+        <p>执行阶段：{formatSubagentLabel(activeSubagent)}</p>
+        <small>{stageStatusText}</small>
+        <small>{stageStatusMeta}</small>
+      </div>
+    </li>
+  ) : null;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turnsForRender, loading, sending, streamItems, streamReply, awaitingAssistant, showStreamStage, showMapCard]);
 
-  const lastAssistantIndex = useMemo(() => {
-    for (let idx = turnsForRender.length - 1; idx >= 0; idx -= 1) {
-      if (turnsForRender[idx].role === "assistant") {
-        return idx;
-      }
-    }
-    return -1;
-  }, [turnsForRender]);
-
-  const renderMapCard = (key: string, animationIndex: number) => {
-    if (!showMapCard || !mapArtifacts) {
+  const renderMapCard = (key: string, animationIndex: number, artifacts = mapArtifacts) => {
+    if (!artifacts) {
       return null;
     }
     return (
@@ -130,7 +139,7 @@ export function ChatPanel({
         style={{ animationDelay: `${Math.min(animationIndex, 8) * 45}ms` }}
       >
         <div className="chat-map-card-item">
-          <AgentMapCard artifacts={mapArtifacts} />
+          <AgentMapCard artifacts={artifacts} />
         </div>
       </li>
     );
@@ -159,6 +168,7 @@ export function ChatPanel({
           </div>
         ) : (
           <ul className="chat-message-list">
+            {lastUserIndex < 0 ? stageStatus : null}
             {turnsForRender.map((turn, index) => (
               <Fragment key={`${turn.created_at}-${index}`}>
                 <li
@@ -174,25 +184,12 @@ export function ChatPanel({
                     <small>{formatTimeLabel(turn.created_at)}</small>
                   </div>
                 </li>
-                {!showStreamingBubble && index === lastAssistantIndex
-                  ? renderMapCard("agent-map-card-history", index + 1)
+                {index === lastUserIndex ? stageStatus : null}
+                {turn.role === "assistant" && turn.map_artifacts
+                  ? renderMapCard(`agent-map-card-history-${index}`, index + 1, turn.map_artifacts)
                   : null}
               </Fragment>
             ))}
-
-            {showStreamStage ? (
-              <li
-                key="streaming-stage-status"
-                className="chat-message assistant stream-event"
-                style={{ animationDelay: `${Math.min(turnsForRender.length, 8) * 45}ms` }}
-              >
-                <div className="chat-bubble chat-event-bubble">
-                  <p>执行阶段：{formatSubagentLabel(activeSubagent)}</p>
-                  <small>{stageStatusText}</small>
-                  <small>{stageStatusMeta}</small>
-                </div>
-              </li>
-            ) : null}
 
             {showStreamingBubble ? (
               <li
@@ -214,8 +211,8 @@ export function ChatPanel({
               </li>
             ) : null}
 
-            {showStreamingBubble || lastAssistantIndex < 0
-              ? renderMapCard("agent-map-card-streaming", turnsForRender.length + 1)
+            {showStreamingBubble && showMapCard
+              ? renderMapCard("agent-map-card-streaming", turnsForRender.length + 1, streamingArtifacts)
               : null}
           </ul>
         )}

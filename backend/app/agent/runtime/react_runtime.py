@@ -296,7 +296,11 @@ class ReactRuntime:
                 content=final_text,
                 agent="main_agent",
                 scope="conversation",
-                payload={"final": True, "reply_source": reply_source},
+                payload={
+                    "final": True,
+                    "reply_source": reply_source,
+                    "map_artifacts": self._snapshot_turn_map_artifacts(state),
+                },
             ),
         )
         response = await self._build_response(session_id=session_id, state=state, final_text=final_text)
@@ -332,6 +336,34 @@ class ReactRuntime:
             _short(final_text, limit=160),
         )
         return response
+
+    def _snapshot_turn_map_artifacts(self, state: AgentSessionState) -> dict[str, Any] | None:
+        """Archive only map artifacts produced by the current conversation turn."""
+        memory = ensure_working_memory_shape(state.working_memory)
+        meta = memory.get("artifact_meta")
+        if not isinstance(meta, dict):
+            return None
+        display_keys = ("shop", "shops", "selected_shops", "route", "destination", "view_payload")
+        has_fresh_display_artifact = any(
+            isinstance(meta.get(key), dict) and meta[key].get("turn_index") == state.turn_index
+            for key in display_keys
+        )
+        if not has_fresh_display_artifact:
+            return None
+
+        destination = get_working_memory_artifact(memory, "destination")
+        if not isinstance(destination, dict):
+            destination = get_working_memory_artifact(memory, "shop")
+        route = get_working_memory_artifact(memory, "route")
+        client_location = get_working_memory_artifact(memory, "client_location")
+        view_payload = get_working_memory_artifact(memory, "view_payload")
+        return deepcopy({
+            "shops": self._display_shops(memory),
+            "route": route if isinstance(route, dict) else None,
+            "client_location": client_location if isinstance(client_location, dict) else None,
+            "destination": destination if isinstance(destination, dict) else None,
+            "view_payload": view_payload if isinstance(view_payload, dict) else None,
+        })
 
     async def _run_main_agent(
         self,

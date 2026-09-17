@@ -92,6 +92,7 @@ export function useChatSessionController() {
   const streamLastEventIdRef = useRef<number | undefined>(undefined);
   const streamRetryAttemptsRef = useRef(0);
   const streamRetryTimerRef = useRef<number | null>(null);
+  const sessionGenerationRef = useRef(0);
   const clientIdRef = useRef("");
   if (!clientIdRef.current) {
     clientIdRef.current = getChatClientId();
@@ -174,7 +175,7 @@ export function useChatSessionController() {
     ]);
   }
 
-  function commitStreamReply(reply: string): void {
+  function commitStreamReply(reply: string, mapArtifacts: ChatMapArtifacts | null): void {
     const normalized = reply.trim();
     if (!normalized) {
       return;
@@ -186,12 +187,20 @@ export function useChatSessionController() {
 
       if (last?.role === "assistant") {
         if (last.content === normalized) {
+          if (mapArtifacts && !last.map_artifacts) {
+            next[next.length - 1] = {
+              ...last,
+              map_artifacts: { ...mapArtifacts, route_pending: false }
+            };
+            return next;
+          }
           return previous;
         }
         if (normalized.startsWith(last.content) || last.content.startsWith(normalized)) {
           next[next.length - 1] = {
             ...last,
-            content: normalized
+            content: normalized,
+            map_artifacts: mapArtifacts ? { ...mapArtifacts, route_pending: false } : last.map_artifacts
           };
           return next;
         }
@@ -200,6 +209,7 @@ export function useChatSessionController() {
       next.push({
         role: "assistant",
         content: normalized,
+        map_artifacts: mapArtifacts ? { ...mapArtifacts, route_pending: false } : null,
         created_at: new Date().toISOString()
       });
       return next;
@@ -276,7 +286,39 @@ export function useChatSessionController() {
         const next = envelope.data.to_subagent ?? envelope.data.active_subagent;
         if (typeof next === "string" && next) {
           currentStore.setActiveSubagent(next);
+          if (next === "navigation_worker") {
+            currentStore.setActiveMapArtifacts({
+              shops: [],
+              route: null,
+              client_location: null,
+              destination: null,
+              view_payload: { version: 1, scene: "agent_route" },
+              route_pending: true
+            });
+          }
         }
+      }
+
+      if (envelope.event === "worker.started" && envelope.data.worker === "navigation_worker") {
+        currentStore.setActiveMapArtifacts({
+          shops: [],
+          route: null,
+          client_location: null,
+          destination: null,
+          view_payload: { version: 1, scene: "agent_route" },
+          route_pending: true
+        });
+      }
+
+      if (envelope.event === "tool.started" && envelope.data.tool === "route_plan_tool") {
+        currentStore.setActiveMapArtifacts((previous) => ({
+          shops: previous?.shops ?? [],
+          route: null,
+          client_location: previous?.client_location ?? null,
+          destination: previous?.destination ?? null,
+          view_payload: { version: 1, scene: "agent_route" },
+          route_pending: true
+        }));
       }
 
       if (envelope.event === "assistant.token") {
@@ -291,7 +333,7 @@ export function useChatSessionController() {
             route,
             client_location: previous?.client_location ?? null,
             destination: previous?.destination ?? null,
-            view_payload: previous?.view_payload ?? { version: 1, scene: "agent_route" },
+            view_payload: { version: 1, scene: "agent_route" },
             route_pending: true
           }));
         }
@@ -304,7 +346,18 @@ export function useChatSessionController() {
           if (reply.length >= getStreamReplyTarget().length) {
             syncStreamReply(reply);
           }
-          commitStreamReply(reply);
+          commitStreamReply(reply, currentStore.activeMapArtifacts);
+          currentStore.setSessions((previous) => previous.map((item) =>
+            item.session_id === sessionId
+              ? {
+                  ...item,
+                  preview: reply.replace(/\s+/g, " ").trim().slice(0, 72),
+                  status: "completed",
+                  turn_count: item.turn_count + 1,
+                  updated_at: envelope.at
+                }
+              : item
+          ));
         }
       }
 
@@ -385,10 +438,27 @@ export function useChatSessionController() {
 
     store.setActiveSessionId(sessionId);
     writeStoredActiveSessionId(sessionId);
-    store.setTurns(toVisibleTurns(detail.turns));
+    const detailArtifacts = mapArtifactsFromSession(detail);
+    const visibleTurns = toVisibleTurns(detail.turns);
+    if (detailArtifacts && !visibleTurns.some((turn) => Boolean(turn.map_artifacts))) {
+      let lastAssistantIndex = -1;
+      for (let index = visibleTurns.length - 1; index >= 0; index -= 1) {
+        if (visibleTurns[index].role === "assistant") {
+          lastAssistantIndex = index;
+          break;
+        }
+      }
+      if (lastAssistantIndex >= 0) {
+        visibleTurns[lastAssistantIndex] = {
+          ...visibleTurns[lastAssistantIndex],
+          map_artifacts: detailArtifacts
+        };
+      }
+    }
+    store.setTurns(visibleTurns);
     store.setActiveSubagent(detail.active_subagent || null);
     store.setActiveSessionStatus(detail.status);
-    store.setActiveMapArtifacts(mapArtifactsFromSession(detail));
+    store.setActiveMapArtifacts(detail.status === "running" ? detailArtifacts : null);
 
     if (!preserveStreamState) {
       store.setStreamItems([]);
@@ -429,14 +499,23 @@ export function useChatSessionController() {
   ): Promise<void> {
     const preserveStreamState = options?.preserveStreamState ?? false;
     const store = useAppStore.getState();
-    store.setSessionsLoading(true);
+    const showLoading = !preserveStreamState;
+    if (showLoading) {
+      store.setSessionsLoading(true);
+    }
 
     try {
       const rows = await listChatSessions(60, clientIdRef.current);
       const latestStore = useAppStore.getState();
-      latestStore.setSessions(rows);
+      const activeOptimisticSession = preserveStreamState && latestStore.activeSessionStatus === "running"
+        ? latestStore.sessions.find((item) => item.session_id === latestStore.activeSessionId)
+        : null;
+      const nextRows = activeOptimisticSession && !rows.some((item) => item.session_id === activeOptimisticSession.session_id)
+        ? [activeOptimisticSession, ...rows]
+        : rows;
+      latestStore.setSessions(nextRows);
 
-      if (!rows.length) {
+      if (!nextRows.length) {
         writeStoredActiveSessionId(null);
         latestStore.setActiveSessionId(null);
         latestStore.setActiveSessionStatus(null);
@@ -454,9 +533,9 @@ export function useChatSessionController() {
 
       const currentActiveSessionId = latestStore.activeSessionId;
       const currentActiveStatus = latestStore.activeSessionStatus;
-      const hasPreferred = preferredSessionId ? rows.some((item) => item.session_id === preferredSessionId) : false;
+      const hasPreferred = preferredSessionId ? nextRows.some((item) => item.session_id === preferredSessionId) : false;
       const hasActive = currentActiveSessionId
-        ? rows.some((item) => item.session_id === currentActiveSessionId)
+        ? nextRows.some((item) => item.session_id === currentActiveSessionId)
         : false;
       const targetId = hasPreferred
         ? preferredSessionId
@@ -464,7 +543,7 @@ export function useChatSessionController() {
           ? currentActiveSessionId
           : currentActiveSessionId && currentActiveStatus === "running"
             ? null
-            : rows[0].session_id;
+            : nextRows[0].session_id;
 
       if (targetId && targetId !== currentActiveSessionId) {
         await loadSession(targetId, { preserveStreamState, reconnectStream: true });
@@ -472,7 +551,9 @@ export function useChatSessionController() {
     } catch (err) {
       useAppStore.getState().setChatError(err instanceof Error ? err.message : "加载会话列表失败");
     } finally {
-      useAppStore.getState().setSessionsLoading(false);
+      if (showLoading) {
+        useAppStore.getState().setSessionsLoading(false);
+      }
     }
   }
 
@@ -482,19 +563,28 @@ export function useChatSessionController() {
   ): Promise<ChatSessionDetail | null> {
     const preserveStreamState = options?.preserveStreamState ?? false;
     const reconnectStream = options?.reconnectStream ?? true;
+    const requestedGeneration = sessionGenerationRef.current;
     const store = useAppStore.getState();
     store.setTurnsLoading(true);
     store.setChatError("");
 
     try {
       const detail = await getChatSession(sessionId, clientIdRef.current);
+      if (requestedGeneration !== sessionGenerationRef.current) {
+        return null;
+      }
       applySessionDetail(sessionId, detail, { preserveStreamState, reconnectStream });
       return detail;
     } catch (err) {
+      if (requestedGeneration !== sessionGenerationRef.current) {
+        return null;
+      }
       useAppStore.getState().setChatError(err instanceof Error ? err.message : "加载会话失败");
       return null;
     } finally {
-      useAppStore.getState().setTurnsLoading(false);
+      if (requestedGeneration === sessionGenerationRef.current) {
+        useAppStore.getState().setTurnsLoading(false);
+      }
     }
   }
 
@@ -511,10 +601,12 @@ export function useChatSessionController() {
   }
 
   function startNewSession(): void {
+    sessionGenerationRef.current += 1;
     stopStream();
     const store = useAppStore.getState();
     store.setViewMode("chat");
     store.resetActiveSessionState();
+    store.setTurnsLoading(false);
     writeStoredActiveSessionId(null);
     store.setInputValue("");
     store.setChatError("");
@@ -534,11 +626,34 @@ export function useChatSessionController() {
     const isNewSession = !currentState.activeSessionId;
     const previousSessionId = currentState.activeSessionId;
     const previousSessionStatus = currentState.activeSessionStatus;
+    const previousSessions = currentState.sessions;
     const sessionId = currentState.activeSessionId || makeSessionId();
     const optimisticCreatedAt = new Date().toISOString();
 
+    sessionGenerationRef.current += 1;
+    resetStreamReply();
+    currentState.setStreamItems([]);
+    currentState.setActiveSubagent(null);
+    currentState.setActiveMapArtifacts(null);
+    currentState.setTurns((previous) => [...previous, { role: "user", content: message, created_at: optimisticCreatedAt }]);
+    currentState.setAwaitingAssistant(true);
+    currentState.setTurnsLoading(false);
     currentState.setSending(true);
     currentState.setChatError("");
+    currentState.setSessions((previous) => {
+      const existing = previous.find((item) => item.session_id === sessionId);
+      const optimistic = {
+        session_id: sessionId,
+        title: existing?.title ?? message.replace(/\s+/g, " ").slice(0, 32),
+        preview: message.replace(/\s+/g, " ").slice(0, 72),
+        intent: existing?.intent ?? "search" as const,
+        status: "running" as const,
+        turn_count: (existing?.turn_count ?? currentState.turns.length) + 1,
+        created_at: existing?.created_at ?? optimisticCreatedAt,
+        updated_at: optimisticCreatedAt
+      };
+      return [optimistic, ...previous.filter((item) => item.session_id !== sessionId)];
+    });
 
     try {
       const location = isNewSession ? await resolveClientLocationForSessionStart() : undefined;
@@ -548,9 +663,6 @@ export function useChatSessionController() {
       store.setActiveSessionId(sessionId);
       writeStoredActiveSessionId(sessionId);
       store.setActiveSessionStatus("running");
-      store.setActiveMapArtifacts(null);
-      store.setAwaitingAssistant(true);
-      store.setTurns((previous) => [...previous, { role: "user", content: message, created_at: optimisticCreatedAt }]);
 
       const dispatched = await dispatchChatSession({
         session_id: sessionId,
@@ -572,6 +684,7 @@ export function useChatSessionController() {
       store.setActiveSessionId(previousSessionId);
       writeStoredActiveSessionId(previousSessionId);
       store.setActiveSessionStatus(previousSessionStatus);
+      store.setSessions(previousSessions);
       store.setTurns((previous) => {
         const next = [...previous];
         const last = next[next.length - 1];
@@ -633,6 +746,7 @@ export function useChatSessionController() {
   }
 
   function selectSession(sessionId: string): void {
+    sessionGenerationRef.current += 1;
     stopStream();
     const store = useAppStore.getState();
     store.setViewMode("chat");

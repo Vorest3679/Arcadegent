@@ -550,6 +550,27 @@ def test_route_plan_arguments_bind_named_shop_candidates(tmp_path: Path) -> None
     assert result.output["route"]["destination"]["lng"] == 121.473024
 
 
+def test_route_plan_converts_browser_wgs84_origin_to_gcj02(tmp_path: Path) -> None:
+    registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
+    browser_wgs84 = {"lng": 121.473024, "lat": 31.228048, "accuracy_m": 25}
+
+    prepared, hydrated = _run(registry.prepare_arguments(
+        tool_name="route_plan_tool",
+        raw_arguments={
+            "provider": "amap",
+            "mode": "walking",
+            "origin": {"lng": browser_wgs84["lng"], "lat": browser_wgs84["lat"]},
+            "destination": {"lng": 121.473495, "lat": 31.228154},
+        },
+        runtime_context={"artifacts": {"client_location": browser_wgs84}},
+    ))
+
+    assert hydrated == ["origin"]
+    assert prepared["origin"]["lng"] > browser_wgs84["lng"] + 0.004
+    assert prepared["origin"]["lat"] < browser_wgs84["lat"]
+    assert prepared["destination"] == {"lng": 121.473495, "lat": 31.228154}
+
+
 def test_route_plan_arguments_reuse_endpoints_for_mode_switch(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
     prepared, hydrated = _run(registry.prepare_arguments(

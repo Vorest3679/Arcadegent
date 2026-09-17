@@ -222,6 +222,16 @@ class ChatSessionDispatchDto(BaseModel):
     status: ChatSessionStatusType
 
 
+class ChatTurnMapArtifactsDto(BaseModel):
+    """Map content archived alongside one assistant response."""
+
+    shops: list[ArcadeShopSummaryDto] = Field(default_factory=list)
+    route: RouteSummaryDto | None = None
+    client_location: ClientLocationContext | None = None
+    destination: ArcadeShopSummaryDto | None = None
+    view_payload: dict[str, Any] | None = None
+
+
 class ChatHistoryTurnDto(BaseModel):
     """Persisted chat history turn for one session."""
 
@@ -229,6 +239,7 @@ class ChatHistoryTurnDto(BaseModel):
     content: str
     name: str | None = None
     call_id: str | None = None
+    map_artifacts: ChatTurnMapArtifactsDto | None = None
     created_at: str
 
 

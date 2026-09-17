@@ -36,7 +36,7 @@ type AppStore = {
   setViewMode: (viewMode: ViewMode, options?: { replace?: boolean; syncUrl?: boolean }) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
-  setSessions: (sessions: ChatSessionSummary[]) => void;
+  setSessions: (sessions: Updater<ChatSessionSummary[]>) => void;
   setActiveSessionId: (sessionId: string | null) => void;
   setActiveSessionStatus: (status: ChatSessionStatus | null) => void;
   setTurns: (turns: Updater<ChatHistoryTurn[]>) => void;
@@ -80,7 +80,7 @@ export const useAppStore = create<AppStore>((set) => ({
   },
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-  setSessions: (sessions) => set({ sessions }),
+  setSessions: (sessions) => set((state) => ({ sessions: resolveUpdater(sessions, state.sessions) })),
   setActiveSessionId: (activeSessionId) => set({ activeSessionId }),
   setActiveSessionStatus: (activeSessionStatus) => set({ activeSessionStatus }),
   setTurns: (turns) => set((state) => ({ turns: resolveUpdater(turns, state.turns) })),

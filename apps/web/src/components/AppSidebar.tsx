@@ -12,14 +12,27 @@ type SidebarSessionItemProps = {
 
 function SidebarSessionItem({ item, active, deleting, onClick, onDelete }: SidebarSessionItemProps) {
   return (
-    <li>
+    <li className="sidebar-session-row">
       <div className={`sidebar-session-wrap ${active ? "is-active" : ""}`}>
         <button type="button" onClick={onClick} className="sidebar-session">
           <strong>{item.title}</strong>
           <small>{formatTimeLabel(item.updated_at)}</small>
         </button>
-        <button type="button" className="sidebar-session-delete" onClick={onDelete} disabled={deleting}>
-          {deleting ? "..." : "删"}
+        <button
+          type="button"
+          className="sidebar-session-delete"
+          onClick={onDelete}
+          disabled={deleting}
+          aria-label={`删除会话：${item.title}`}
+          title="删除会话"
+        >
+          {deleting ? (
+            <span className="sidebar-session-delete-pending" aria-hidden="true">...</span>
+          ) : (
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+            </svg>
+          )}
         </button>
       </div>
     </li>
@@ -79,25 +92,23 @@ export function AppSidebar({
       <div className="sidebar-history-head">
         <strong>历史会话</strong>
         <button type="button" onClick={onRefresh} disabled={sessionsLoading}>
-          刷新
+          {sessionsLoading ? "同步中..." : "刷新"}
         </button>
       </div>
 
       <ul className="sidebar-history-list">
-        {sessionsLoading ? <li className="sidebar-empty">会话加载中...</li> : null}
+        {sessionsLoading && sessions.length === 0 ? <li className="sidebar-empty">会话加载中...</li> : null}
         {!sessionsLoading && sessions.length === 0 ? <li className="sidebar-empty">暂无历史会话</li> : null}
-        {!sessionsLoading
-          ? sessions.map((item) => (
-              <SidebarSessionItem
-                key={item.session_id}
-                item={item}
-                active={item.session_id === activeSessionId}
-                deleting={deletingSessionId === item.session_id}
-                onClick={() => onSelectSession(item.session_id)}
-                onDelete={() => onDeleteSession(item.session_id)}
-              />
-            ))
-          : null}
+        {sessions.map((item) => (
+          <SidebarSessionItem
+            key={item.session_id}
+            item={item}
+            active={item.session_id === activeSessionId}
+            deleting={deletingSessionId === item.session_id}
+            onClick={() => onSelectSession(item.session_id)}
+            onDelete={() => onDeleteSession(item.session_id)}
+          />
+        ))}
       </ul>
     </aside>
   );
