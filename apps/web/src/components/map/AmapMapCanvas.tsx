@@ -105,8 +105,13 @@ export function AmapMapCanvas({
 
     return () => {
       disposed = true;
-      if (runtimeRef.current?.map?.destroy) {
-        runtimeRef.current.map.destroy();
+      const map = runtimeRef.current?.map;
+      if (typeof map?.destroy === "function") {
+        try {
+          map.destroy();
+        } catch {
+          // AMap controls can throw while removing themselves during React remounts.
+        }
       }
       runtimeRef.current = null;
       onRuntimeChange(null);
