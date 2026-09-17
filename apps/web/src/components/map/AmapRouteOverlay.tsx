@@ -14,6 +14,17 @@ type AmapRouteOverlayProps = {
   route?: RouteSummary | null;
 };
 
+function removeOverlays(map: any, overlays: any[]): void {
+  if (!overlays.length || typeof map?.remove !== "function") {
+    return;
+  }
+  try {
+    map.remove(overlays);
+  } catch {
+    // The map canvas may already be disposing when React cleans up this overlay.
+  }
+}
+
 export function AmapRouteOverlay({ runtime, route }: AmapRouteOverlayProps) {
   const overlaysRef = useRef<any[]>([]);
 
@@ -23,10 +34,8 @@ export function AmapRouteOverlay({ runtime, route }: AmapRouteOverlayProps) {
     }
 
     const path = normalizeRoutePolyline(route);
-    if (overlaysRef.current.length && typeof runtime.map.remove === "function") {
-      runtime.map.remove(overlaysRef.current);
-      overlaysRef.current = [];
-    }
+    removeOverlays(runtime.map, overlaysRef.current);
+    overlaysRef.current = [];
     if (!path.length && !route?.origin && !route?.destination) {
       return;
     }
@@ -77,9 +86,7 @@ export function AmapRouteOverlay({ runtime, route }: AmapRouteOverlayProps) {
     }
 
     return () => {
-      if (overlaysRef.current.length && typeof runtime.map.remove === "function") {
-        runtime.map.remove(overlaysRef.current);
-      }
+      removeOverlays(runtime.map, overlaysRef.current);
       overlaysRef.current = [];
     };
   }, [route, runtime]);
