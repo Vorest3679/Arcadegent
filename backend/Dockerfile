@@ -7,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app/backend
 
 COPY backend/pyproject.toml ./
+COPY backend/skill.config.py ./
 COPY backend/app ./app
 
 RUN python -m pip install --upgrade pip \

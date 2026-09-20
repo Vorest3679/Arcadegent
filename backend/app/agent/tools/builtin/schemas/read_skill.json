@@ -1,0 +1,29 @@
+{
+  "name": "read_skill",
+  "kind": "function",
+  "description": "Load a skill instruction or relative text resource into this execution context. Read SKILL.md first, then referenced files as needed. Does not execute scripts.",
+  "executor": "app.agent.tools.builtin.executors.skills:read_skill",
+  "capabilities": [
+    "builtin",
+    "read_only",
+    "skills"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Skill name from the available skill catalog."
+      },
+      "path": {
+        "type": "string",
+        "default": "SKILL.md",
+        "description": "Relative path within the skill directory, such as SKILL.md or references/guide.md."
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "additionalProperties": false
+  }
+}

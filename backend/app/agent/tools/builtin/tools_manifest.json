@@ -43,6 +43,8 @@
     "schemas/geo_resolve_tool.json",
     "schemas/route_plan_tool.json",
     "schemas/summary_tool.json",
-    "schemas/result_selection_tool.json"
+    "schemas/result_selection_tool.json",
+    "schemas/list_skills.json",
+    "schemas/read_skill.json"
   ]
 }

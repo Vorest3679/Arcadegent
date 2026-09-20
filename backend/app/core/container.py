@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.agent.context.context_builder import ContextBuilder
+from app.agent.skills.config import load_skill_config
+from app.agent.skills.registry import SkillRegistry
 from app.agent.events.replay_buffer import ReplayBuffer
 from app.agent.llm.llm_config import resolve_llm_config
 from app.agent.llm.provider_adapter import ProviderAdapter
@@ -38,6 +40,7 @@ class AppContainer:
     arcade_geo_resolver: ArcadeGeoResolver
     arcade_payload_mapper: ArcadePayloadMapper
     tool_registry: ToolRegistry
+    skill_registry: SkillRegistry
     react_runtime: ReactRuntime
     orchestrator: Orchestrator
 
@@ -72,9 +75,10 @@ def build_container(
     )
     arcade_payload_mapper = ArcadePayloadMapper(geo_resolver=arcade_geo_resolver)
     project_root = Path(__file__).resolve().parents[1]
+    skill_registry = SkillRegistry(load_skill_config(project_root.parent / "skill.config.py"))
     context_builder = ContextBuilder(
         prompt_root=project_root / "agent" / "context" / "prompts",
-        skill_root=project_root / "agent" / "context" / "skills",
+        skill_registry=skill_registry,
         history_turn_limit=settings.agent_context_window,
     )
     subagent_builder = SubAgentBuilder(
@@ -91,6 +95,7 @@ def build_container(
     builtin_tool_provider = BuiltinToolProvider(
         runtime_services={
             "store": store,
+            "skill_registry": skill_registry,
             "settings": settings,
             "amap_config": AMapConfig(
                 api_key=settings.amap_api_key,
@@ -116,6 +121,7 @@ def build_container(
         replay_buffer=replay_buffer,
         arcade_payload_mapper=arcade_payload_mapper,
         max_steps=settings.agent_max_steps,
+        skill_registry=skill_registry,
     )
     orchestrator = Orchestrator(
         react_runtime=react_runtime,
@@ -129,6 +135,7 @@ def build_container(
         arcade_geo_resolver=arcade_geo_resolver,
         arcade_payload_mapper=arcade_payload_mapper,
         tool_registry=tool_registry,
+        skill_registry=skill_registry,
         react_runtime=react_runtime,
         orchestrator=orchestrator,
     )

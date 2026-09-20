@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from app.agent.skills.execution import SkillExecution
+
 TurnRole = Literal["user", "assistant", "tool"]
 TurnScope = Literal["conversation", "worker"]
 SessionStatus = Literal["idle", "running", "completed", "failed"]
@@ -54,6 +56,7 @@ class AgentSessionState:
     turns: list[AgentTurn] = field(default_factory=list)
     working_memory: dict[str, Any] = field(default_factory=dict)
     previous_response_id: str | None = None
+    skill_execution: SkillExecution = field(default_factory=SkillExecution, repr=False, compare=False)
     created_at: str = field(default_factory=_utc_now_iso)
     updated_at: str = field(default_factory=_utc_now_iso)
 

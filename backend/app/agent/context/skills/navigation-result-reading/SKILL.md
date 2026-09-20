@@ -1,3 +1,8 @@
+---
+name: navigation-result-reading
+description: Interpret route distances, durations, and destinations. Use when context_payload includes route.
+---
+
 Use this skill when runtime state includes `context_payload.route`.
 
 Interpretation rules:

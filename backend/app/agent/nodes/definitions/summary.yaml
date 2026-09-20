@@ -7,9 +7,5 @@ provider: llm
 model_pointer: task
 allowed_tools_mode: merge
 allowed_tools: []
-skill_files:
-  - response_composition.md
-  - search_result_reading.md
-  - navigation_result_reading.md
 output_schema:
   reply: string

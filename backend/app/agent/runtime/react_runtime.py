@@ -14,6 +14,8 @@ from app.agent.context.context_builder import ContextBuilder
 from app.agent.events.replay_buffer import ReplayBuffer
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.loop_guard import LoopGuard
+from app.agent.skills.execution import SkillExecution, bind_skill_execution
+from app.agent.skills.registry import SkillRegistry
 from app.agent.runtime.session_state import (
     AgentSessionState,
     AgentTurn,
@@ -125,6 +127,7 @@ class ReactRuntime:
         replay_buffer: ReplayBuffer,
         arcade_payload_mapper: ArcadePayloadMapper,
         max_steps: int,
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
         self._context_builder = context_builder
         self._subagent_builder = subagent_builder
@@ -134,6 +137,7 @@ class ReactRuntime:
         self._replay_buffer = replay_buffer
         self._arcade_payload_mapper = arcade_payload_mapper
         self._max_steps = max(2, max_steps)
+        self._skill_registry = skill_registry
 
     def prepare_session(self, session_id: str, *, client_id: str | None = None) -> None:
         """Clear stale stream events and mark the session as running for a fresh turn."""
@@ -200,6 +204,8 @@ class ReactRuntime:
                 state.active_subagent,
             )
             raise
+        finally:
+            state.skill_execution = SkillExecution()
 
     async def _run_chat_session(
         self,
@@ -209,6 +215,7 @@ class ReactRuntime:
         state: AgentSessionState,
     ) -> ChatResponse:
         state.turn_index += 1
+        state.skill_execution = SkillExecution()
 
         inferred_intent = request.intent or _infer_intent(request.message)
         if request.intent is not None:
@@ -267,6 +274,9 @@ class ReactRuntime:
             reason="session.started",
         )
 
+        # Persist user input before the first cancellable discovery operation.
+        if self._skill_registry is not None:
+            await asyncio.to_thread(self._skill_registry.refresh)
         final_text, model_error = await self._run_main_agent(
             request=request,
             session_id=session_id,
@@ -650,12 +660,13 @@ class ReactRuntime:
                     call.call_id,
                     hydrated_fields,
                 )
-            result = await self._tool_registry.execute(
-                call_id=call.call_id,
-                tool_name=call.name,
-                raw_arguments=prepared_args,
-                allowed_tools=profile.allowed_tools,
-            )
+            with bind_skill_execution(profile.name, session_state.skill_execution):
+                result = await self._tool_registry.execute(
+                    call_id=call.call_id,
+                    tool_name=call.name,
+                    raw_arguments=prepared_args,
+                    allowed_tools=profile.allowed_tools,
+                )
             if result.status == "completed" and result.tool_name == "invoke_worker":
                 envelope = await self._run_worker(
                     session_id=session_id,
@@ -709,6 +720,8 @@ class ReactRuntime:
             }
 
         worker_profile = self._subagent_builder.get(worker_name)
+        if self._skill_registry is not None:
+            await asyncio.to_thread(self._skill_registry.refresh)
         run_id = f"wrk_{uuid4().hex[:10]}"
         worker_state = AgentSessionState(
             session_id=state.session_id,

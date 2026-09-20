@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.agent.context.context_builder import ContextBuilder
+from app.agent.skills.config import SkillConfig
+from app.agent.skills.registry import SkillRegistry
 from app.agent.runtime.session_state import AgentSessionState, AgentTurn
 from app.agent.subagents.subagent_builder import SubAgentProfile
 from app.protocol.messages import ChatRequest
@@ -16,7 +18,7 @@ def test_context_builder_passes_through_model_transcripts(tmp_path: Path) -> Non
     (prompt_root / "system_base.md").write_text("base prompt", encoding="utf-8")
     (prompt_root / "main_agent.md").write_text("main prompt", encoding="utf-8")
 
-    builder = ContextBuilder(prompt_root=prompt_root, skill_root=None, history_turn_limit=10)
+    builder = ContextBuilder(prompt_root=prompt_root, skill_registry=None, history_turn_limit=10)
     state = AgentSessionState(
         session_id="s_transcript",
         active_subagent="main_agent",
@@ -68,7 +70,6 @@ def test_context_builder_passes_through_model_transcripts(tmp_path: Path) -> Non
             name="main_agent",
             prompt_file="main_agent.md",
             allowed_tools=[],
-            skill_files=[],
         ),
     )
 
@@ -90,11 +91,15 @@ def test_context_builder_injects_directory_and_detail_blocks(tmp_path: Path) -> 
     skill_root.mkdir()
     (prompt_root / "system_base.md").write_text("base prompt", encoding="utf-8")
     (prompt_root / "main_agent.md").write_text("main prompt", encoding="utf-8")
-    (skill_root / "search_result_reading.md").write_text("search skill", encoding="utf-8")
+    (skill_root / "search-result-reading").mkdir()
+    (skill_root / "search-result-reading" / "SKILL.md").write_text(
+        "---\nname: search-result-reading\ndescription: Interpret search results.\n---\nsearch skill",
+        encoding="utf-8",
+    )
 
     builder = ContextBuilder(
         prompt_root=prompt_root,
-        skill_root=skill_root,
+        skill_registry=SkillRegistry(SkillConfig(roots=[skill_root])),
         history_turn_limit=6,
     )
     state = AgentSessionState(
@@ -146,14 +151,14 @@ def test_context_builder_injects_directory_and_detail_blocks(tmp_path: Path) -> 
             name="main_agent",
             prompt_file="main_agent.md",
             allowed_tools=[],
-            skill_files=["search_result_reading.md"],
         ),
     )
 
     assert "base prompt" in context.instructions
     assert "main prompt" in context.instructions
-    assert "Skill reference: search_result_reading.md" in context.instructions
-    assert "search skill" in context.instructions
+    assert '"name": "search-result-reading"' in context.instructions
+    assert "Interpret search results." in context.instructions
+    assert "search skill" not in context.instructions
     assert '"context_payload"' in context.instructions
     assert '"directory"' in context.instructions
     assert '"search_catalog"' in context.instructions
@@ -172,11 +177,15 @@ def test_context_builder_injects_route_block_before_shop_details(tmp_path: Path)
     skill_root.mkdir()
     (prompt_root / "system_base.md").write_text("base prompt", encoding="utf-8")
     (prompt_root / "main_agent.md").write_text("main prompt", encoding="utf-8")
-    (skill_root / "navigation_result_reading.md").write_text("nav skill", encoding="utf-8")
+    (skill_root / "navigation-result-reading").mkdir()
+    (skill_root / "navigation-result-reading" / "SKILL.md").write_text(
+        "---\nname: navigation-result-reading\ndescription: Interpret routes.\n---\nnav skill",
+        encoding="utf-8",
+    )
 
     builder = ContextBuilder(
         prompt_root=prompt_root,
-        skill_root=skill_root,
+        skill_registry=SkillRegistry(SkillConfig(roots=[skill_root])),
         history_turn_limit=6,
     )
     state = AgentSessionState(session_id="s2", active_subagent="main_agent")
@@ -200,7 +209,6 @@ def test_context_builder_injects_route_block_before_shop_details(tmp_path: Path)
             name="main_agent",
             prompt_file="main_agent.md",
             allowed_tools=[],
-            skill_files=["navigation_result_reading.md"],
         ),
     )
 
@@ -219,7 +227,7 @@ def test_context_builder_exposes_last_mcp_result_in_runtime_hint(tmp_path: Path)
 
     builder = ContextBuilder(
         prompt_root=prompt_root,
-        skill_root=skill_root,
+        skill_registry=SkillRegistry(SkillConfig(roots=[skill_root])),
         history_turn_limit=6,
     )
     state = AgentSessionState(session_id="s3", active_subagent="navigation_worker")
@@ -241,7 +249,6 @@ def test_context_builder_exposes_last_mcp_result_in_runtime_hint(tmp_path: Path)
             name="navigation_worker",
             prompt_file="navigation_worker.md",
             allowed_tools=[],
-            skill_files=[],
         ),
     )
 
@@ -260,7 +267,7 @@ def test_context_builder_includes_recent_tool_results_history(tmp_path: Path) ->
 
     builder = ContextBuilder(
         prompt_root=prompt_root,
-        skill_root=skill_root,
+        skill_registry=SkillRegistry(SkillConfig(roots=[skill_root])),
         history_turn_limit=6,
     )
     state = AgentSessionState(
@@ -321,7 +328,6 @@ def test_context_builder_includes_recent_tool_results_history(tmp_path: Path) ->
             name="navigation_worker",
             prompt_file="navigation_worker.md",
             allowed_tools=[],
-            skill_files=[],
         ),
     )
 
@@ -343,7 +349,7 @@ def test_context_builder_main_agent_sees_worker_tool_history(tmp_path: Path) -> 
 
     builder = ContextBuilder(
         prompt_root=prompt_root,
-        skill_root=skill_root,
+        skill_registry=SkillRegistry(SkillConfig(roots=[skill_root])),
         history_turn_limit=6,
     )
     state = AgentSessionState(
@@ -385,7 +391,6 @@ def test_context_builder_main_agent_sees_worker_tool_history(tmp_path: Path) -> 
             name="main_agent",
             prompt_file="main_agent.md",
             allowed_tools=[],
-            skill_files=[],
         ),
     )
 

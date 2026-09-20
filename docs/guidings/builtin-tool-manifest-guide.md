@@ -176,7 +176,7 @@
 {
   "dependencies": {
     "prompt_path": {
-      "path": "app/agent/context/skills/response_composition.md",
+      "path": "app/agent/context/skills/response-composition/SKILL.md",
       "base": "project_root",
       "as_string": true
     }
@@ -281,7 +281,7 @@ module.path:object_name
   "capabilities": ["builtin", "read_only", "navigation"],
   "metadata": {
     "guide": {
-      "path": "app/agent/context/skills/navigation_result_reading.md",
+      "path": "app/agent/context/skills/navigation-result-reading/SKILL.md",
       "base": "project_root",
       "as_string": true
     }

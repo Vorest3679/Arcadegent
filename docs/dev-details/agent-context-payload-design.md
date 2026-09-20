@@ -78,7 +78,7 @@
 
 ### 3. skill 是说明书，不是模板库
 
-`skills/*.md` 的作用是：
+`skills/*/SKILL.md` 的作用是：
 
 - 告诉模型先读 `directory`
 - 告诉模型 `search_catalog` 和 `route` 是主回答锚点
@@ -86,6 +86,8 @@
 - 告诉模型什么字段是 supporting detail，什么字段是 primary answer anchor
 
 skill 的目标不是输出固定句式，而是提高模型在结构化上下文上的阅读稳定性。
+
+`directory.skills` 只包含当前 agent 可用技能的名称和描述。模型通过 `read_skill` 按需加载正文与引用文本，已加载内容在本轮 context 中持续保留，工具历史只记录读取回执。配置、刷新和隔离规则见 [Agent Skills 指南](../guidings/agent-skills-guide.md)。
 
 ## 后续开发约束
 
