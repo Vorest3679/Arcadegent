@@ -315,6 +315,7 @@ def test_route_oracle_rejects_wrong_origin_and_forged_geometry():
     assert "route_not_from_tool_result" in result["failures"]
 
 
+@pytest.mark.private_data
 def test_matrix_and_cases_validate_without_secrets(tmp_path, monkeypatch):
     cfg = config(tmp_path, monkeypatch, "EVAL_MODELS=deepseek,glm,kimi,mimo\nEVAL_CASES=datasets/public/benchmark.yaml\nEVAL_DATA=../data/local/arcades.geocoded.sample.jsonl\n")
     assert len(cfg.cases) == 38
@@ -324,6 +325,7 @@ def test_matrix_and_cases_validate_without_secrets(tmp_path, monkeypatch):
         "retrieval": 32, "navigation": 4, "robustness": 2}
 
 
+@pytest.mark.private_data
 def test_benchmark_has_broad_city_and_landmark_coverage(tmp_path, monkeypatch):
     cfg = config(tmp_path, monkeypatch, "EVAL_CASES=datasets/public/benchmark.yaml\nEVAL_DATA=../data/local/arcades.geocoded.sample.jsonl\n")
     rows = [json.loads(line) for line in cfg.data.read_text().splitlines() if line]
@@ -338,6 +340,7 @@ def test_benchmark_has_broad_city_and_landmark_coverage(tmp_path, monkeypatch):
     assert all(sum(row["city_name"] == city for row in targets) >= 3 for city in requested_cities)
 
 
+@pytest.mark.private_data
 def test_benchmark_matches_verified_local_sources():
     from evaluate.build_benchmark import build, OUT
     import yaml
@@ -346,6 +349,7 @@ def test_benchmark_matches_verified_local_sources():
     assert json.loads((OUT / "benchmark.sources.json").read_text()) == manifest
 
 
+@pytest.mark.private_data
 def test_real_benchmark_targets_are_retrievable_by_production_store():
     from evaluate.build_benchmark import DATA, build
     from app.infra.db.local import LocalArcadeStore

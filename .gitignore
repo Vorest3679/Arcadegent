@@ -52,6 +52,12 @@ tests/
 !backend/app/tests/unit/
 backend/app/tests/unit/*
 !backend/app/tests/unit/test_arcade_geo_jsonl_enricher.py
+!backend/app/tests/unit/_tool_registry_test_support.py
+!backend/app/tests/unit/test_tool_registry_*.py
+!apps/web/tests/
+!apps/web/tests/e2e/
+!apps/web/tests/e2e/*.spec.ts
+!apps/web/tests/e2e/test-support.ts
 
 # Evaluation reports and private fixtures stay local; checks remain versionable.
 evaluate/reports/
