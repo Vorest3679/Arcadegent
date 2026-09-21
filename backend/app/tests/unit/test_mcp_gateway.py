@@ -196,7 +196,10 @@ def test_mcp_gateway_discovers_and_executes_tools_from_json_directory(tmp_path: 
 def test_mcp_gateway_discovers_and_executes_http_tools() -> None:
     mcp = FastMCP("HTTP MCP")
 
-    @mcp.tool(name="maps_direction_walking", description="步行路径规划，输入 origin 和 destination，输出 paths。")
+    @mcp.tool(
+        name="maps_direction_walking",
+        description="步行路径规划，输入 origin 和 destination，输出 paths。",
+    )
     def maps_direction_walking(origin: str, destination: str) -> dict[str, object]:
         return {
             "origin": origin,
@@ -232,7 +235,12 @@ def test_mcp_gateway_discovers_and_executes_http_tools() -> None:
         )
 
         asyncio.run(gateway.refresh())
-        definitions = asyncio.run(gateway.build_tool_definitions(allowed_tools=["mcp__*"], strict=True))
+        definitions = asyncio.run(
+            gateway.build_tool_definitions(
+                allowed_tools=["mcp__*"],
+                strict=True,
+            )
+        )
         names = [item["function"]["name"] for item in definitions]
         assert "mcp__amap__maps_direction_walking" in names
 

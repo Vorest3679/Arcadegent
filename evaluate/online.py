@@ -505,7 +505,8 @@ def report(evidence, attempts):
         if judge_failures:
             lines += ["", "质量 Judge 未通过的回答：", "", "| Case | Judge 分数 | Judge 指出的失误 |", "| --- | --- | --- |"]
             for row in judge_failures:
-                lines.append(f"| {row['case_id']} | {row.get('score', 'N/A')} | {str(row.get('reason', '')).replace('|', '\\|').replace(chr(10), ' ')} |")
+                reason = str(row.get("reason", "")).replace("|", "\\|").replace("\n", " ")
+                lines.append(f"| {row['case_id']} | {row.get('score', 'N/A')} | {reason} |")
         if judge_errors:
             lines += ["", "Judge 未完成的项目：", "", "| Case | 错误 |", "| --- | --- |"]
             for row in judge_errors:
