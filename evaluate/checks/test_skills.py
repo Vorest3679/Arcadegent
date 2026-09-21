@@ -20,6 +20,8 @@ from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.protocol.messages import ChatRequest
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def write_skill(root, directory="sample-skill", *, body="BODY_MARKER", **fields):
     folder = root / directory
@@ -37,7 +39,7 @@ def tool_registry(registry, tmp_path):
 
 
 def test_bundled_skills_use_standard_format():
-    config = load_skill_config(Path("backend/skill.config.py"))
+    config = load_skill_config(REPO_ROOT / "backend" / "skill.config.py")
     registry = SkillRegistry(config)
     catalog = registry.list_skills(agent_name="main_agent")
     assert {item["name"] for item in catalog} == {

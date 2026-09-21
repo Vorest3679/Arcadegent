@@ -249,6 +249,8 @@ class ReactRuntime:
             _short(request.message, limit=140),
         )
 
+        # Persist the user turn and session.started before the first cancellable
+        # discovery operation, so cancellation during refresh cannot lose input.
         self._append_turn(
             state,
             AgentTurn(
@@ -274,7 +276,6 @@ class ReactRuntime:
             reason="session.started",
         )
 
-        # Persist user input before the first cancellable discovery operation.
         if self._skill_registry is not None:
             await asyncio.to_thread(self._skill_registry.refresh)
         final_text, model_error = await self._run_main_agent(

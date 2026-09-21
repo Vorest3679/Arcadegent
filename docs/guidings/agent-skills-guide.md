@@ -99,4 +99,4 @@ read_skill({"name": "arcade-price-explanation", "path": "references/pricing.md"}
 
 使用后端虚拟环境运行 `python -m pytest -q`。这些验证不依赖真实模型；它们证明运行时契约与隔离行为，不代表已评估真实模型选择技能的准确率。
 
-本次改造验证：`backend/.venv/bin/python -m pytest -q`，264 项通过；`git diff --check` 通过。未执行真实模型选择质量评测或 Docker 镜像构建。
+测试总数会随 pytest 配置、运行目录和选择的测试集变化，不作为固定契约。本次改造在仓库根目录运行 `backend/.venv/bin/python -m pytest -q`，结果为 264 项通过；`git diff --check` 通过。未执行真实模型选择质量评测或 Docker 镜像构建。
