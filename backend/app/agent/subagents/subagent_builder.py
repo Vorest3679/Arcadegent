@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -20,7 +20,6 @@ class SubAgentProfile:
     name: SubAgentName
     prompt_file: str
     allowed_tools: list[str]
-    skill_files: list[str] = field(default_factory=list)
 
 
 class SubAgentBuilder:
@@ -37,6 +36,8 @@ class SubAgentBuilder:
                 name="main_agent",
                 prompt_file="main_agent.md",
                 allowed_tools=[
+                    "list_skills",
+                    "read_skill",
                     "invoke_worker",
                     "db_query_tool",
                     "geo_resolve_tool",
@@ -45,24 +46,23 @@ class SubAgentBuilder:
                     "result_selection_tool",
                     "mcp__*",
                 ],
-                skill_files=[],
             ),
             "search_worker": SubAgentProfile(
                 name="search_worker",
                 prompt_file="search_worker.md",
-                allowed_tools=["db_query_tool", "result_selection_tool", "mcp__*"],
-                skill_files=["search_result_reading.md"],
+                allowed_tools=["list_skills", "read_skill", "db_query_tool", "result_selection_tool", "mcp__*"],
             ),
             "navigation_worker": SubAgentProfile(
                 name="navigation_worker",
                 prompt_file="navigation_worker.md",
                 allowed_tools=[
+                    "list_skills",
+                    "read_skill",
                     "db_query_tool",
                     "geo_resolve_tool",
                     "route_plan_tool",
                     "mcp__*",
                 ],
-                skill_files=["search_result_reading.md", "navigation_result_reading.md"],
             ),
         }
         if enable_yaml_overlay and definitions_dir is not None:
@@ -88,6 +88,8 @@ class SubAgentBuilder:
             payload = self._read_yaml(path)
             if payload is None:
                 continue
+            if "skill_files" in payload:
+                raise ValueError("skill_files is no longer supported; configure skills in skill.config.py")
             status = self._read_status(payload)
             if status != "active":
                 continue
@@ -103,12 +105,10 @@ class SubAgentBuilder:
                 allowed_tools = overlay_tools
             else:
                 allowed_tools = self._merge_unique(profile.allowed_tools, overlay_tools)
-            skill_files = self._merge_unique(profile.skill_files, self._read_skill_files(payload))
             self._profiles[subagent_name] = SubAgentProfile(
                 name=profile.name,
                 prompt_file=prompt_file,
                 allowed_tools=allowed_tools,
-                skill_files=skill_files,
             )
 
     def _read_yaml(self, path: Path) -> dict[str, Any] | None:
@@ -177,18 +177,6 @@ class SubAgentBuilder:
                 if value:
                     tools.append(value)
         return tools
-
-    def _read_skill_files(self, payload: dict[str, Any]) -> list[str]:
-        raw = payload.get("skill_files")
-        if not isinstance(raw, list):
-            return []
-        skill_files: list[str] = []
-        for item in raw:
-            if isinstance(item, str):
-                value = item.strip()
-                if value:
-                    skill_files.append(value)
-        return skill_files
 
     def _merge_unique(self, base: list[str], overlay: list[str]) -> list[str]:
         merged: list[str] = []

@@ -1,3 +1,8 @@
+---
+name: response-composition
+description: Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.
+---
+
 Use runtime state plus observed tool outputs to write the final user-facing reply.
 
 Read order:

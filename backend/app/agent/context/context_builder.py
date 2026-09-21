@@ -27,6 +27,7 @@ from app.agent.context.context_payload import (
 )
 from app.agent.runtime.session_state import AgentSessionState, AgentTurn, get_working_memory_artifact
 from app.agent.subagents.subagent_builder import SubAgentProfile
+from app.agent.skills.registry import SkillRegistry
 from app.protocol.messages import ChatRequest
 
 
@@ -46,13 +47,12 @@ class ContextBuilder:
         *,
         prompt_root: Path,
         history_turn_limit: int,
-        skill_root: Path | None = None,
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
         self._prompt_root = prompt_root
-        self._skill_root = skill_root
+        self._skill_registry = skill_registry
         self._history_turn_limit = max(4, history_turn_limit)
         self._prompt_cache: dict[str, str] = {}
-        self._skill_cache: dict[str, str] = {}
 
     def build(
         self,
@@ -63,7 +63,7 @@ class ContextBuilder:
     ) -> BuiltContext:
         base_prompt = self._load_prompt("system_base.md").strip()
         subagent_prompt = self._load_prompt(subagent.prompt_file).strip()
-        skill_block = self._build_skill_block(subagent.skill_files)
+        skill_block = self._build_skill_block(session_state)
         client_location = self._client_location_payload(session_state=session_state, request=request)
         client_location_block = self._build_client_location_block(client_location)
         context_payload = self._build_context_payload(
@@ -323,16 +323,15 @@ class ContextBuilder:
                     message["responses_output"] = deepcopy(responses_output)
         return message
 
-    def _build_skill_block(self, skill_files: list[str]) -> str:
-        sections: list[str] = []
-        for filename in skill_files:
-            content = self._load_skill(filename).strip()
-            if not content:
-                continue
-            sections.append(f"Skill reference: {filename}\n{content}")
-        if not sections:
+    def _build_skill_block(self, state: AgentSessionState) -> str:
+        resources = state.skill_execution.resources.values()
+        if not resources:
             return ""
-        return "\n\n".join(sections)
+        # Structured wrapping keeps resource identity explicit without exposing host paths.
+        return "Loaded skill resources (relative paths are based at each named skill):\n" + json.dumps(
+            [{"name": item.name, "path": item.path, "content": item.content} for item in resources],
+            ensure_ascii=False,
+        )
 
     def _build_context_payload(
         self,
@@ -420,6 +419,7 @@ class ContextBuilder:
             reading_order = [item for item in reading_order if item in {block.block for block in available_blocks}]
 
         return ContextDirectoryDto(
+            skills=self._skill_registry.list_skills(agent_name=subagent.name) if self._skill_registry else [],
             active_intent=session_state.intent,
             active_subagent=subagent.name,
             available_blocks=available_blocks,
@@ -920,15 +920,6 @@ class ContextBuilder:
             filename=filename,
             root=self._prompt_root,
             cache=self._prompt_cache,
-        )
-
-    def _load_skill(self, filename: str) -> str:
-        if self._skill_root is None:
-            return ""
-        return self._load_markdown(
-            filename=filename,
-            root=self._skill_root,
-            cache=self._skill_cache,
         )
 
     def _load_markdown(

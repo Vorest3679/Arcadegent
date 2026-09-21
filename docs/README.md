@@ -16,6 +16,8 @@
 5. [Agent Context Payload Design](./dev-details/agent-context-payload-design.md)：agent 上下文 payload 的结构和约束。
 6. [动态工具注册实现说明](./dev-details/dynamic-tool-registry-implementation.md)：builtin 与 MCP 工具注册链路。
 7. [Evaluate 评测工作台架构](./dev-details/evaluation-workbench-architecture.md)：离线契约、在线模型评测、证据、判分与报告边界。
+8. [Agent Skills 配置与扩展](./guidings/agent-skills-guide.md)：标准技能格式、目录发现、按需读取和本轮上下文隔离。
+9. [Agent Skills 资源目录支持与扩展预留](./dev-details/agent-skills-resource-support.md)：`scripts/`、`references/`、`assets/` 和其他资源的当前边界与后续接口预留。
 
 ## 公开边界
 

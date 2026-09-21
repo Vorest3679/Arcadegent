@@ -7,6 +7,8 @@ provider: rule_based
 model_pointer: main
 allowed_tools_mode: replace
 allowed_tools:
+  - list_skills
+  - read_skill
   - invoke_worker
   - db_query_tool
   - geo_resolve_tool

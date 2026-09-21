@@ -8,7 +8,7 @@
   "metadata": {
     "tool_function": "app.agent.tools.builtin.executors.route_plan:execute",
     "guide": {
-      "path": "app/agent/context/skills/navigation_result_reading.md",
+      "path": "app/agent/context/skills/navigation-result-reading/SKILL.md",
       "base": "project_root",
       "as_string": true
     },

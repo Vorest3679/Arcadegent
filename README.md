@@ -421,10 +421,13 @@ Agent 配置分为几层：
 - Provider profile：`backend/app/agent/nodes/profiles/provider_profiles.yaml`
 - Tool policy：`backend/app/agent/nodes/profiles/tool_policies.yaml`
 - Prompt：`backend/app/agent/context/prompts/*.md`
-- Skill：`backend/app/agent/context/skills/*.md`
+- Skill：`backend/app/agent/context/skills/*/SKILL.md`
+- Skill 配置：`backend/skill.config.py`（目录、禁用项、agent 白名单和读取上限）
 - Builtin tool manifest：`backend/app/agent/tools/builtin/tools_manifest.json`
 - Builtin tool schema：`backend/app/agent/tools/builtin/schemas/*.json`
 - MCP server 配置：`backend/app/agent/tools/mcp/servers/*.json`
+
+Skill 使用标准 Agent Skills 格式，通过目录自动发现，正文和引用文本按需加载。新增技能无需修改注册代码，配置与迁移说明见 [Agent Skills 指南](docs/guidings/agent-skills-guide.md)。
 
 当前主流程是 `main_agent` 识别意图并调度 worker。`search_worker` 负责机厅查询，`navigation_worker` 负责目标解析和路线规划，最终再由 summary 流程生成用户可见回复。
 

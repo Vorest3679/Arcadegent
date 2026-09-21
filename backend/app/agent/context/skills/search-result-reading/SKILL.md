@@ -1,3 +1,8 @@
+---
+name: search-result-reading
+description: Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.
+---
+
 Use this skill when runtime state includes `context_payload.directory` and `context_payload.search_catalog`.
 
 Interpretation rules:

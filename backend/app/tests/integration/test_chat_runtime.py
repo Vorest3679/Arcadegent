@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.agent.llm.provider_adapter import ModelResponse
-from app.agent.runtime.session_state import AgentSessionState, state_from_dict
+from app.agent.runtime.session_state import AgentSessionState, state_from_dict, state_to_dict
 from app.infra.db.protocols import SessionStateRepository
 from backend.app.tests.integration._api_test_support import (
     InMemorySessionStateRepository,
@@ -17,6 +17,109 @@ from backend.app.tests.integration._api_test_support import (
     _stub_provider_adapter,
     _wait_for_session_status,
 )
+
+
+def test_skill_discovery_loading_business_tools_and_execution_isolation(tmp_path, monkeypatch):
+    """Exercise real tool dispatch/context/session boundaries with a deterministic model."""
+    import app.core.container as container_module
+    from app.agent.llm.provider_adapter import ModelToolCall
+    from app.agent.skills.config import SkillConfig
+
+    root = tmp_path / "skills"
+    root.mkdir()
+    monkeypatch.setattr(container_module, "load_skill_config", lambda _: SkillConfig(roots=[root]))
+    client = _build_client(tmp_path)
+    runtime = client.app.state.container.react_runtime
+    main_calls = 0
+    worker_calls = 0
+
+    def create_skill(name, body):
+        folder = root / name
+        folder.mkdir(exist_ok=True)
+        (folder / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: Use for synthetic integration tasks.\n---\n{body}",
+            encoding="utf-8",
+        )
+        return folder
+
+    def call(name, args):
+        return ModelResponse(tool_calls=[ModelToolCall(f"{name}-{main_calls}-{worker_calls}", name, args)])
+
+    async def fake_complete(*, instructions, messages, tools, runtime_hints=None):
+        nonlocal main_calls, worker_calls
+        assert "PARENT_BODY_MARKER" not in json.dumps(messages)
+        assert "WORKER_BODY_MARKER" not in json.dumps(messages)
+        if runtime_hints["active_subagent"] == "search_worker":
+            worker_calls += 1
+            assert "PARENT_BODY_MARKER" not in instructions
+            assert "REFERENCE_MARKER" not in instructions
+            assert '"name": "worker-skill"' in instructions
+            if worker_calls % 2:
+                assert "WORKER_BODY_MARKER" not in instructions
+                return call("read_skill", {"name": "worker-skill"})
+            assert instructions.count("WORKER_BODY_MARKER") == 1
+            return ModelResponse(text="worker finished")
+
+        main_calls += 1
+        assert "WORKER_BODY_MARKER" not in instructions
+        if main_calls == 1:
+            assert '"name": "parent-skill"' not in instructions
+            folder = create_skill("parent-skill", "PARENT_BODY_MARKER. Read references/guide.md.")
+            (folder / "references").mkdir()
+            (folder / "references" / "guide.md").write_text("REFERENCE_MARKER")
+            return call("list_skills", {})
+        if main_calls == 2:
+            assert '"name": "parent-skill"' in instructions
+            assert "PARENT_BODY_MARKER" not in instructions
+            return call("read_skill", {"name": "parent-skill", "path": "SKILL.md"})
+        if main_calls == 3:
+            assert instructions.count("PARENT_BODY_MARKER") == 1
+            create_skill("parent-skill", "NEW_BODY_FOR_NEXT_TURN")
+            return ModelResponse(tool_calls=[
+                ModelToolCall("reference", "read_skill", {"name": "parent-skill", "path": "references/guide.md"}),
+                ModelToolCall("duplicate", "read_skill", {"name": "parent-skill"}),
+            ])
+        if 4 <= main_calls <= 7:
+            assert instructions.count("PARENT_BODY_MARKER") == 1
+            assert instructions.count("REFERENCE_MARKER") == 1
+            assert "NEW_BODY_FOR_NEXT_TURN" not in instructions
+        if main_calls == 4:
+            return call("db_query_tool", {"shop_name": "Gamma Arcade", "page": 1, "page_size": 5})
+        if main_calls == 5:
+            assert "Gamma Arcade" in instructions
+            create_skill("worker-skill", "WORKER_BODY_MARKER")
+            return call("invoke_worker", {"worker": "search_worker", "task": "Inspect the available skill."})
+        if main_calls == 6:
+            return call("invoke_worker", {"worker": "search_worker", "task": "Inspect it in a fresh execution."})
+        if main_calls == 7:
+            return ModelResponse(text="已找到 Gamma Arcade。")
+        assert main_calls == 8
+        assert "PARENT_BODY_MARKER" not in instructions and "REFERENCE_MARKER" not in instructions
+        assert "NEW_BODY_FOR_NEXT_TURN" not in instructions
+        return ModelResponse(text="新一轮尚未加载技能。")
+
+    runtime._provider_adapter.complete = fake_complete
+    response = client.post("/api/chat", json={"message": "find Gamma"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reply"] == "已找到 Gamma Arcade。"
+    assert worker_calls == 4
+    state = client.app.state.container.session_store.get_session(payload["session_id"])
+    query = next(turn for turn in state.turns if turn.name == "db_query_tool")
+    assert query.payload["status"] == "completed"
+    assert query.payload["result"]["total"] == 1
+    for turn in state.turns:
+        assert "PARENT_BODY_MARKER" not in turn.content
+        assert "REFERENCE_MARKER" not in json.dumps(turn.payload)
+        if turn.name == "read_skill":
+            assert turn.payload["status"] == "completed"
+            assert turn.payload["result"]["status"] == "loaded"
+    assert "PARENT_BODY_MARKER" not in json.dumps(state_to_dict(state))
+    response = client.post("/api/chat", json={"message": "继续", "session_id": payload["session_id"]})
+    assert response.status_code == 200
+    assert response.json()["reply"] == "新一轮尚未加载技能。"
+
+
 def test_navigation_worker_hydrates_route_strings_and_returns_route(tmp_path: Path) -> None:
     from app.agent.llm.provider_adapter import ModelToolCall
 

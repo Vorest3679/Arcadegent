@@ -18,6 +18,13 @@ class ContextBlockRefDto(BaseModel):
     primary_fields: list[str] = Field(default_factory=list)
 
 
+class SkillCatalogEntryDto(BaseModel):
+    """Discovery metadata only; full instructions are activated separately."""
+
+    name: str
+    description: str
+
+
 class ContextDirectoryDto(BaseModel):
     """Table-of-contents style view for available runtime context."""
 
@@ -27,6 +34,7 @@ class ContextDirectoryDto(BaseModel):
     reading_order: list[ContextBlockKey] = Field(default_factory=list)
     focus: str | None = None
     top_shop_ids: list[int] = Field(default_factory=list)
+    skills: list[SkillCatalogEntryDto] = Field(default_factory=list)
 
 
 class QueryContextDto(BaseModel):

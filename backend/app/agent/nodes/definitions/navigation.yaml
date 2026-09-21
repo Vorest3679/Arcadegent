@@ -7,12 +7,11 @@ provider: local
 model_pointer: navigation
 allowed_tools_mode: replace
 allowed_tools:
+  - list_skills
+  - read_skill
   - db_query_tool
   - geo_resolve_tool
   - route_plan_tool
   - mcp__*
-skill_files:
-  - search_result_reading.md
-  - navigation_result_reading.md
 output_schema:
   route: object

@@ -32,7 +32,7 @@ def test_tool_registry_gettools_aggregates_builtin_and_mcp_tools(tmp_path: Path)
     assert tools["db_query_tool"].provider == "builtin"
     assert "mcp__amap__maps_direction_walking" in tools
     assert tools["mcp__amap__maps_direction_walking"].provider == "mcp"
-    assert tools["summary_tool"].metadata["prompt"].endswith("response_composition.md")
+    assert tools["summary_tool"].metadata["prompt"].endswith("response-composition/SKILL.md")
 
 def test_tool_registry_can_execute_discovered_mcp_tool(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
