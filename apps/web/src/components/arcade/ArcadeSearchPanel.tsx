@@ -136,6 +136,7 @@ export function ArcadeSearchPanel({
         <label className="browser-field">
           机种
           <select
+            data-testid="arcade-title-filter"
             value={titleName}
             onChange={(e) => setTitleName(e.target.value)}
           >

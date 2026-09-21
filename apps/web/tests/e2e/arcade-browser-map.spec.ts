@@ -341,17 +341,19 @@ async function installStreamMock(page: Page) {
   }, CHAT_ROUTE);
 }
 
-async function installApiMocks(page: Page) {
-  await page.route("**/api/v1/chat/sessions**", async (route) => {
+async function installApiMocks(page: Page, options: { totalPages?: number } = {}) {
+  const totalPages = options.totalPages ?? 1;
+
+  await page.route("**/api/chat/sessions**", async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route("**/api/v1/regions/provinces", async (route) => {
+  await page.route("**/api/regions/provinces", async (route) => {
     await route.fulfill({ json: [{ code: "310000000000", name: "上海市" }] });
   });
-  await page.route("**/api/v1/regions/cities**", async (route) => {
+  await page.route("**/api/regions/cities**", async (route) => {
     await route.fulfill({ json: [{ code: "310100000000", name: "上海市" }] });
   });
-  await page.route("**/api/v1/regions/counties**", async (route) => {
+  await page.route("**/api/regions/counties**", async (route) => {
     await route.fulfill({
       json: [
         { code: "310101000000", name: "黄浦区" },
@@ -359,7 +361,7 @@ async function installApiMocks(page: Page) {
       ]
     });
   });
-  await page.route("**/api/v1/location/reverse-geocode", async (route) => {
+  await page.route("**/api/location/reverse-geocode", async (route) => {
     await route.fulfill({
       json: {
         lng: 121.4,
@@ -369,18 +371,21 @@ async function installApiMocks(page: Page) {
       }
     });
   });
-  await page.route("**/api/v1/arcades?**", async (route) => {
+  await page.route("**/api/arcades?**", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    const pageNumber = Number(requestUrl.searchParams.get("page") ?? "1");
+    const items = totalPages > 1 && pageNumber > 1 ? [ARCADES[2]] : ARCADES;
     await route.fulfill({
       json: {
-        items: ARCADES,
-        page: 1,
+        items,
+        page: pageNumber,
         page_size: 20,
-        total: ARCADES.length,
-        total_pages: 1
+        total: totalPages > 1 ? 21 : ARCADES.length,
+        total_pages: totalPages
       }
     });
   });
-  await page.route("**/api/v1/arcades/*", async (route) => {
+  await page.route("**/api/arcades/*", async (route) => {
     const id = Number(route.request().url().split("/").pop());
     await route.fulfill({ json: DETAILS[id] });
   });
@@ -458,7 +463,7 @@ async function installChatApiMocks(page: Page) {
       }
     });
   });
-  await page.route("**/api/v1/location/reverse-geocode", async (route) => {
+  await page.route("**/api/location/reverse-geocode", async (route) => {
     await route.fulfill({
       json: {
         lng: 121.4,
@@ -475,7 +480,7 @@ test("ArcadeBrowser keeps list, map, and actions in sync", async ({ page }) => {
   await installAmapMock(page);
   await installApiMocks(page);
 
-  await page.goto("/?view=arcades");
+  await page.goto("/arcades");
 
   await expect(page.getByTestId("arcade-list-item-101")).toBeVisible();
   await expect(page.getByTestId("arcade-map-placeholder")).toBeVisible();
@@ -511,6 +516,72 @@ test("ArcadeBrowser keeps list, map, and actions in sync", async ({ page }) => {
   await expect(page.getByText(/该机厅暂时没有精确地图坐标/)).toBeVisible();
   await expect(page.getByTestId("map-action-view")).toHaveCount(0);
   await expect(page.getByText("暂无地图定位")).toBeVisible();
+});
+
+test("ArcadeBrowser submits filters and paginates results", async ({ page }) => {
+  await installAmapMock(page);
+  await installApiMocks(page, { totalPages: 2 });
+
+  await page.goto("/arcades");
+  await expect(page.getByTestId("arcade-list-item-101")).toBeVisible();
+
+  await page.getByLabel("机厅名称").fill("Arcade One");
+  await page.getByLabel("省份").selectOption("310000000000");
+  await expect(page.getByLabel("城市")).toBeEnabled();
+  await page.getByLabel("城市").selectOption("310100000000");
+  await expect(page.getByLabel("区县")).toBeEnabled();
+  await page.getByLabel("区县").selectOption("310101000000");
+  await page.getByLabel("排序字段").selectOption("title_quantity");
+  await page.getByTestId("arcade-title-filter").selectOption({ label: "maimai DX" });
+
+  const searchRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/arcades"
+      && url.searchParams.get("shop_name") === "Arcade One"
+      && url.searchParams.get("province_code") === "310000000000"
+      && url.searchParams.get("city_code") === "310100000000"
+      && url.searchParams.get("county_code") === "310101000000"
+      && url.searchParams.get("sort_by") === "title_quantity"
+      && url.searchParams.get("sort_title_name") === "maimai DX";
+  });
+  await page.getByRole("button", { name: "检索", exact: true }).click();
+  await searchRequest;
+
+  await expect(page.getByText("1-20 / 21")).toBeVisible();
+  await page.getByRole("button", { name: "下一页" }).click();
+  await expect(page.getByText("21-21 / 21")).toBeVisible();
+  await expect(page.getByTestId("arcade-list-item-103")).toBeVisible();
+});
+
+test("ArcadeBrowser renders detailed cabinet information", async ({ page }) => {
+  await installAmapMock(page);
+  await installApiMocks(page);
+
+  await page.goto("/arcades");
+  await page.getByTestId("arcade-list-item-101").click();
+
+  await expect(page.getByTestId("browser-detail-title")).toHaveText("Arcade One");
+  await expect(page.getByText("First detail")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "机台信息（1）" })).toBeVisible();
+  await expect(page.locator(".browser-title-list b", { hasText: "maimai DX" })).toBeVisible();
+  await expect(page.getByText("数量：2", { exact: true })).toBeVisible();
+  await expect(page.getByText("版本：2026", { exact: true })).toBeVisible();
+});
+
+test("sidebar switches between chat and arcade views", async ({ page }) => {
+  await installAmapMock(page);
+  await installApiMocks(page);
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Agent 对话" })).toBeVisible();
+
+  await page.getByRole("button", { name: "机厅检索" }).click();
+  await expect(page).toHaveURL(/\/arcades$/);
+  await expect(page.locator(".topbar").getByRole("heading", { name: "机厅检索" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Agent 对话" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.locator(".topbar").getByRole("heading", { name: "Agent 对话" })).toBeVisible();
 });
 
 test("ChatPanel shows progressive route card from SSE route_ready", async ({ page }) => {

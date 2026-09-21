@@ -551,6 +551,10 @@ cd apps/web
 npm run test:e2e
 ```
 
+## License
+
+本项目采用 MIT License，详见根目录 [LICENSE](LICENSE)。项目中的第三方依赖、地图服务、数据源及本地评测数据可能适用各自的许可或使用条款。
+
 ## 故障排查
 
 - 后端启动但无数据：检查 `ARCADE_DATA_JSONL` 是否存在，或访问 `/health` 看 `store` 状态。
