@@ -159,7 +159,7 @@ def weighted_timeline_svg(rows):
     """Render one monotonic weighted-complete score line per model."""
     timed = [row for row in rows if row.get("elapsed_ms") is not None]
     width, height = 840, 480
-    left, right, top, bottom = 82, 30, 54, 66
+    left, right, top, bottom = 82, 30, 54, 96
     plot_width, plot_height = width - left - right, height - top - bottom
     maximum = max((row["elapsed_ms"] for row in timed), default=1) / 1000
     x_max = max(1, maximum * 1.08)
@@ -191,12 +191,12 @@ def weighted_timeline_svg(rows):
         for row in points[1:]:
             label = escape(f"{model} / {row['case_id']}: 累计 {row['elapsed_ms'] / 1000:.1f}s, 加权完整通过 {row['weighted_complete_score']:.1f}/100, 已知 token {row['cumulative_known_total_tokens']}, 已确认价格 {row['cumulative_confirmed_cost']:.6f}, 未定价请求 {row['cumulative_unpriced_requests']}")
             parts.append(f'<circle cx="{x(row["elapsed_ms"]):.1f}" cy="{y(row["weighted_complete_score"]):.1f}" r="4" fill="{colors[model]}"><title>{label}</title></circle>')
-    parts += [f'<text x="{left + plot_width / 2:.1f}" y="{height - 15}" text-anchor="middle" font-family="sans-serif" font-size="13">完成耗时（秒）</text>',
+    parts += [f'<text x="{left + plot_width / 2:.1f}" y="{height - 40}" text-anchor="middle" font-family="sans-serif" font-size="13">完成耗时（秒）</text>',
               f'<text x="18" y="{top + plot_height / 2:.1f}" transform="rotate(-90 18 {top + plot_height / 2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="13">累计加权完整通过得分（百分制）</text>']
     legend_x = left
     for model in models:
-        parts.append(f'<circle cx="{legend_x}" cy="{height - 40}" r="5" fill="{colors[model]}"/>')
-        parts.append(f'<text x="{legend_x + 10}" y="{height - 36}" font-family="sans-serif" font-size="12">{escape(model)}</text>')
+        parts.append(f'<circle cx="{legend_x}" cy="{height - 16}" r="5" fill="{colors[model]}"/>')
+        parts.append(f'<text x="{legend_x + 10}" y="{height - 12}" font-family="sans-serif" font-size="12">{escape(model)}</text>')
         legend_x += 18 + len(model) * 8
     parts.append("</svg>")
     return "\n".join(parts)
@@ -233,11 +233,31 @@ def score_cost_scatter_svg(models, currency):
         pos = left + plot_width * value / 4
         parts += [f'<line x1="{pos:.1f}" y1="{top}" x2="{pos:.1f}" y2="{top + plot_height}" stroke="#e5e7eb"/>',
                   f'<text x="{pos:.1f}" y="{top + plot_height + 22}" text-anchor="middle" font-family="sans-serif" font-size="12">{amount:.3f}</text>']
+    labels = []
     for name, model, tier, cost_value in rows:
-        label = escape(f"{name}（{tier}）: 加权完整通过 {model['weighted_complete_score']:.2f}/100，每 task 已确认均价 {currency} {cost_value:.6f}，未定价请求 {model['unpriced_requests']}")
-        fill = "none" if tier == "闲时" else colors[name]
-        parts += [f'<circle cx="{x(cost_value):.1f}" cy="{y(model["weighted_complete_score"]):.1f}" r="6" fill="{fill}" stroke="{colors[name]}" stroke-width="2"><title>{label}</title></circle>',
-                  f'<text x="{x(cost_value) + 8:.1f}" y="{y(model["weighted_complete_score"]) - 8:.1f}" font-family="sans-serif" font-size="12">{escape(name + "（" + tier + "）")}</text>']
+        # 估算标签宽度时偏保守（ASCII 9、CJK 15），避免在渲染字体偏宽时溢出画布右缘。
+        estimated = sum(15 if ord(char) > 127 else 9 for char in name + "（" + tier + "）")
+        text_x, anchor = x(cost_value) + 8, "start"
+        if text_x + estimated > width - 8:
+            text_x, anchor = x(cost_value) - 8, "end"
+        labels.append({"name": name, "model": model, "tier": tier, "cost_value": cost_value,
+                       "estimated": estimated, "text_x": text_x, "anchor": anchor,
+                       "box_x": text_x if anchor == "start" else text_x - estimated,
+                       "text_y": y(model["weighted_complete_score"]) - 8})
+    labels.sort(key=lambda item: (item["text_y"], item["box_x"]))
+    # 标签在水平方向有交叠时，向下错开到与所有已放置标签都不冲突的高度。
+    for index in range(1, len(labels)):
+        current = labels[index]
+        pushed = max((item["text_y"] + 17 for item in labels[:index]
+                      if current["box_x"] < item["box_x"] + item["estimated"]
+                      and item["box_x"] < current["box_x"] + current["estimated"]), default=None)
+        if pushed is not None and current["text_y"] < pushed:
+            current["text_y"] = max(pushed, top + 12)
+    for item in labels:
+        label = escape(f"{item['name']}（{item['tier']}）: 加权完整通过 {item['model']['weighted_complete_score']:.2f}/100，每 task 已确认均价 {currency} {item['cost_value']:.6f}，未定价请求 {item['model']['unpriced_requests']}")
+        fill = "none" if item["tier"] == "闲时" else colors[item["name"]]
+        parts += [f'<circle cx="{x(item["cost_value"]):.1f}" cy="{y(item["model"]["weighted_complete_score"]):.1f}" r="6" fill="{fill}" stroke="{colors[item["name"]]}" stroke-width="2"><title>{label}</title></circle>',
+                  f'<text x="{item["text_x"]:.1f}" y="{item["text_y"]:.1f}" text-anchor="{item["anchor"]}" font-family="sans-serif" font-size="12">{escape(item["name"] + "（" + item["tier"] + "）")}</text>']
     parts += [f'<text x="{left + plot_width / 2:.1f}" y="{height - 15}" text-anchor="middle" font-family="sans-serif" font-size="13">每 task 已确认均价（{escape(currency)}）</text>',
               f'<text x="18" y="{top + plot_height / 2:.1f}" transform="rotate(-90 18 {top + plot_height / 2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="13">加权完整通过得分（百分制）</text>',
               '</svg>']
