@@ -14,6 +14,7 @@
 apps/web/.env.local
 apps/web/node_modules/
 apps/web/dist/
+.pnpm-store/
 backend/.venv/
 backend/arcadegent_agent.egg-info/
 

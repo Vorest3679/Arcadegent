@@ -58,7 +58,7 @@ docker-compose.yml               本地或服务器 compose 编排
 
 - Python `>=3.11`
 - Node.js `>=18`
-- npm `>=9`
+- pnpm `10.33.0`（版本固定在 `apps/web/package.json`；安装方式见 [pnpm 官方说明](https://pnpm.io/installation)）
 
 仓库根目录没有统一的前端 workspace `package.json`，前端命令需要在 `apps/web/` 下执行。
 
@@ -92,9 +92,11 @@ cd ..
 
 ### 2. 安装前端依赖
 
+前端依赖使用 pnpm 管理。请确认 `pnpm --version` 显示 `10.33.0`。
+
 ```bash
 cd apps/web
-npm install
+pnpm install --frozen-lockfile
 cd ../..
 ```
 
@@ -255,7 +257,7 @@ VITE_AMAP_URI_SRC=arcadegent_web
 
 ```bash
 cd apps/web
-npm run dev
+pnpm run dev
 ```
 
 打开：
@@ -537,21 +539,21 @@ python -m pytest -q
 
 ```bash
 cd apps/web
-npm run dev
+pnpm run dev
 ```
 
 前端打包：
 
 ```bash
 cd apps/web
-npm run build
+pnpm run build
 ```
 
 前端 E2E：
 
 ```bash
 cd apps/web
-npm run test:e2e
+pnpm run test:e2e
 ```
 
 ## License

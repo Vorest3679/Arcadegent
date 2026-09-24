@@ -2,8 +2,10 @@ FROM node:20-alpine AS build
 
 WORKDIR /app/apps/web
 
-COPY apps/web/package*.json ./
-RUN npm ci
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+
+COPY apps/web/package.json apps/web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY apps/web ./
 
@@ -17,7 +19,7 @@ ENV VITE_API_BASE=${VITE_API_BASE} \
     VITE_AMAP_SECURITY_JS_CODE=${VITE_AMAP_SECURITY_JS_CODE} \
     VITE_AMAP_URI_SRC=${VITE_AMAP_URI_SRC}
 
-RUN npm run build
+RUN pnpm run build
 
 FROM nginx:1.27-alpine
 
