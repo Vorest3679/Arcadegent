@@ -29,14 +29,14 @@ python -m evaluate check --suite contracts -k native_tool_round_trip
 
 每次运行创建独立 `evaluate/reports/<run_id>/`，含 `junit.xml`、`pytest.log`、`summary.json` 和 `summary.md`。`--output` 可指定新目录，相对路径相对于项目根目录；已存在目录禁止覆盖。退出码保留 pytest 语义：失败、收集错误或未选中测试均非零。跳过项独立统计，并使报告 `complete=false`。报告保留 Git SHA、已跟踪代码变更 hash、测试与 fixture 文件 hash、Python 版本和逐例耗时。
 
-浏览器沿用前端 Playwright 安装，不新增 Node workspace：
+浏览器沿用前端 Playwright 安装和 pnpm 锁文件，不新增 Node workspace。前端固定使用 `pnpm 10.33.0`，版本写在 `apps/web/package.json` 的 `packageManager` 字段；安装方式见 [pnpm 官方说明](https://pnpm.io/installation)：
 
 ```bash
-npm --prefix apps/web ci
-npm --prefix apps/web run test:e2e
+pnpm --dir apps/web install --frozen-lockfile
+pnpm --dir apps/web test:e2e
 ```
 
-首次使用需在 `apps/web` 下执行 `npx playwright install chromium`。浏览器使用模拟地图 SDK、SSE 和 HTTP fixture；未知 `/api/` 请求会使测试失败。测试失败 trace 位于 `apps/web/test-results/`。
+首次使用需执行 `pnpm --dir apps/web exec playwright install chromium`。浏览器使用模拟地图 SDK、SSE 和 HTTP fixture；未知 `/api/` 请求会使测试失败。测试失败 trace 位于 `apps/web/test-results/`。
 
 `.github/workflows/evaluation-checks.yml` 为相关 PR 和手动运行配置了后端、浏览器检查，并保留报告 14 天；不需要模型或地图密钥。本次仅新增工作流文件，未推送或运行远端 CI。
 
