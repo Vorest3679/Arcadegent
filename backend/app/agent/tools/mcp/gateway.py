@@ -33,10 +33,11 @@ from app.agent.tools.mcp.models import (
     MCPToolDescriptor,
 )
 from app.agent.tools.schemas import load_json_schema
-from app.infra.observability.logger import get_logger, log_ref
+from app.infra.observability.logger import get_logger, log_public_label, log_ref
 from app.protocol.messages import GeoPoint, Location, RouteSummaryDto
 
 logger = get_logger(__name__)
+_PUBLIC_SOURCE_TYPES = frozenset({"http", "stdio", "sse", "streamable-http", "script", "string", "config"})
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -310,18 +311,18 @@ class MCPToolGateway:
                 state.selected_route_tool = pick_route_tool(config=config, descriptors=discovered)
                 state.discovered = True
                 logger.info(
-                    "mcp.discovery server_ref=%s source_ref=%s tool_count=%s has_route_tool=%s",
+                    "mcp.discovery server_ref=%s source_type=%s tool_count=%s has_route_tool=%s",
                     log_ref(server_name),
-                    log_ref(state.source_type),
+                    log_public_label(state.source_type, _PUBLIC_SOURCE_TYPES),
                     len(state.available_tools),
                     state.selected_route_tool is not None,
                 )
             except Exception as exc:  # pragma: no cover - exercised by integration/network failures
                 state.last_error = str(exc)
                 logger.warning(
-                    "mcp.discovery.failed server_ref=%s source_ref=%s exception_type=%s",
+                    "mcp.discovery.failed server_ref=%s source_type=%s exception_type=%s",
                     log_ref(server_name),
-                    log_ref(state.source_type),
+                    log_public_label(state.source_type, _PUBLIC_SOURCE_TYPES),
                     type(exc).__name__,
                 )
 

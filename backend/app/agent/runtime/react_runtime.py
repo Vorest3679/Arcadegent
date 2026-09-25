@@ -28,7 +28,7 @@ from app.agent.runtime.session_state import (
 from app.infra.db.protocols import SessionStateRepository
 from app.agent.subagents.subagent_builder import SubAgentBuilder, SubAgentProfile
 from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
-from app.infra.observability.logger import get_logger, log_ref
+from app.infra.observability.logger import get_logger, log_exception_frames, log_ref
 from app.protocol.messages import (
     ChatRequest,
     ChatResponse,
@@ -199,9 +199,10 @@ class ReactRuntime:
                 },
             )
             logger.error(
-                "chat.failed session_ref=%s exception_type=%s",
+                "chat.failed session_ref=%s exception_type=%s app_frames=%s",
                 log_ref(session_id),
                 type(exc).__name__,
+                log_exception_frames(exc),
             )
             raise
         finally:
@@ -825,7 +826,7 @@ class ReactRuntime:
                     log_ref(worker_name),
                     log_ref(run_id),
                     step,
-                    bool(failed_error),
+                    True,
                 )
                 break
 

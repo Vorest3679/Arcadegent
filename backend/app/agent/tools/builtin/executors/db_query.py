@@ -224,9 +224,17 @@ def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]
     )
     rows, removed_outliers = _apply_geo_outlier_filter(rows, origin_lng, origin_lat)
     if removed_outliers:
+        sample = []
+        for row, distance_km in removed_outliers[:5]:
+            source_id = row.get("source_id")
+            sample.append({
+                "source_id": source_id if type(source_id) is int else None,
+                "distance_km": round(distance_km, 1),
+            })
         logger.info(
-            "db_query_tool.geo_outliers removed=%s",
+            "db_query_tool.geo_outliers removed=%s sample=%s",
             len(removed_outliers),
+            sample,
         )
     return {
         "shops": rows,

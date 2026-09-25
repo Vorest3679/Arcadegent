@@ -9,10 +9,16 @@ logger = get_logger(__name__)
 
 
 async def on_startup(container: AppContainer) -> None:
-    container.store.health()
+    stats = container.store.health()
     await container.tool_registry.refresh_tools()
     providers = container.tool_registry.provider_health()
-    logger.info("Data store loaded")
+    counts = {}
+    if isinstance(stats, dict):
+        for key in ("total_lines", "loaded_rows", "bad_lines"):
+            value = stats.get(key)
+            if type(value) is int:
+                counts[key] = value
+    logger.info("Data store loaded: counts=%s", counts)
     logger.info("Tool provider status: provider_count=%s", len(providers))
 
 

@@ -8,7 +8,7 @@ import asyncio
 from threading import Lock
 from uuid import uuid4
 
-from app.infra.observability.logger import get_logger, log_ref
+from app.infra.observability.logger import get_logger, log_exception_frames, log_ref
 from app.agent.runtime.react_runtime import ReactRuntime
 from app.agent.runtime.session_state import SessionOwnershipError
 from app.protocol.messages import ChatRequest, ChatResponse
@@ -90,7 +90,12 @@ class Orchestrator:
         try:
             await self._react_runtime.run_chat(request)
         except Exception as exc:
-            logger.error("chat.background.failed session_ref=%s exception_type=%s", log_ref(session_id), type(exc).__name__)
+            logger.error(
+                "chat.background.failed session_ref=%s exception_type=%s app_frames=%s",
+                log_ref(session_id),
+                type(exc).__name__,
+                log_exception_frames(exc),
+            )
         finally:
             self._release_session(session_id)
             with self._lock:
