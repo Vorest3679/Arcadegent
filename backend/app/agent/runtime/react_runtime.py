@@ -28,7 +28,7 @@ from app.agent.runtime.session_state import (
 from app.infra.db.protocols import SessionStateRepository
 from app.agent.subagents.subagent_builder import SubAgentBuilder, SubAgentProfile
 from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
-from app.infra.observability.logger import get_logger
+from app.infra.observability.logger import get_logger, log_ref
 from app.protocol.messages import (
     ChatRequest,
     ChatResponse,
@@ -62,7 +62,7 @@ def _normalize_intent(raw: str | None) -> IntentType:
 
 
 def _extract_keyword(message: str) -> str:
-    """Heuristic keyword extraction for working memory population and logging."""
+    """Heuristic keyword extraction for working memory population."""
     text = message.strip()
     if not text:
         return ""
@@ -198,10 +198,10 @@ class ReactRuntime:
                     "active_subagent": state.active_subagent,
                 },
             )
-            logger.exception(
-                "chat.failed session_id=%s active_subagent=%s",
-                session_id,
-                state.active_subagent,
+            logger.error(
+                "chat.failed session_ref=%s exception_type=%s",
+                log_ref(session_id),
+                type(exc).__name__,
             )
             raise
         finally:
@@ -241,12 +241,11 @@ class ReactRuntime:
             state.working_memory["last_shop_id"] = request.shop_id
         state.working_memory["keyword"] = request.keyword or _extract_keyword(request.message)
         logger.info(
-            "chat.start session_id=%s turn_index=%s intent=%s keyword=%s message=%s",
-            session_id,
+            "chat.start session_ref=%s turn_index=%s intent=%s message_chars=%s",
+            log_ref(session_id),
             state.turn_index,
-            state.intent,
-            _short(str(state.working_memory.get("keyword") or ""), limit=48),
-            _short(request.message, limit=140),
+            _normalize_intent(state.intent),
+            len(request.message),
         )
 
         # Persist the user turn and session.started before the first cancellable
@@ -287,9 +286,9 @@ class ReactRuntime:
         reply_source = "model"
         if not final_text:
             logger.warning(
-                "chat.fallback session_id=%s reason=empty_model_output last_error=%s",
-                session_id,
-                _short(str(state.working_memory.get("last_error") or ""), limit=180),
+                "chat.fallback session_ref=%s reason=empty_model_output has_last_error=%s",
+                log_ref(session_id),
+                bool(state.working_memory.get("last_error")),
             )
             final_text = self._fallback_reply(state, request)
             reply_source = "fallback"
@@ -340,11 +339,11 @@ class ReactRuntime:
             },
         )
         logger.info(
-            "chat.done session_id=%s intent=%s shops=%s reply=%s",
-            session_id,
+            "chat.done session_ref=%s intent=%s shops=%s reply_chars=%s",
+            log_ref(session_id),
             _normalize_intent(state.intent),
             len(self._memory_shops(state.working_memory)),
-            _short(final_text, limit=160),
+            len(final_text),
         )
         return response
 
@@ -397,11 +396,11 @@ class ReactRuntime:
                 subagent=profile,
             )
             logger.debug(
-                "chat.context session_id=%s step=%s subagent=%s allowed_tools=%s message_count=%s",
-                session_id,
+                "chat.context session_ref=%s step=%s subagent_ref=%s allowed_tool_count=%s message_count=%s",
+                log_ref(session_id),
                 step,
-                state.active_subagent,
-                profile.allowed_tools,
+                log_ref(state.active_subagent),
+                len(profile.allowed_tools),
                 len(context.messages),
             )
             model_response = await self._provider_adapter.complete(
@@ -424,10 +423,10 @@ class ReactRuntime:
             if model_response.response_id:
                 state.previous_response_id = model_response.response_id
             logger.info(
-                "chat.step session_id=%s step=%s subagent=%s tool_calls=%s has_text=%s",
-                session_id,
+                "chat.step session_ref=%s step=%s subagent_ref=%s tool_calls=%s has_text=%s",
+                log_ref(session_id),
                 step,
-                state.active_subagent,
+                log_ref(state.active_subagent),
                 len(model_response.tool_calls),
                 bool(model_response.text),
             )
@@ -440,10 +439,10 @@ class ReactRuntime:
                     "source": "model",
                 }
                 logger.warning(
-                    "chat.model_error session_id=%s step=%s error=%s",
-                    session_id,
+                    "chat.model_error session_ref=%s step=%s error_ref=%s",
+                    log_ref(session_id),
                     step,
-                    _short(str(model_error.get("message") or ""), limit=200),
+                    log_ref(str(model_error.get("type") or "unknown")),
                 )
                 break
 
@@ -615,12 +614,11 @@ class ReactRuntime:
             }
             if preparation_error is not None:
                 logger.warning(
-                    "tool.prepare_failed session_id=%s tool=%s call_id=%s agent=%s error=%s",
-                    session_id,
-                    call.name,
-                    call.call_id,
-                    profile.name,
-                    _short(preparation_error, limit=200),
+                    "tool.prepare_failed session_ref=%s tool_ref=%s call_ref=%s agent_ref=%s",
+                    log_ref(session_id),
+                    log_ref(call.name),
+                    log_ref(call.call_id),
+                    log_ref(profile.name),
                 )
                 result = ToolExecutionResult(
                     call_id=call.call_id,
@@ -646,20 +644,20 @@ class ReactRuntime:
                 )
                 continue
             logger.info(
-                "tool.call session_id=%s tool=%s call_id=%s agent=%s args=%s",
-                session_id,
-                call.name,
-                call.call_id,
-                profile.name,
-                _short(json.dumps(prepared_args, ensure_ascii=False), limit=220),
+                "tool.call session_ref=%s tool_ref=%s call_ref=%s agent_ref=%s arg_count=%s",
+                log_ref(session_id),
+                log_ref(call.name),
+                log_ref(call.call_id),
+                log_ref(profile.name),
+                len(prepared_args),
             )
             if hydrated_fields:
                 logger.debug(
-                    "tool.call.hydrated session_id=%s tool=%s call_id=%s fields=%s",
-                    session_id,
-                    call.name,
-                    call.call_id,
-                    hydrated_fields,
+                    "tool.call.hydrated session_ref=%s tool_ref=%s call_ref=%s field_count=%s",
+                    log_ref(session_id),
+                    log_ref(call.name),
+                    log_ref(call.call_id),
+                    len(hydrated_fields),
                 )
             with bind_skill_execution(profile.name, session_state.skill_execution):
                 result = await self._tool_registry.execute(
@@ -777,12 +775,12 @@ class ReactRuntime:
                 subagent=worker_profile,
             )
             logger.debug(
-                "worker.context session_id=%s worker=%s run_id=%s step=%s allowed_tools=%s message_count=%s",
-                session_id,
-                worker_name,
-                run_id,
+                "worker.context session_ref=%s worker_ref=%s run_ref=%s step=%s allowed_tool_count=%s message_count=%s",
+                log_ref(session_id),
+                log_ref(worker_name),
+                log_ref(run_id),
                 step,
-                worker_profile.allowed_tools,
+                len(worker_profile.allowed_tools),
                 len(context.messages),
             )
             model_response = await self._provider_adapter.complete(
@@ -807,10 +805,10 @@ class ReactRuntime:
             if model_response.response_id:
                 worker_state.previous_response_id = model_response.response_id
             logger.info(
-                "worker.step session_id=%s worker=%s run_id=%s step=%s tool_calls=%s has_text=%s",
-                session_id,
-                worker_name,
-                run_id,
+                "worker.step session_ref=%s worker_ref=%s run_ref=%s step=%s tool_calls=%s has_text=%s",
+                log_ref(session_id),
+                log_ref(worker_name),
+                log_ref(run_id),
                 step,
                 len(model_response.tool_calls),
                 bool(model_response.text),
@@ -822,12 +820,12 @@ class ReactRuntime:
                     limit=240,
                 )
                 logger.warning(
-                    "worker.model_error session_id=%s worker=%s run_id=%s step=%s error=%s",
-                    session_id,
-                    worker_name,
-                    run_id,
+                    "worker.model_error session_ref=%s worker_ref=%s run_ref=%s step=%s has_error=%s",
+                    log_ref(session_id),
+                    log_ref(worker_name),
+                    log_ref(run_id),
                     step,
-                    failed_error,
+                    bool(failed_error),
                 )
                 break
 
@@ -943,10 +941,10 @@ class ReactRuntime:
                 self._replay_buffer.append(session_id, "navigation.route_ready", route)
             self._replay_buffer.append(session_id, "tool.completed", payload)
             logger.info(
-                "tool.completed session_id=%s tool=%s agent=%s",
-                session_id,
-                result.tool_name,
-                agent_name,
+                "tool.completed session_ref=%s tool_ref=%s agent_ref=%s",
+                log_ref(session_id),
+                log_ref(result.tool_name),
+                log_ref(agent_name),
             )
         else:
             error_message = result.error_message or "tool execution failed"
@@ -962,11 +960,10 @@ class ReactRuntime:
                 },
             )
             logger.warning(
-                "tool.failed session_id=%s tool=%s agent=%s error=%s",
-                session_id,
-                result.tool_name,
-                agent_name,
-                _short(error_message, limit=160),
+                "tool.failed session_ref=%s tool_ref=%s agent_ref=%s",
+                log_ref(session_id),
+                log_ref(result.tool_name),
+                log_ref(agent_name),
             )
 
         self._append_turn(

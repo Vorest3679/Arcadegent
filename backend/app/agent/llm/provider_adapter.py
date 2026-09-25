@@ -12,7 +12,7 @@ from uuid import uuid4
 import httpx
 
 from app.agent.llm.llm_config import LLMConfig
-from app.infra.observability.logger import get_logger
+from app.infra.observability.logger import get_logger, log_ref
 
 logger = get_logger(__name__)
 
@@ -496,17 +496,15 @@ class ProviderAdapter:
         tools: list[dict[str, Any]],
         protocol: str,
     ) -> None:
-        tool_names = self._tool_names(tools)
-        message_preview = self._message_preview(messages)
         logger.info(
-            "llm.request provider_pref=%s model=%s subagent=%s tool_choice=%s tools=%s messages=%s instruction_preview=%s",
+            "llm.request provider_pref=%s model_ref=%s subagent_ref=%s tool_choice_ref=%s tool_count=%s message_count=%s instruction_chars=%s",
             protocol,
-            self._config.model,
-            active_subagent or "-",
-            tool_choice,
-            tool_names,
-            message_preview,
-            self._short(instructions, limit=120),
+            log_ref(self._config.model),
+            log_ref(active_subagent),
+            log_ref(tool_choice),
+            len(tools),
+            len(messages),
+            len(instructions),
         )
 
     def _log_response_summary(
@@ -516,49 +514,14 @@ class ProviderAdapter:
         response: ModelResponse,
     ) -> None:
         logger.info(
-            "llm.response provider=%s response_id=%s status=%s tool_calls=%s has_text=%s reasoning_items=%s usage=%s error=%s tool_names=%s text_preview=%s",
+            "llm.response provider=%s response_ref=%s completed=%s tool_calls=%s has_text=%s reasoning_items=%s total_tokens=%s has_error=%s text_chars=%s",
             provider,
-            response.response_id,
-            response.status,
+            log_ref(response.response_id),
+            response.status == "completed",
             len(response.tool_calls),
             bool(response.text),
             len(response.reasoning_items),
-            {key: value for key, value in response.usage.items() if value is not None},
-            response.error,
-            [call.name for call in response.tool_calls],
-            self._short(response.text, limit=120),
+            response.usage.get("total_tokens") if isinstance(response.usage.get("total_tokens"), int) else None,
+            response.error is not None,
+            len(response.text or ""),
         )
-
-    def _tool_names(self, tools: list[dict[str, Any]]) -> list[str]:
-        names: list[str] = []
-        for tool in tools:
-            if not isinstance(tool, dict):
-                continue
-            if tool.get("type") != "function":
-                continue
-            function = tool.get("function")
-            if not isinstance(function, dict):
-                continue
-            name = function.get("name")
-            if isinstance(name, str) and name:
-                names.append(name)
-        return names
-
-    def _message_preview(self, messages: list[dict[str, Any]]) -> list[str]:
-        rows: list[str] = []
-        for item in messages[-4:]:
-            if not isinstance(item, dict):
-                continue
-            role = str(item.get("role") or "-")
-            content = item.get("content")
-            content_text = content if isinstance(content, str) else str(content)
-            rows.append(f"{role}:{self._short(content_text, limit=60)}")
-        return rows
-
-    def _short(self, value: str | None, *, limit: int = 120) -> str:
-        if not isinstance(value, str):
-            return ""
-        compact = " ".join(value.split())
-        if len(compact) <= limit:
-            return compact
-        return compact[: max(1, limit - 3)] + "..."

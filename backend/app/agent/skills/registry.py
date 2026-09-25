@@ -196,7 +196,7 @@ class SkillRegistry:
                         metadata, _ = parse_skill(text, child.name)
                     except SkillError as exc:
                         # Never log file contents, filesystem paths or YAML parser messages.
-                        logger.warning("skill_skipped root_index=%s reason=%s", root_index, str(exc))
+                        logger.warning("skill_skipped root_index=%s exception_type=%s", root_index, type(exc).__name__)
                         continue
                     name = metadata["name"]
                     if name in records:

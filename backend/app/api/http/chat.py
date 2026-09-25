@@ -8,7 +8,7 @@ from app.agent.runtime.orchestrator import SessionAlreadyRunningError, SessionOw
 from app.agent.runtime.session_state import AgentSessionState, AgentTurn, get_working_memory_artifact
 from app.api.deps import get_container
 from app.core.container import AppContainer
-from app.infra.observability.logger import get_logger
+from app.infra.observability.logger import get_logger, log_ref
 from app.protocol.messages import (
     ChatHistoryTurnDto,
     ChatRequest,
@@ -190,11 +190,11 @@ async def chat(
     container: AppContainer = Depends(get_container),
 ) -> ChatResponse:
     logger.info(
-        "api.chat.request session_id=%s intent=%s page_size=%s message=%s",
-        request.session_id or "new",
+        "api.chat.request session_ref=%s intent=%s page_size=%s message_chars=%s",
+        log_ref(request.session_id),
         request.intent or "auto",
         request.page_size,
-        " ".join(request.message.split())[:160],
+        len(request.message),
     )
     try:
         response = await container.orchestrator.run_chat(request)
@@ -203,8 +203,8 @@ async def chat(
     except SessionOwnershipError as exc:
         raise HTTPException(status_code=404, detail=f"session '{exc.session_id}' not found") from exc
     logger.info(
-        "api.chat.response session_id=%s intent=%s shops=%s",
-        response.session_id,
+        "api.chat.response session_ref=%s intent=%s shops=%s",
+        log_ref(response.session_id),
         response.intent,
         len(response.shops),
     )
@@ -221,11 +221,11 @@ async def dispatch_chat_session(
     container: AppContainer = Depends(get_container),
 ) -> ChatSessionDispatchDto:
     logger.info(
-        "api.chat.dispatch session_id=%s intent=%s page_size=%s message=%s",
-        request.session_id or "new",
+        "api.chat.dispatch session_ref=%s intent=%s page_size=%s message_chars=%s",
+        log_ref(request.session_id),
         request.intent or "auto",
         request.page_size,
-        " ".join(request.message.split())[:160],
+        len(request.message),
     )
     try:
         session_id = await container.orchestrator.dispatch_chat(request)

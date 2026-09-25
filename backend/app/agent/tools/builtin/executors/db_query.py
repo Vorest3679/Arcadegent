@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.agent.tools.builtin.executor_utils import as_region_code_or_name, short_text
+from app.agent.tools.builtin.executor_utils import as_region_code_or_name
 from app.agent.tools.builtin.geo_outlier_filter import filter_geo_outliers, row_coordinates
 from app.agent.tools.builtin.provider import BuiltinToolContext
 from app.infra.observability.logger import get_logger
@@ -211,40 +211,22 @@ def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]
         origin_coord_system=origin_coord_system,
     )
     logger.info(
-        "db_query_tool.filters keyword=%s shop_name=%s title_name=%s province_code=%s city_code=%s county_code=%s province_name=%s city_name=%s county_name=%s has_arcades=%s sort_by=%s sort_order=%s sort_title_name=%s origin_lng=%s origin_lat=%s origin_coord_system=%s page=%s page_size=%s total=%s",
-        short_text(args.get("keyword")),
-        short_text(args.get("shop_name")),
-        short_text(args.get("title_name")),
-        province_code,
-        city_code,
-        county_code,
-        province_name,
-        city_name,
-        county_name,
-        args.get("has_arcades"),
-        sort_by,
-        sort_order,
-        short_text(sort_title_name),
-        origin_lng,
-        origin_lat,
-        origin_coord_system,
-        args["page"],
-        args["page_size"],
+        "db_query_tool.filters has_keyword=%s has_shop_name=%s has_title_name=%s has_region=%s has_sort=%s has_origin=%s page=%s page_size=%s total=%s",
+        bool(args.get("keyword")),
+        bool(args.get("shop_name")),
+        bool(args.get("title_name")),
+        bool(province_code or city_code or county_code or province_name or city_name or county_name),
+        bool(sort_by or sort_order or sort_title_name),
+        origin_lng is not None and origin_lat is not None,
+        int(args["page"]),
+        int(args["page_size"]),
         total,
     )
     rows, removed_outliers = _apply_geo_outlier_filter(rows, origin_lng, origin_lat)
     if removed_outliers:
         logger.info(
-            "db_query_tool.geo_outliers removed=%s details=%s",
+            "db_query_tool.geo_outliers removed=%s",
             len(removed_outliers),
-            [
-                {
-                    "source_id": row.get("source_id"),
-                    "name": short_text(str(row.get("name") or "")),
-                    "distance_km": round(distance_km, 1),
-                }
-                for row, distance_km in removed_outliers
-            ],
         )
     return {
         "shops": rows,

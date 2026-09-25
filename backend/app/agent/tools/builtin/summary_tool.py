@@ -131,13 +131,12 @@ class SummaryTool:
         sort_title_name: str | None = None,
     ) -> str:
         logger.info(
-            "summary_tool.search keyword=%s total=%s shops=%s sort_by=%s sort_order=%s sort_title_name=%s",
-            " ".join((keyword or "").split())[:64],
+            "summary_tool.search has_keyword=%s total=%s shops=%s has_sort=%s has_sort_title=%s",
+            bool(keyword),
             total,
             len(shops),
-            sort_by,
-            sort_order,
-            (sort_title_name or "").strip()[:64],
+            bool(sort_by or sort_order),
+            bool(sort_title_name),
         )
 
         if (

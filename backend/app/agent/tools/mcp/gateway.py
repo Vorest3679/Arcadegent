@@ -19,7 +19,6 @@ from app.agent.tools.mcp.discovery import (
     infer_source_type,
     mask_url,
     pick_route_tool,
-    short,
     utc_now_iso,
 )
 from app.agent.tools.mcp.dispatcher import (
@@ -34,7 +33,7 @@ from app.agent.tools.mcp.models import (
     MCPToolDescriptor,
 )
 from app.agent.tools.schemas import load_json_schema
-from app.infra.observability.logger import get_logger
+from app.infra.observability.logger import get_logger, log_ref
 from app.protocol.messages import GeoPoint, Location, RouteSummaryDto
 
 logger = get_logger(__name__)
@@ -311,19 +310,19 @@ class MCPToolGateway:
                 state.selected_route_tool = pick_route_tool(config=config, descriptors=discovered)
                 state.discovered = True
                 logger.info(
-                    "mcp.discovery server=%s source_type=%s tools=%s selected_route_tool=%s",
-                    server_name,
-                    state.source_type,
-                    state.available_tools,
-                    state.selected_route_tool,
+                    "mcp.discovery server_ref=%s source_ref=%s tool_count=%s has_route_tool=%s",
+                    log_ref(server_name),
+                    log_ref(state.source_type),
+                    len(state.available_tools),
+                    state.selected_route_tool is not None,
                 )
             except Exception as exc:  # pragma: no cover - exercised by integration/network failures
                 state.last_error = str(exc)
                 logger.warning(
-                    "mcp.discovery.failed server=%s source_type=%s error=%s",
-                    server_name,
-                    state.source_type,
-                    short(str(exc)),
+                    "mcp.discovery.failed server_ref=%s source_ref=%s exception_type=%s",
+                    log_ref(server_name),
+                    log_ref(state.source_type),
+                    type(exc).__name__,
                 )
 
         self._tools = descriptors
@@ -427,9 +426,9 @@ class MCPToolGateway:
         result = await self.execute(tool_name=descriptor.local_name, raw_arguments=arguments)
         if result.status != "completed":
             logger.warning(
-                "mcp.route.failed tool=%s error=%s",
-                descriptor.local_name,
-                short(result.error_message),
+                "mcp.route.failed tool_ref=%s has_error=%s",
+                log_ref(descriptor.local_name),
+                bool(result.error_message),
             )
             return None
         route_payload = result.output.get("route")

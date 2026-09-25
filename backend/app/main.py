@@ -19,7 +19,7 @@ from app.core.container import build_container
 from app.core.lifecycle import on_shutdown, on_startup
 from app.infra.observability.logger import get_logger, setup_logging
 
-access_logger = get_logger("uvicorn.access")
+access_logger = get_logger("app.access")
 logger = get_logger(__name__)
 
 # 装配应用：配置、日志、依赖容器、生命周期、路由
@@ -52,10 +52,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     logger.info(
-        "CORS configured: origins=%s, arcade_data_source=%s, supabase_url=%s",
-        settings.cors_allow_origins,
+        "CORS configured: origin_count=%s arcade_data_source=%s supabase_configured=%s",
+        len([origin for origin in settings.cors_allow_origins.split(",") if origin.strip()]),
         settings.arcade_data_source,
-        "<set>" if settings.supabase_url else "<unset>",
+        bool(settings.supabase_url),
     )
 
     @app.middleware("http")
@@ -68,13 +68,11 @@ def create_app() -> FastAPI:
             return response
         finally:
             duration_ms = (perf_counter() - start) * 1000
-            query = f"?{request.url.query}" if request.url.query else ""
-            path = f"{request.url.path}{query}"
-            client_ip = request.client.host if request.client else "-"
+            route = request.scope.get("route")
+            path = getattr(route, "path", "<unmatched>")
             access_logger.info(
-                '%s "%s %s" %s %.2fms',
-                client_ip,
-                request.method,
+                '"%s %s" %s %.2fms',
+                request.method if request.method in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"} else "OTHER",
                 path,
                 status_code,
                 duration_ms,
