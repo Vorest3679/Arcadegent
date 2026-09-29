@@ -1,5 +1,7 @@
 # Arcadegent Docs
 
+[简体中文] · [English](en/README.md) · [日本語](ja/README.md)
+
 这里是公开仓库的文档入口。对外只公开两类文档：
 
 - `guidings/`：面向使用和扩展的指南。
