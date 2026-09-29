@@ -49,12 +49,7 @@ docker-compose.yml               本地或服务器 compose 编排
 
 ## 文档入口
 
-- [Docs 总览](docs/README.md)
-- [内建工具动态注册表写法](docs/guidings/builtin-tool-manifest-guide.md)
-- [Agent 地图结果渲染设计](docs/dev-details/agent-map-artifacts-rendering.md)
-- [Agent context payload 设计](docs/dev-details/agent-context-payload-design.md)
-- [动态工具注册实现说明](docs/dev-details/dynamic-tool-registry-implementation.md)
-- [浏览器定位与逆地理编码](docs/dev-details/browser-location-reverse-geocoding.md)
+[Docs 总览](docs/README.md) 按使用指南和工程细节分类列出公开文档。实施计划和评测报告留在本地归档，不进入公开文档入口。
 
 ## 环境要求
 
@@ -431,7 +426,7 @@ Agent 配置分为几层：
 - Builtin tool schema：`backend/app/agent/tools/builtin/schemas/*.json`
 - MCP server 配置：`backend/app/agent/tools/mcp/servers/*.json`
 
-Skill 使用标准 Agent Skills 格式，通过目录自动发现，正文和引用文本按需加载。新增技能无需修改注册代码，配置与迁移说明见 [Agent Skills 指南](docs/guidings/agent-skills-guide.md)。
+Skill 使用标准 Agent Skills 格式，通过目录自动发现，正文和引用文本按需加载。新增技能无需修改注册代码，配置与迁移说明见 [Agent Skills 指南](docs/guidings/技能配置与扩展指南.md)。
 
 当前主流程是 `main_agent` 识别意图并调度 worker。`search_worker` 负责机厅查询，`navigation_worker` 负责目标解析和路线规划，最终再由 summary 流程生成用户可见回复。
 

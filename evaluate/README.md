@@ -12,7 +12,7 @@ evaluate/.venv/bin/python -m evaluate run
 
 ## 确定性测试
 
-这里实现 `docs/plans/vertical-evaluation-workbench.md` 的离线回归入口与证据输出，复用生产 `ProviderAdapter`、`ReactRuntime`、JSONL 查询仓库和在线路线工具。合成数据不对应真实商户，不使用生产数据或模型密钥。
+离线回归入口与证据输出的公开架构说明见 [评测工作台架构与实现说明](../docs/dev-details/评测工作台架构与实现.md)。实现复用生产 `ProviderAdapter`、`ReactRuntime`、JSONL 查询仓库和在线路线工具。合成数据不对应真实商户，不使用生产数据或模型密钥。
 
 ## 运行
 

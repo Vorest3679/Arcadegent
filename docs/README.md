@@ -5,25 +5,35 @@
 - `guidings/`：面向使用和扩展的指南。
 - `dev-details/`：已经落地或接近落地的工程细节。
 
-计划、issue、历史草稿、数据链路细节和迁移材料只作为本地归档，不进入公开文档入口。
+实施计划、issue、历史草稿、数据链路细节、迁移材料和评测报告只作为本地归档，不进入公开文档入口。
 
-## 推荐阅读顺序
+## 从这里开始
 
-1. [项目 README](../README.md)：安装、运行、部署和 API 入口。
-2. [Builtin Tool Manifest 指南](./guidings/builtin-tool-manifest-guide.md)：新增内建工具时的 manifest / schema 写法。
-3. [Agent 地图 Artifacts 渲染说明](./dev-details/agent-map-artifacts-rendering.md)：后端 artifacts 契约与前端地图渲染。
-4. [浏览器定位与逆地理编码](./dev-details/browser-location-reverse-geocoding.md)：定位、逆地理和 agent 上下文注入链路。
-5. [Agent Context Payload Design](./dev-details/agent-context-payload-design.md)：agent 上下文 payload 的结构和约束。
-6. [动态工具注册实现说明](./dev-details/dynamic-tool-registry-implementation.md)：builtin 与 MCP 工具注册链路。
-7. [Evaluate 评测工作台架构](./dev-details/evaluation-workbench-architecture.md)：离线契约、在线模型评测、证据、判分与报告边界。
-8. [Agent Skills 配置与扩展](./guidings/agent-skills-guide.md)：标准技能格式、目录发现、按需读取和本轮上下文隔离。
-9. [Agent Skills 资源目录支持与扩展预留](./dev-details/agent-skills-resource-support.md)：`scripts/`、`references/`、`assets/` 和其他资源的当前边界与后续接口预留。
+[项目 README](../README.md) 说明安装、运行、部署和 API 入口。
+
+## 使用与扩展
+
+| 文档 | 内容 |
+| --- | --- |
+| [内建工具清单编写指南](./guidings/内建工具清单编写指南.md) | 新增内建工具时的 manifest 与 schema 写法 |
+| [技能配置与扩展指南](./guidings/技能配置与扩展指南.md) | 技能格式、目录发现、按需读取与上下文隔离 |
+
+## 工程细节
+
+| 文档 | 内容 |
+| --- | --- |
+| [智能体地图结果渲染](./dev-details/智能体地图结果渲染.md) | 后端 artifacts 契约与前端地图渲染 |
+| [浏览器定位与逆地理编码](./dev-details/浏览器定位与逆地理编码.md) | 定位、逆地理与 Agent 上下文注入 |
+| [智能体上下文载荷设计](./dev-details/智能体上下文载荷设计.md) | Agent 上下文 payload 结构与约束 |
+| [动态工具注册实现说明](./dev-details/动态工具注册实现.md) | 内建工具与 MCP 工具注册链路 |
+| [技能资源目录支持](./dev-details/技能资源目录支持.md) | 技能资源目录能力与扩展边界 |
+| [评测工作台架构与实现](./dev-details/评测工作台架构与实现.md) | 离线契约、在线评测、证据与报告边界 |
 
 ## 公开边界
 
 以下内容不要写入公开文档或提交到仓库：
 
-- 真实机厅数据、抓取产物、运行缓存、QA 报告和数据库导出。
+- 真实机厅数据、抓取产物、运行缓存、QA/评测报告和数据库导出。
 - 生产 `.env`、API key、Supabase service role key、地图服务密钥。
 - 可反推出私有数据规模、抓取批次或生产库结构的细节。
 - 计划草稿、issue 讨论、上线清单、临时调试输出、截图、浏览器 traces 和本机绝对路径。
@@ -35,4 +45,4 @@
 1. README 只保留用户真正需要的安装、运行、部署和排障信息。
 2. 新增对外指南放入 `guidings/`。
 3. 新增对外工程细节放入 `dev-details/`。
-4. 含真实数据路径、抓取批次、数据库迁移、计划或 issue 讨论的材料只放本地归档。
+4. 含真实数据路径、抓取批次、数据库迁移、计划、issue 讨论或评测结果的材料只放本地归档。
