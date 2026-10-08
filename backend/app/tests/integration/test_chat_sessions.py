@@ -298,9 +298,9 @@ def test_chat_dispatch_rejects_duplicate_running_session(tmp_path: Path) -> None
     runtime = client.app.state.container.react_runtime
     original_run_chat = runtime.run_chat
 
-    async def slow_run_chat(request):
+    async def slow_run_chat(request, *, events):
         await asyncio.sleep(0.2)
-        return await original_run_chat(request)
+        return await original_run_chat(request, events=events)
 
     runtime.run_chat = slow_run_chat  # type: ignore[method-assign]
 

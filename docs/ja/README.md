@@ -22,6 +22,7 @@
 | --- | --- |
 | [Agent の地図結果を描画する](dev-details/智能体地图结果渲染.md) | バックエンド artifact 契約とフロントエンド地図描画 |
 | [ブラウザー位置情報と逆ジオコーディング](dev-details/浏览器定位与逆地理编码.md) | 位置取得、逆ジオコーディング、Agent コンテキスト注入 |
+| [セッション run のライフサイクルと SSE](dev-details/会话运行生命周期与SSE.md) | run の受付・キャンセル・終了と SSE の再送・終了条件 |
 | [Agent コンテキスト payload の設計](dev-details/智能体上下文载荷设计.md) | Agent コンテキスト payload の構造と制約 |
 | [動的ツール登録の実装記録](dev-details/动态工具注册实现.md) | 組み込みツールと MCP ツールの登録経路 |
 | [スキルのリソースディレクトリ対応](dev-details/技能资源目录支持.md) | スキルのリソース directory 機能と拡張境界 |

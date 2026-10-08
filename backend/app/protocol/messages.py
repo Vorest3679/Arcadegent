@@ -1,10 +1,12 @@
-"""Protocol layer: request/response DTOs shared by API and orchestrator modules."""
+"""Protocol layer: request/response DTOs shared by API, runtime and service modules."""
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+from app.session.models import RunStatus
 
 
 IntentType = Literal["search_nearby", "navigate", "search"]
@@ -190,7 +192,7 @@ class RouteSummaryDto(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """Chat entrypoint request used by the orchestrator."""
+    """Chat entrypoint request accepted by the chat API and runtime."""
 
     session_id: str | None = None
     client_id: str | None = Field(default=None, min_length=1, max_length=128)
@@ -209,6 +211,7 @@ class ChatResponse(BaseModel):
     """Chat entrypoint response DTO."""
 
     session_id: str
+    run_id: str | None = None
     intent: IntentType
     reply: str
     shops: list[ArcadeShopSummaryDto] = Field(default_factory=list)
@@ -219,7 +222,15 @@ class ChatSessionDispatchDto(BaseModel):
     """Accepted async chat dispatch response."""
 
     session_id: str
+    run_id: str
     status: ChatSessionStatusType
+
+
+class ChatRunDto(BaseModel):
+    """Management state of a session's current or latest run."""
+
+    run_id: str
+    status: RunStatus
 
 
 class ChatTurnMapArtifactsDto(BaseModel):
@@ -263,6 +274,7 @@ class ChatSessionDetailDto(BaseModel):
     intent: IntentType
     active_subagent: str
     status: ChatSessionStatusType
+    current_run: ChatRunDto | None = None
     last_error: str | None = None
     reply: str | None = None
     shops: list[ArcadeShopSummaryDto] = Field(default_factory=list)

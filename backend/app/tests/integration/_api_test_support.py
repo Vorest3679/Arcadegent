@@ -144,6 +144,28 @@ def _clear_llm_env() -> None:
         os.environ.pop(name, None)
 
 
+def _stream_events(
+    client: TestClient,
+    session_id: str,
+    *,
+    run_id: str | None = None,
+    after_id: int | None = None,
+) -> list[dict]:
+    """Read a finished run's events through the SSE endpoint, parsed from data lines."""
+    params: dict[str, str | int] = {}
+    if run_id:
+        params["run_id"] = run_id
+    if after_id is not None:
+        params["last_event_id"] = after_id
+    response = client.get(f"/api/stream/{session_id}", params=params)
+    assert response.status_code == 200
+    return [
+        json.loads(line[len("data: "):])
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+
+
 def _build_client(
     tmp_path: Path,
     *,

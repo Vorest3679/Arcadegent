@@ -8,7 +8,7 @@ QQ群：1091316877
 ## 功能概览
 
 - Agent 对话：支持机厅搜索、附近推荐、导航路线三类意图，前端默认使用异步会话派发和 SSE 实时事件流。
-- 实时过程展示：会话会推送 `session.started`、`subagent.changed`、`tool.*`、`navigation.route_ready`、`assistant.token`、`assistant.completed` 等事件。
+- 实时过程展示：会话会推送 `session.started`、`subagent.changed`、`tool.*`、`navigation.route_ready`、`assistant.token`、`assistant.completed` 等事件；每次派发对应一个 run，流中的 `run.state` 控制事件标记运行状态，详见 [会话运行生命周期与 SSE](docs/dev-details/会话运行生命周期与SSE.md)。
 - 地图化结果：聊天路线和机厅浏览都能渲染高德地图点位、路线卡片，并提供 Web 高德查看和唤起高德导航链接。
 - 机厅浏览器：支持机厅名称、地区级联、省市区筛选、只看有机台、更新时间/机种数/指定机种机台数排序、分页和门店详情。
 - 会话管理：支持历史会话列表、详情加载、运行中重连和删除会话。
@@ -406,8 +406,9 @@ SSE 事件流依赖长连接，Nginx 配置里 `/api/stream/` 已关闭 bufferin
 - `GET /api/regions/counties`：区县列表，参数 `city_code`
 - `POST /api/location/reverse-geocode`：浏览器坐标逆地理编码
 - `POST /api/chat`：同步 Agent 对话入口
-- `POST /api/chat/sessions`：异步派发 Agent 会话，前端默认使用
-- `GET /api/stream/{session_id}`：SSE 实时事件流，支持 `last_event_id` 和 `Last-Event-ID`
+- `POST /api/chat/sessions`：异步派发 Agent 会话，返回 `session_id` 与 `run_id`，前端默认使用
+- `POST /api/chat/sessions/{session_id}/cancel`：取消会话中的 run，可选参数 `run_id`
+- `GET /api/stream/{session_id}`：SSE 实时事件流，可选 `run_id`，支持 `last_event_id` 和 `Last-Event-ID`
 - `GET /api/chat/sessions`：历史会话列表
 - `GET /api/chat/sessions/{session_id}`：会话详情、历史 turns、地图 artifacts
 - `DELETE /api/chat/sessions/{session_id}`：删除会话

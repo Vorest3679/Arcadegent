@@ -5,12 +5,12 @@ import asyncio
 from time import perf_counter
 from uuid import uuid4
 
-from app.agent.events.replay_buffer import ReplayBuffer
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.session_state import AgentSessionState, _client_can_access, _client_matches_list_scope
 from app.agent.tools.mcp_gateway import MCPToolGateway
 from app.core.config import Settings
 from app.core.container import build_container
+from app.session.models import utc_now_iso
 from evaluate.config import ROOT
 
 
@@ -90,23 +90,28 @@ class RecordedProvider(ProviderAdapter):
             self.write("calls", record)
 
 
-class RecordedReplay(ReplayBuffer):
-    def __init__(self, write, attempt_id, tool_limit):
-        super().__init__()
-        self.write, self.attempt_id, self.tool_limit = write, attempt_id, tool_limit
-        self.tools = 0
+class RecordedEvents:
+    """Run publisher that records evaluation events and enforces the tool budget."""
 
-    def append(self, session_id, event_name, data=None):
+    def __init__(self, write, attempt_id, session_id, tool_limit):
+        self.write, self.attempt_id, self.session_id, self.tool_limit = write, attempt_id, session_id, tool_limit
+        self.tools = 0
+        self.next_id = 1
+
+    def publish(self, event_name, data=None, *, output_id=None):
         if event_name == "tool.started":
             if self.tools >= self.tool_limit:
                 raise BudgetExceeded("tool_budget_exhausted")
             self.tools += 1
-        event = super().append(session_id, event_name, data)
-        self.write("events", {"attempt_id": self.attempt_id, "event": event.model_dump(mode="json")})
-        return event
+        event = {"id": self.next_id, "session_id": self.session_id, "event": event_name,
+                 "at": utc_now_iso(), "data": dict(data or {})}
+        if output_id is not None:
+            event["output_id"] = output_id
+        self.next_id += 1
+        self.write("events", {"attempt_id": self.attempt_id, "event": event})
 
 
-def environment(config, model, budget, directory, attempt_id, write):
+def environment(config, model, budget, directory, attempt_id, write, session_id):
     provider = RecordedProvider(model, budget, config.per_attempt, config.interval_s, write, attempt_id)
     sessions = MemorySessions()
     app = ROOT / "backend/app"
@@ -129,7 +134,5 @@ def environment(config, model, budget, directory, attempt_id, write):
         request_timeout_seconds=1, sync_limit=0, max_workers=1)))
     container.arcade_payload_mapper = mapper
     container.react_runtime._arcade_payload_mapper = mapper
-    replay = RecordedReplay(write, attempt_id, config.max_tools)
-    container.replay_buffer = replay
-    container.react_runtime._replay_buffer = replay
-    return container, provider
+    events = RecordedEvents(write, attempt_id, session_id, config.max_tools)
+    return container, provider, events

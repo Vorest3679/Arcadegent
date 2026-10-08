@@ -1,17 +1,22 @@
-"""HTTP API layer: chat endpoint backed by orchestrator runtime."""
+"""HTTP API layer: chat endpoints backed by session runs of the chat runtime."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from app.agent.runtime.orchestrator import SessionAlreadyRunningError, SessionOwnershipError
-from app.agent.runtime.session_state import AgentSessionState, AgentTurn, get_working_memory_artifact
+from app.agent.runtime.session_state import (
+    AgentSessionState,
+    AgentTurn,
+    SessionOwnershipError,
+    get_working_memory_artifact,
+)
 from app.api.deps import get_container
 from app.core.container import AppContainer
 from app.infra.observability.logger import get_logger, log_ref
 from app.protocol.messages import (
     ChatHistoryTurnDto,
     ChatRequest,
+    ChatRunDto,
     ChatResponse,
     ChatSessionDispatchDto,
     ChatSessionDetailDto,
@@ -20,9 +25,42 @@ from app.protocol.messages import (
     ClientLocationContext,
     IntentType,
 )
+from app.session.models import (
+    RunConflictError,
+    RunNotFoundError,
+    ServiceDrainingError,
+    SessionBusyError,
+    SessionError,
+)
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = get_logger(__name__)
+
+CANCEL_REASON = "实时连接中断，当前请求已停止；再次输入会继续使用已保存的上下文。"
+
+
+def _http_error(exc: SessionError | SessionOwnershipError) -> HTTPException:
+    if isinstance(exc, SessionOwnershipError):
+        return HTTPException(status_code=404, detail=f"session '{exc.session_id}' not found")
+    if isinstance(exc, (SessionBusyError, RunConflictError)):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, RunNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, ServiceDrainingError):
+        return HTTPException(status_code=503, detail=str(exc))
+    return HTTPException(status_code=500, detail="session error")
+
+
+def _live_status(state: AgentSessionState, *, container: AppContainer):
+    """Active runs decide the shown status; otherwise the stored label is used."""
+    return "running" if container.run_manager.is_active(state.session_id) else state.status
+
+
+def _current_run(session_id: str, *, container: AppContainer) -> ChatRunDto | None:
+    record = container.run_manager.current(session_id)
+    if record is None:
+        return None
+    return ChatRunDto(run_id=record.run_id, status=record.status)
 
 
 def _normalize_intent(raw: str) -> IntentType:
@@ -111,13 +149,13 @@ def _to_turn(turn: AgentTurn, *, container: AppContainer) -> ChatHistoryTurnDto:
     )
 
 
-def _to_summary(state: AgentSessionState) -> ChatSessionSummaryDto:
+def _to_summary(state: AgentSessionState, *, container: AppContainer) -> ChatSessionSummaryDto:
     return ChatSessionSummaryDto(
         session_id=state.session_id,
         title=_build_title(state.turns),
         preview=_build_preview(state.turns),
         intent=_normalize_intent(state.intent),
-        status=state.status,
+        status=_live_status(state, container=container),
         turn_count=len(_visible_turns(state.turns)),
         created_at=state.created_at,
         updated_at=state.updated_at,
@@ -167,7 +205,8 @@ def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSess
         session_id=state.session_id,
         intent=_normalize_intent(state.intent),
         active_subagent=state.active_subagent,
-        status=state.status,
+        status=_live_status(state, container=container),
+        current_run=_current_run(state.session_id, container=container),
         last_error=state.last_error,
         reply=state.working_memory.get("reply") if isinstance(state.working_memory.get("reply"), str) else None,
         shops=shops,
@@ -197,11 +236,10 @@ async def chat(
         len(request.message),
     )
     try:
-        response = await container.orchestrator.run_chat(request)
-    except SessionAlreadyRunningError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SessionOwnershipError as exc:
-        raise HTTPException(status_code=404, detail=f"session '{exc.session_id}' not found") from exc
+        response, record = await container.chat_runs.run(request)
+    except (SessionError, SessionOwnershipError) as exc:
+        raise _http_error(exc) from exc
+    response = response.model_copy(update={"run_id": record.run_id})
     logger.info(
         "api.chat.response session_ref=%s intent=%s shops=%s",
         log_ref(response.session_id),
@@ -228,27 +266,26 @@ async def dispatch_chat_session(
         len(request.message),
     )
     try:
-        session_id = await container.orchestrator.dispatch_chat(request)
-    except SessionAlreadyRunningError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SessionOwnershipError as exc:
-        raise HTTPException(status_code=404, detail=f"session '{exc.session_id}' not found") from exc
-    return ChatSessionDispatchDto(session_id=session_id, status="running")
+        _normalized, record = container.chat_runs.dispatch(request)
+    except (SessionError, SessionOwnershipError) as exc:
+        raise _http_error(exc) from exc
+    return ChatSessionDispatchDto(session_id=record.session_id, run_id=record.run_id, status="running")
 
 
 @router.post("/chat/sessions/{session_id}/cancel", response_model=ChatSessionDetailDto)
 async def cancel_chat_session(
     session_id: str,
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
+    run_id: str | None = Query(default=None, min_length=1, max_length=64),
     container: AppContainer = Depends(get_container),
 ) -> ChatSessionDetailDto:
     session = container.session_store.get_session(session_id, client_id=client_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
-    await container.orchestrator.cancel_chat(
-        session_id,
-        reason="实时连接中断，当前请求已停止；再次输入会继续使用已保存的上下文。",
-    )
+    try:
+        await container.chat_runs.cancel(session_id, run_id=run_id, reason=CANCEL_REASON)
+    except SessionError as exc:
+        raise _http_error(exc) from exc
     updated = container.session_store.get_session(session_id, client_id=client_id)
     return _to_detail(updated or session, container=container)
 
@@ -260,7 +297,11 @@ def list_chat_sessions(
     container: AppContainer = Depends(get_container),
 ) -> list[ChatSessionSummaryDto]:
     sessions = container.session_store.list_sessions(limit=limit, client_id=client_id)
-    return [_to_summary(state) for state in sessions if state.turns or state.status == "running"]
+    return [
+        _to_summary(state, container=container)
+        for state in sessions
+        if state.turns or _live_status(state, container=container) == "running"
+    ]
 
 
 @router.get("/chat/sessions/{session_id}", response_model=ChatSessionDetailDto)
@@ -284,9 +325,10 @@ def delete_chat_session(
     session = container.session_store.get_session(session_id, client_id=client_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
-    if container.orchestrator.is_session_running(session_id):
+    if container.run_manager.is_active(session_id):
         raise HTTPException(status_code=409, detail=f"session '{session_id}' is currently running")
     deleted = container.session_store.delete_session(session_id, client_id=client_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
+    container.run_manager.forget(session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

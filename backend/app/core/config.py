@@ -85,9 +85,8 @@ class Settings:
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
     supabase_timeout_seconds: float = 8.0
-    replay_buffer_size: int = 200
+    replay_buffer_size: int = 2000
     sse_keepalive_seconds: float = 1.0
-    sse_max_wait_seconds: int = 20
     enable_provider_fallback: bool = True
     llm_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"
@@ -140,9 +139,6 @@ class Settings:
             replay_buffer_size=int(os.getenv("REPLAY_BUFFER_SIZE", str(cls.replay_buffer_size))),
             sse_keepalive_seconds=float(
                 os.getenv("SSE_KEEPALIVE_SECONDS", str(cls.sse_keepalive_seconds))
-            ),
-            sse_max_wait_seconds=int(
-                os.getenv("SSE_MAX_WAIT_SECONDS", str(cls.sse_max_wait_seconds))
             ),
             enable_provider_fallback=_env_bool(
                 "ENABLE_PROVIDER_FALLBACK", cls.enable_provider_fallback
