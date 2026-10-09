@@ -1,7 +1,7 @@
 """Streaming events and chunk collectors for OpenAI-compatible providers.
 
-Collectors turn protocol-specific stream payloads into normalized events and, once the
-stream ends, rebuild the same decoded body the non-stream endpoint would have returned,
+Collectors turn protocol-specific stream payloads into normalized events for provider_adapters,
+once the stream ends, rebuild the same decoded body the non-stream endpoint would have returned,
 so the adapter can reuse a single response parser for both modes.
 """
 
@@ -49,7 +49,11 @@ DONE_SENTINEL = "[DONE]"
 
 
 def parse_sse_line(line: str) -> tuple[str, Any] | None:
-    """Return ("done", None) / ("data", payload) / ("invalid", None); None for non-data lines."""
+    """解析一行 SSE 数据，区分结束标记、有效载荷与非法数据。
+
+    返回 ("done", None)、("data", payload) 或 ("invalid", None)。
+    非 data 行和空数据返回 None；有效载荷必须是 JSON 对象。
+    """
     if not line.startswith("data:"):
         return None
     data = line[5:].strip()
@@ -65,7 +69,8 @@ def parse_sse_line(line: str) -> tuple[str, Any] | None:
 
 
 def _error_info(raw: Any) -> dict[str, Any]:
-    # Only type/code are kept; provider messages may echo request content.
+    """生成统一的流式错误信息，仅提取供应商错误的 code 或 type 字段。"""
+    # 供应商的原始错误消息可能回显请求内容，因此不保留 message 字段。
     code = ""
     if isinstance(raw, dict):
         code = str(raw.get("code") or raw.get("type") or "")[:80]
@@ -76,6 +81,7 @@ class ChatStreamCollector:
     """Accumulates chat.completions chunks."""
 
     def __init__(self) -> None:
+        """初始化文本、推理内容、工具调用片段及响应元数据的收集状态。"""
         self._text: list[str] = []
         self._reasoning: list[str] = []
         self._calls: dict[int, dict[str, str]] = {}
@@ -88,17 +94,26 @@ class ChatStreamCollector:
 
     @property
     def complete(self) -> bool:
-        # Some providers drop the trailing [DONE]; a finish_reason is enough to trust the body.
+        """判断是否收到完成信号，用于检查流是否意外中断。"""
+        # 部分供应商省略末尾的 [DONE]，收到 finish_reason 也可视为响应完整。
         return self.saw_done or self._finish_reason is not None
 
     @property
     def finished(self) -> bool:
+        """判断是否应停止读取：收到 [DONE] 或供应商错误即结束。"""
+        # finish_reason 不立即终止读取，后续分片仍可能携带 usage。
         return self.saw_done or self.error is not None
 
     def mark_done(self) -> None:
+        """记录已收到 SSE 的 [DONE] 结束标记。"""
         self.saw_done = True
 
     def feed(self, payload: dict[str, Any]) -> list[StreamEvent]:
+        """收集一个 Chat Completions 分片，返回其中的标准化增量事件。
+
+        保存响应元数据，仅处理首个 choice；分别累积文本、推理和工具调用。
+        遇到供应商错误时记录错误，并返回空事件列表。
+        """
         if payload.get("error"):
             self.error = _error_info(payload["error"])
             return []
@@ -134,6 +149,11 @@ class ChatStreamCollector:
         return events
 
     def _merge_call(self, raw: dict[str, Any]) -> ToolCallDelta:
+        """将工具调用分片合并到对应索引，并返回本次增量。
+
+        缺少索引时，先按调用 ID 匹配；新 ID 或首次调用分配新索引，
+        无 ID 的后续片段归入当前最大索引。ID 和名称仅首次写入，参数按到达顺序拼接。
+        """
         call_id = raw.get("id") if isinstance(raw.get("id"), str) and raw.get("id") else None
         index = raw.get("index")
         if not isinstance(index, int):
@@ -156,6 +176,10 @@ class ChatStreamCollector:
         return ToolCallDelta(index, call_id, name, fragment)
 
     def decoded(self) -> dict[str, Any]:
+        """重建 Chat Completions 非流式响应结构，供适配器复用解析逻辑。
+
+        工具调用按索引排序，忽略缺少名称的调用，并为缺少 ID 的调用生成临时 ID。
+        """
         text = "".join(self._text)
         message: dict[str, Any] = {"role": "assistant", "content": text or None}
         if self._reasoning:
@@ -183,6 +207,7 @@ class ResponsesStreamCollector:
     """Accumulates Responses API server-sent events."""
 
     def __init__(self) -> None:
+        """初始化文本、输出项、工具参数片段及终态响应的收集状态。"""
         self._text: list[str] = []
         self._items: dict[int, dict[str, Any]] = {}
         self._arguments: dict[int, str] = {}
@@ -193,16 +218,23 @@ class ResponsesStreamCollector:
 
     @property
     def complete(self) -> bool:
+        """判断是否收到终态响应；完整、未完成和失败响应均属于终态。"""
         return self._completed is not None
 
     @property
     def finished(self) -> bool:
+        """判断是否应停止读取：收到终态响应或独立错误事件即结束。"""
         return self._completed is not None or self.error is not None
 
     def mark_done(self) -> None:
-        """Responses streams end with response.completed, not [DONE]."""
+        """兼容统一收集器接口；[DONE] 不改变状态，完成状态由终态响应事件确定。"""
 
     def feed(self, payload: dict[str, Any]) -> list[StreamEvent]:
+        """按 Responses 事件类型更新收集状态，并返回标准化增量事件。
+
+        输出项和工具参数按 output_index 关联，参数 done 事件覆盖累计片段。
+        推理增量仅转发为事件；终态响应整体保存，未知事件返回空列表。
+        """
         kind = str(payload.get("type") or "")
         index = payload.get("output_index") if isinstance(payload.get("output_index"), int) else 0
         if kind in {"response.created", "response.in_progress"}:
@@ -245,6 +277,11 @@ class ResponsesStreamCollector:
         return []
 
     def decoded(self) -> dict[str, Any]:
+        """以终态响应为基础重建 Responses 非流式响应结构。
+
+        缺少 output 时按索引组装已收集的输出项，并补齐工具参数；没有消息项时
+        用累计文本填充 output_text。未收到终态响应则标记为 incomplete。
+        """
         base = dict(self._completed or {})
         base.setdefault("id", self._response_id)
         base.setdefault("model", self._model)
