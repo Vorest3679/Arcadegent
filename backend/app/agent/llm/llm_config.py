@@ -32,6 +32,7 @@ class LLMConfig:
     token_limit_parameter: str = "max_tokens"
     supported_tool_choices: tuple[str, ...] = ("auto", "none", "required")
     extra_parameters: dict[str, Any] = field(default_factory=dict)
+    stream: bool = False
 
     @property
     def enabled(self) -> bool:
@@ -178,4 +179,5 @@ def resolve_llm_config(settings: Settings) -> LLMConfig:
         token_limit_parameter=_pick_str(profile, "token_limit_parameter", "max_tokens"),
         supported_tool_choices=tuple(profile.get("supported_tool_choices", ["auto", "none", "required"])),
         extra_parameters=dict(profile.get("extra_parameters") or {}),
+        stream=settings.llm_stream or _pick_bool(profile, "stream", False),
     )

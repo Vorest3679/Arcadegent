@@ -24,7 +24,7 @@ EVAL_LLM_API_MODE=chat_completions
 
 Responses 服务使用 `EVAL_LLM_API_MODE=responses`。base URL 不包含 `/chat/completions` 或 `/responses` 后缀，不在 URL 中放 key。协议显式选择，失败不静默切换。不同服务支持的 model ID、参数和账号可用性应以你的供应商配置为准。
 
-若服务不接受 temperature，设置 `EVAL_LLM_SEND_TEMPERATURE=false`。需要 `max_completion_tokens` 时修改 `EVAL_LLM_TOKEN_PARAMETER`。思考配置等可通过 `EVAL_LLM_EXTRA_PARAMETERS` 填入 JSON 对象，不能覆盖 tools、messages、model 等核心协议字段。没有思考参数的默认 profile 不代表强制关闭供应商默认思考模式。
+若服务不接受 temperature，设置 `EVAL_LLM_SEND_TEMPERATURE=false`。需要 `max_completion_tokens` 时修改 `EVAL_LLM_TOKEN_PARAMETER`。思考配置等可通过 `EVAL_LLM_EXTRA_PARAMETERS` 填入 JSON 对象，不能覆盖 tools、messages、model 等核心协议字段。没有思考参数的默认 profile 不代表强制关闭供应商默认思考模式。`EVAL_LLM_STREAM=true` 让该 profile 以流式请求并在内部收集为完整响应，用于对比流式与非流式；证据形状不变，`stream_mode` 记为 `provider`。
 
 shell 中已有的 `EVAL_*` 变量优先于此文件；其他生产变量不读取，dotenv 不插值、不修改进程环境。`.env` 被 Git 忽略，初始化时权限为 `0600`，重复初始化不会覆盖已有内容。
 

@@ -94,6 +94,7 @@ class Settings:
     llm_timeout_seconds: float = 20.0
     llm_temperature: float = 0.2
     llm_max_tokens: int = 500
+    llm_stream: bool = False
     agent_max_steps: int = 20
     agent_context_window: int = 24
     agent_nodes_definitions_dir: Path = Path("app/agent/nodes/definitions")
@@ -155,6 +156,7 @@ class Settings:
             llm_max_tokens=int(
                 os.getenv("LLM_MAX_TOKENS", str(cls.llm_max_tokens))
             ),
+            llm_stream=_env_bool("LLM_STREAM", cls.llm_stream),
             agent_max_steps=int(
                 os.getenv("AGENT_MAX_STEPS", str(cls.agent_max_steps))
             ),

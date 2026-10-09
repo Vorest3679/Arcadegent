@@ -54,3 +54,10 @@ def test_llm_config_prefers_explicit_settings_over_profile_defaults() -> None:
 
     assert config.base_url == "https://api.deepseek.com"
     assert config.model == "deepseek-chat"
+
+
+def test_llm_stream_defaults_off_and_follows_settings() -> None:
+    profiles = Path("app/agent/nodes/profiles/provider_profiles.yaml")
+    assert resolve_llm_config(Settings(llm_api_key="k", agent_provider_profiles_file=profiles)).stream is False
+    enabled = Settings(llm_api_key="k", llm_stream=True, agent_provider_profiles_file=profiles)
+    assert resolve_llm_config(enabled).stream is True
