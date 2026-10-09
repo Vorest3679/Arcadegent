@@ -153,8 +153,16 @@ export type ChatResponse = {
   route?: RouteSummary | null;
 };
 
+export type ChatRunStatus = "pending" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+
+export type ChatRun = {
+  run_id: string;
+  status: ChatRunStatus;
+};
+
 export type ChatSessionDispatch = {
   session_id: string;
+  run_id: string;
   status: ChatSessionStatus;
 };
 
@@ -183,6 +191,7 @@ export type ChatSessionDetail = {
   intent: IntentType;
   active_subagent: string;
   status: ChatSessionStatus;
+  current_run?: ChatRun | null;
   last_error?: string | null;
   reply?: string | null;
   shops: ArcadeSummary[];
@@ -196,25 +205,16 @@ export type ChatSessionDetail = {
   turns: ChatHistoryTurn[];
 };
 
-export type ChatStreamEventName =
-  | "session.started"
-  | "subagent.changed"
-  | "worker.started"
-  | "worker.completed"
-  | "worker.failed"
-  | "assistant.token"
-  | "tool.started"
-  | "tool.progress"
-  | "tool.completed"
-  | "tool.failed"
-  | "navigation.route_ready"
-  | "assistant.completed"
-  | "session.failed";
-
+// Transport envelope of one run event; `event` is a business label for
+// kind "event" and a control name (run.state, stream.reset) for kind "control".
 export type ChatStreamEnvelope = {
   id: number;
   session_id: string;
-  event: ChatStreamEventName;
+  run_id: string;
+  kind: "event" | "control";
+  event: string;
+  output_id?: string;
+  status?: ChatRunStatus;
   at: string;
   data: Record<string, unknown>;
 };

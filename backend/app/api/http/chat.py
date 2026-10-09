@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 
 from app.agent.runtime.session_state import (
     AgentSessionState,
@@ -272,11 +272,11 @@ async def dispatch_chat_session(
     return ChatSessionDispatchDto(session_id=record.session_id, run_id=record.run_id, status="running")
 
 
-@router.post("/chat/sessions/{session_id}/cancel", response_model=ChatSessionDetailDto)
+@router.post("/chat/sessions/{session_id}/runs/{run_id}/cancel", response_model=ChatSessionDetailDto)
 async def cancel_chat_session(
     session_id: str,
+    run_id: str = Path(min_length=1, max_length=64),
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
-    run_id: str | None = Query(default=None, min_length=1, max_length=64),
     container: AppContainer = Depends(get_container),
 ) -> ChatSessionDetailDto:
     session = container.session_store.get_session(session_id, client_id=client_id)

@@ -47,7 +47,6 @@ export function App() {
           <ChatPanel
             onSubmit={chat.submitChat}
             onQuickAsk={chat.quickAsk}
-            streamReplyTarget={chat.streamReplyTarget}
             streamReply={chat.streamReply}
             streamReplyActive={chat.streamReplyActive}
           />

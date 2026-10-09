@@ -283,7 +283,7 @@ def test_second_turn_streams_only_its_own_run(tmp_path: Path) -> None:
     session_id = first_resp.json()["session_id"]
     first_run = first_resp.json()["run_id"]
 
-    first_events = _stream_events(client, session_id)
+    first_events = _stream_events(client, session_id, run_id=first_run)
     assert first_events
     assert {event["run_id"] for event in first_events} == {first_run}
     assert any(event["event"] == "assistant.completed" for event in first_events)
@@ -296,7 +296,7 @@ def test_second_turn_streams_only_its_own_run(tmp_path: Path) -> None:
     second_run = second_resp.json()["run_id"]
     assert second_run != first_run
 
-    second_events = _stream_events(client, session_id)
+    second_events = _stream_events(client, session_id, run_id=second_run)
     assert {event["run_id"] for event in second_events} == {second_run}
     assert [event["id"] for event in second_events] == list(range(1, len(second_events) + 1))
     assert any(event["event"] == "assistant.completed" for event in second_events)
@@ -311,9 +311,9 @@ def test_incomplete_text_fails_without_success_event(tmp_path: Path) -> None:
     response = client.post("/api/chat", json={"message": "find Gamma"}).json()
     state = client.app.state.container.session_store.get_session(response["session_id"])
     assert state.status == "failed"
-    stream = client.get(f"/api/stream/{state.session_id}").text
-    assert "event: session.failed" in stream
-    assert "event: assistant.completed" not in stream
+    names = [event["event"] for event in _stream_events(client, state.session_id, run_id=response["run_id"])]
+    assert "session.failed" in names
+    assert "assistant.completed" not in names
 
 def test_invalid_json_cannot_be_hydrated_into_success(tmp_path: Path) -> None:
     from app.agent.llm.provider_adapter import ModelToolCall
@@ -327,7 +327,7 @@ def test_invalid_json_cannot_be_hydrated_into_success(tmp_path: Path) -> None:
         return ModelResponse(text="Unable to summarize")
     client.app.state.container.react_runtime._provider_adapter.complete = fake_complete
     response = client.post("/api/chat", json={"message": "find Gamma"}).json()
-    events = _stream_events(client, response["session_id"])
+    events = _stream_events(client, response["session_id"], run_id=response["run_id"])
     assert [event["event"] for event in events if event["event"].startswith("tool.")] == ["tool.started", "tool.failed"]
     state = client.app.state.container.session_store.get_session(response["session_id"])
     evidence = next(turn.payload["argument_evidence"] for turn in state.turns if turn.role == "tool")
@@ -382,7 +382,7 @@ def test_incomplete_worker_call_is_not_executed(tmp_path: Path) -> None:
         return ModelResponse(text="partial", tool_calls=[ModelToolCall("partial", "db_query_tool", {"page": 1, "page_size": 3})], error={"type": "incomplete_response", "message": "length"})
     client.app.state.container.react_runtime._provider_adapter.complete = fake_complete
     response = client.post("/api/chat", json={"message": "find Gamma"}).json()
-    events = _stream_events(client, response["session_id"])
+    events = _stream_events(client, response["session_id"], run_id=response["run_id"])
     assert any(event["event"] == "worker.failed" for event in events)
     assert not any(event["event"] == "tool.started" and event["data"].get("call_id") == "partial" for event in events)
     assert any(event["event"] == "tool.failed" and event["data"].get("call_id") == "dispatch" for event in events)

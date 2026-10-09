@@ -335,7 +335,7 @@ def test_cancel_running_chat_preserves_context_for_the_next_input(tmp_path: Path
     )
     assert first.status_code == 202
 
-    cancelled = client.post(f"/api/chat/sessions/{session_id}/cancel")
+    cancelled = client.post(f"/api/chat/sessions/{session_id}/runs/{first.json()['run_id']}/cancel")
     assert cancelled.status_code == 200
     cancelled_detail = cancelled.json()
     assert cancelled_detail["status"] == "failed"

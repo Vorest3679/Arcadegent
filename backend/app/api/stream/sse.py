@@ -1,9 +1,10 @@
 """Stream API layer: SSE encoding and the run event stream endpoint.
 
 ``format_sse`` and ``sse_response`` know nothing about runs or business
-events and can serve any async source of StreamEvent/Heartbeat items. The
-endpoint subscribes to one run of a session; the run log ends the stream once
-the run is sealed and every event was delivered.
+events and can serve any async source of StreamEvent/Heartbeat items. Every
+frame uses the default ``message`` event name; the business label travels in the
+JSON envelope. The endpoint subscribes to one named run of a session; the run
+log ends the stream once the run is sealed and every event was delivered.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ def format_sse(event: StreamEvent) -> str:
     body = json.dumps(event.to_json(), ensure_ascii=False)
     # Tell native EventSource clients a conservative reconnect delay. The web
     # client also applies its own bounded retry policy and replays by event id.
-    return f"retry: 1000\nid: {event.id}\nevent: {event.event}\ndata: {body}\n\n"
+    return f"retry: 1000\nid: {event.id}\nevent: message\ndata: {body}\n\n"
 
 
 def sse_response(source: AsyncIterator[StreamEvent | Heartbeat], *, request: Request) -> StreamingResponse:
@@ -53,17 +54,12 @@ def _parse_cursor(query_value: int | None, header_value: str | None) -> int | No
     return None
 
 
-async def _empty() -> AsyncIterator[StreamEvent | Heartbeat]:
-    for item in ():
-        yield item
-
-
 @router.get("/api/stream/{session_id}")
 async def stream(
     session_id: str,
     request: Request,
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
-    run_id: str | None = Query(default=None, min_length=1, max_length=64),
+    run_id: str = Query(min_length=1, max_length=64),
     last_event_id: int | None = Query(default=None, ge=0),
     last_event_id_header: str | None = Header(default=None, alias="Last-Event-ID"),
     container: AppContainer = Depends(get_container),
@@ -72,16 +68,12 @@ async def stream(
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
 
     run_log = container.run_log
-    target_run = run_id or run_log.latest_run_id(session_id)
-    if run_id is not None and not run_log.has_run(session_id, run_id):
+    if not run_log.has_run(session_id, run_id):
         raise HTTPException(status_code=404, detail=f"run '{run_id}' of session '{session_id}' not found")
-    if target_run is None:
-        # Nothing has run in this process for the session; end the stream at once.
-        return sse_response(_empty(), request=request)
 
     source = run_log.subscribe(
         session_id,
-        target_run,
+        run_id,
         after_id=_parse_cursor(last_event_id, last_event_id_header),
         heartbeat_seconds=container.settings.sse_keepalive_seconds,
     )

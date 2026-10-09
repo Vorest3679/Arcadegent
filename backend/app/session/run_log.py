@@ -174,10 +174,6 @@ class RunLog:
         book = self._books.get(session_id)
         return book is not None and book.run_id == run_id
 
-    def latest_run_id(self, session_id: str) -> str | None:
-        book = self._books.get(session_id)
-        return book.run_id if book is not None else None
-
     async def subscribe(
         self,
         session_id: str,

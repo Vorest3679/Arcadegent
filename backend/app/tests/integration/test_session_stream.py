@@ -53,16 +53,18 @@ def test_stream_replays_after_last_event_id_without_duplicates(tmp_path: Path) -
     client = _build_client(tmp_path)
     _stub_provider_adapter(client)
     response = client.post("/api/chat", json={"message": "find Gamma"}).json()
-    all_events = _stream_events(client, response["session_id"])
+    run_id = response["run_id"]
+    all_events = _stream_events(client, response["session_id"], run_id=run_id)
 
     resumed = client.get(
         f"/api/stream/{response['session_id']}",
+        params={"run_id": run_id},
         headers={"Last-Event-ID": "3"},
     )
     resumed_ids = [int(line[4:]) for line in resumed.text.splitlines() if line.startswith("id: ")]
     assert resumed_ids == [event["id"] for event in all_events if event["id"] > 3]
 
-    by_query = client.get(f"/api/stream/{response['session_id']}", params={"last_event_id": 3})
+    by_query = client.get(f"/api/stream/{response['session_id']}", params={"run_id": run_id, "last_event_id": 3})
     assert by_query.text == resumed.text
 
 
@@ -72,7 +74,7 @@ def test_evicted_cursor_receives_stream_reset(tmp_path: Path, monkeypatch: pytes
     _stub_provider_adapter(client, reply="这是一段很长的回复。" * 30)
     response = client.post("/api/chat", json={"message": "find Gamma"}).json()
 
-    events = _stream_events(client, response["session_id"], after_id=1)
+    events = _stream_events(client, response["session_id"], run_id=response["run_id"], after_id=1)
     assert events[0]["event"] == "stream.reset"
     assert events[0]["kind"] == "control"
     head = events[0]["data"]["head_id"]
@@ -86,7 +88,7 @@ def test_cancel_targets_run_and_stream_reports_cancellation(tmp_path: Path) -> N
     dispatched = client.post("/api/chat/sessions", json={"session_id": "s_cancel1", "message": "find Gamma"}).json()
     run_id = dispatched["run_id"]
 
-    cancelled = client.post("/api/chat/sessions/s_cancel1/cancel", params={"run_id": run_id})
+    cancelled = client.post(f"/api/chat/sessions/s_cancel1/runs/{run_id}/cancel")
     assert cancelled.status_code == 200
     detail = cancelled.json()
     assert detail["status"] == "failed"
@@ -102,7 +104,7 @@ def test_cancel_targets_run_and_stream_reports_cancellation(tmp_path: Path) -> N
     assert "上下文" in events[-2]["data"]["error"]
 
     # Repeating the cancel is harmless and keeps the terminal state.
-    again = client.post("/api/chat/sessions/s_cancel1/cancel", params={"run_id": run_id})
+    again = client.post(f"/api/chat/sessions/s_cancel1/runs/{run_id}/cancel")
     assert again.status_code == 200
     assert again.json()["current_run"]["status"] == "cancelled"
 
@@ -115,7 +117,7 @@ def test_cancel_of_stale_run_does_not_touch_the_new_run(tmp_path: Path) -> None:
     _slow_provider(client)
     second = client.post("/api/chat/sessions", json={"session_id": "s_stale1", "message": "again"}).json()
 
-    stale = client.post("/api/chat/sessions/s_stale1/cancel", params={"run_id": first["run_id"]})
+    stale = client.post(f"/api/chat/sessions/s_stale1/runs/{first['run_id']}/cancel")
     assert stale.status_code == 409
     detail = client.get("/api/chat/sessions/s_stale1").json()
     assert detail["status"] == "running"
@@ -124,31 +126,29 @@ def test_cancel_of_stale_run_does_not_touch_the_new_run(tmp_path: Path) -> None:
     delete_running = client.delete("/api/chat/sessions/s_stale1")
     assert delete_running.status_code == 409
 
-    unknown = client.post("/api/chat/sessions/s_stale1/cancel", params={"run_id": "r_unknown"})
+    unknown = client.post("/api/chat/sessions/s_stale1/runs/r_unknown/cancel")
     assert unknown.status_code == 409
-    assert client.post("/api/chat/sessions/s_stale1/cancel", params={"run_id": second["run_id"]}).status_code == 200
+    assert client.post(f"/api/chat/sessions/s_stale1/runs/{second['run_id']}/cancel").status_code == 200
 
     assert client.delete("/api/chat/sessions/s_stale1").status_code == 204
     assert client.app.state.container.run_manager.current("s_stale1") is None
     assert client.get("/api/stream/s_stale1", params={"run_id": second["run_id"]}).status_code == 404
 
 
-def test_cancel_without_run_id_targets_the_current_run_for_old_clients(tmp_path: Path) -> None:
+def test_cancel_and_stream_require_run_id(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
     _slow_provider(client)
-    dispatched = client.post("/api/chat/sessions", json={"session_id": "s_legacy1", "message": "find Gamma"}).json()
+    dispatched = client.post("/api/chat/sessions", json={"session_id": "s_norun1", "message": "find Gamma"}).json()
 
-    cancelled = client.post("/api/chat/sessions/s_legacy1/cancel")
-    assert cancelled.status_code == 200
-    assert cancelled.json()["current_run"] == {"run_id": dispatched["run_id"], "status": "cancelled"}
+    # The old route without a run id no longer exists.
+    assert client.post("/api/chat/sessions/s_norun1/cancel").status_code == 404
+    assert client.get("/api/stream/s_norun1").status_code == 422
+    # The run was not touched by the rejected requests.
+    detail = client.get("/api/chat/sessions/s_norun1").json()
+    assert detail["current_run"] == {"run_id": dispatched["run_id"], "status": "running"}
+    assert client.post(f"/api/chat/sessions/s_norun1/runs/{dispatched['run_id']}/cancel").status_code == 200
 
-    # Nothing is running any more, so a second legacy cancel is a no-op.
-    assert client.post("/api/chat/sessions/s_legacy1/cancel").status_code == 200
 
-
-def test_stream_for_session_without_run_closes_immediately(tmp_path: Path) -> None:
+def test_stream_for_unknown_run_is_not_found(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
-    response = client.get("/api/stream/s_never_ran")
-    assert response.status_code == 200
-    assert response.text == ""
     assert client.get("/api/stream/s_never_ran", params={"run_id": "r_missing"}).status_code == 404

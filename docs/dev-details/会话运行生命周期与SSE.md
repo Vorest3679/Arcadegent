@@ -1,6 +1,6 @@
 # 会话运行生命周期与 SSE
 
-本文说明一次 Agent 对话（一个 run）如何被接受、执行、取消和结束，以及 SSE 事件流如何回放与结束。对应源码：`backend/app/session/`、`backend/app/services/chat_run_service.py`、`backend/app/api/stream/sse.py`。
+本文说明一次 Agent 对话（一个 run）如何被接受、执行、取消和结束，SSE 事件流如何回放与结束，以及前端如何订阅。对应源码：`backend/app/session/`、`backend/app/services/chat_run_service.py`、`backend/app/api/stream/sse.py`、`apps/web/src/lib/runStream.ts`。
 
 ## 模块划分
 
@@ -25,12 +25,11 @@ run 状态只表示执行结果：模型失败、走兜底回复等业务失败�
 
 ## 取消
 
-`POST /api/chat/sessions/{id}/cancel?run_id=...`：
+`POST /api/chat/sessions/{id}/runs/{run_id}/cancel`：
 
 - 只有第一个取消请求真正取消 task，后续请求等待同一次收尾并保留第一次的原因。
 - 返回时 task 已停止、会话存储已写入、记录本已封口；取消调用方断开不会中断收尾。
 - 目标 run 已结束时直接返回当前状态；`run_id` 不是当前活动 run 时返回 409，不影响新 run。
-- 省略 `run_id` 时取请求时刻的当前 run（兼容旧前端）。
 - 还没开始执行就被取消的 task 由完成回调补齐收尾，不会残留占用。
 - 取消到达时执行已经结束（收尾已开始）的，不再打断任务，run 按实际结果记为 completed 或 failed；状态序列为 cancelling → completed/failed。
 - 收尾中任何一步异常，终态事件、封口和释放占用仍会执行，SSE 不会停在未封口状态。
@@ -39,7 +38,7 @@ run 状态只表示执行结果：模型失败、走兜底回复等业务失败�
 
 ## SSE 外壳与结束条件
 
-`GET /api/stream/{session_id}?run_id=&last_event_id=`（也读取 `Last-Event-ID` 头）：
+`GET /api/stream/{session_id}?run_id=&last_event_id=`（`run_id` 必填；也读取 `Last-Event-ID` 头）。每帧的 `event:` 行固定为 `message`，业务事件名只在 JSON 外壳的 `event` 字段中：
 
 ```json
 {"id": 4, "session_id": "s_x", "run_id": "r_x", "kind": "event", "event": "assistant.token",
@@ -48,12 +47,119 @@ run 状态只表示执行结果：模型失败、走兜底回复等业务失败�
 
 - `id` 在 run 内从 1 递增，control 与业务事件共用序列；`kind` 为 `event` 或 `control`。
 - control 事件：`run.state`（带 `status`）、`stream.reset`（请求的 cursor 已被淘汰，`data.head_id` 为当前最大编号；客户端应重拉会话详情后继续）。
-- 记录本封口且全部推送完毕后连接结束，不依赖 `assistant.completed` 等业务事件名。没有 run 的会话立即结束；指定的 `run_id` 不存在返回 404。
+- 记录本封口且全部推送完毕后连接结束，不依赖 `assistant.completed` 等业务事件名。指定的 `run_id` 不在记录本中（从未运行、已被新一轮替换或进程重启）返回 404。
 - 等待期间按 `SSE_KEEPALIVE_SECONDS` 发送 `: keep-alive` 注释。
 - 每个会话只保留最近一轮的记录本，单轮上限为 `REPLAY_BUFFER_SIZE`（默认 2000），新一轮开始后旧 run 不能再订阅。
 - `assistant.token` 只携带增量 `delta`，同一回复的片段共用 `output_id`，`assistant.completed` 带相同 `output_id` 与完整 `reply`。当前片段仍是在完整回复生成后本地分块（`stream_mode: synthetic`）。
 
-当前 SSE 帧的 `event:` 行仍等于业务事件名；后续前端改为按 run 订阅后会统一为固定帧名。
+## 前端订阅
+
+- `apps/web/src/lib/runStream.ts` 的 `openRunStream` 只订阅一个 run，不依赖 React：校验外壳（`session_id`/`run_id` 与订阅一致，其余帧丢弃）；`id <= 已收最大 id` 的重放帧丢弃；断线后按 500ms×2ⁿ 退避、带 `last_event_id` 重连，最多 3 次；收到终态 `run.state` 后关闭，不再重连。
+- 文本按 `output_id` 追加 `delta`。出现新的 `output_id` 时上一段**定格**（`onOutputSealed`），界面显示为「中间回复」，新的一段单独显示。目前后端只为最终回复发 token，多段输出要等真实流式接入后才会出现。
+- 「当前 run 是否仍在显示中」由 store 的 `activeRunId` / `committedRunId` 决定：终态后重拉会话详情，详情与 `committedRunId` 在同一次更新中写入，流式气泡与进度卡片随之切换为历史消息。不再用文本前缀或长度猜测重复。
+- 刷新页面时，若详情的 `current_run` 未结束，则不带游标订阅该 run，从头回放；收到 `stream.reset` 时重拉详情后继续订阅。
+- 重连 3 次仍失败时，先拉详情确认该 run 仍在运行，再按 `run_id` 取消。
+
+### 前端调用链
+
+```text
+App.tsx
+  └─ useChatSessionController()            挂载时拉会话列表；返回 submitChat 等回调给组件
+       ├─ submitChat → dispatchChatSession → 拿到 run_id → startStream(sessionId, runId)
+       ├─ 刷新/切换会话 → loadSession → applySessionDetail → current_run 未结束 → startStream
+       └─ startStream → openRunStream({ url, sessionId, runId, handlers })
+            └─ connect() → new EventSource(url(lastId))
+                 └─ addEventListener("message", handleMessage)
+                      ├─ parseEnvelope：校验外壳，session_id/run_id 不符则丢弃
+                      ├─ id <= lastId：重放帧，丢弃
+                      ├─ control：stream.reset → onReset；run.state → onState（终态先 close）
+                      └─ event：assistant.token → applyToken（onText / onOutputSealed），再 onEvent
+```
+
+**1. App.tsx 只挂载 controller**，SSE 不在组件里处理：
+
+```tsx
+// apps/web/src/App.tsx
+const chat = useChatSessionController();
+// ...
+<ChatPanel onSubmit={chat.submitChat} streamReply={chat.streamReply} ... />
+```
+
+**2. controller 发起订阅并注册 handlers**，每个回调只负责写 store 或触发重拉详情：
+
+```ts
+// apps/web/src/hooks/useChatSessionController.ts
+const dispatched = await dispatchChatSession({ session_id, client_id, message, ... });
+startStream(dispatched.session_id, dispatched.run_id);
+
+function startStream(sessionId: string, runId: string): void {
+  stopStream();
+  store.setActiveRunId(runId);
+  const stream = openRunStream({
+    url: (afterId) => buildChatStreamUrl(sessionId, runId, afterId, clientIdRef.current),
+    sessionId,
+    runId,
+    handlers: {
+      onEvent: (envelope) => handleRunEvent(sessionId, envelope), // 业务事件 → 阶段、地图、进度卡片
+      onText: (_outputId, text, delta) => appendStreamReply(text, delta), // 流式气泡
+      onOutputSealed: (outputId, text) => { /* 追加到 sealedOutputs（中间回复） */ },
+      onState: (status) => { /* 终态 → loadSession，详情到达后交接为历史消息 */ },
+      onReset: () => { /* 重拉详情，继续订阅 */ },
+      onConnection: (connected) => store.setStreamConnected(connected),
+      onRetry: recordStreamReconnect,
+      onGiveUp: () => { void giveUpRun(sessionId, runId); } // 确认仍在运行后按 run_id 取消
+    }
+  });
+  streamRef.current = stream;
+}
+```
+
+**3. runStream 在 connect 时挂上 handleMessage**，处理传输层逻辑后再分发给 handlers：
+
+```ts
+// apps/web/src/lib/runStream.ts
+function connect(): void {
+  const current = new EventSource(url(lastId));      // 重连时带 last_event_id
+  source = current;
+  current.addEventListener("message", (event) => handleMessage(event as MessageEvent<string>, current));
+  current.onerror = () => { /* 关闭连接；未超次数则 500ms×2ⁿ 后 connect()，否则 onGiveUp */ };
+}
+
+function handleMessage(message: MessageEvent<string>, current: EventSource): void {
+  if (closed || source !== current || !message.data) return;          // 旧连接的迟到帧
+  const envelope = parseEnvelope(message.data, sessionId, runId);
+  if (!envelope) return;                                               // 外壳不合法或不属于本 run
+  if (lastId !== undefined && envelope.id <= lastId) return;           // 重放去重
+  lastId = envelope.id;
+  attempts = 0;
+
+  if (envelope.kind === "control") {
+    if (envelope.event === "stream.reset") { handlers.onReset(); return; }
+    if (envelope.event === "run.state" && envelope.status) {
+      if (isTerminalRunStatus(envelope.status)) { close(); handlers.onConnection(false); }
+      handlers.onState(envelope.status);
+    }
+    return;
+  }
+  if (envelope.event === "assistant.token") applyToken(envelope);
+  handlers.onEvent(envelope);
+}
+
+function applyToken(envelope: ChatStreamEnvelope): void {
+  const delta = envelope.data.delta;
+  if (typeof delta !== "string" || !delta) return;
+  const nextOutputId = envelope.output_id ?? "";
+  if (outputId !== null && outputId !== nextOutputId) {
+    handlers.onOutputSealed(outputId, outputText);                     // 上一段定格为中间回复
+    outputText = "";
+  }
+  outputId = nextOutputId;
+  outputText += delta;
+  handlers.onText(nextOutputId, outputText, delta);
+}
+```
+
+职责边界：`runStream.ts` 只懂外壳、游标、重连和按 output_id 拼文本，不认识 tool/worker/route 等业务事件；业务含义在 controller 的 `handleRunEvent` 和 `lib/chatStream.ts`（`mapArtifactsForEvent`、`toProgressText`）中解释；组件只读 store。
 
 ## 状态来源
 

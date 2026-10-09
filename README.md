@@ -407,8 +407,8 @@ SSE 事件流依赖长连接，Nginx 配置里 `/api/stream/` 已关闭 bufferin
 - `POST /api/location/reverse-geocode`：浏览器坐标逆地理编码
 - `POST /api/chat`：同步 Agent 对话入口
 - `POST /api/chat/sessions`：异步派发 Agent 会话，返回 `session_id` 与 `run_id`，前端默认使用
-- `POST /api/chat/sessions/{session_id}/cancel`：取消会话中的 run，可选参数 `run_id`
-- `GET /api/stream/{session_id}`：SSE 实时事件流，可选 `run_id`，支持 `last_event_id` 和 `Last-Event-ID`
+- `POST /api/chat/sessions/{session_id}/runs/{run_id}/cancel`：取消会话中指定的 run
+- `GET /api/stream/{session_id}`：SSE 实时事件流，必填 `run_id`，支持 `last_event_id` 和 `Last-Event-ID`；帧名固定为 `message`，业务事件名在 JSON 外壳的 `event` 字段
 - `GET /api/chat/sessions`：历史会话列表
 - `GET /api/chat/sessions/{session_id}`：会话详情、历史 turns、地图 artifacts
 - `DELETE /api/chat/sessions/{session_id}`：删除会话

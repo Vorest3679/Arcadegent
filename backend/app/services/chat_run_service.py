@@ -65,13 +65,8 @@ class ChatRunService:
             on_terminal=self._on_terminal,
         )
 
-    async def cancel(self, session_id: str, *, run_id: str | None, reason: str) -> RunRecord | None:
-        """Cancel the named run, or the current one when no run id is given."""
-        if run_id is None:
-            current = self._runs.current(session_id)
-            if current is None or current.is_terminal:
-                return current
-            run_id = current.run_id
+    async def cancel(self, session_id: str, *, run_id: str, reason: str) -> RunRecord:
+        """Cancel the named run of the session."""
         return await self._runs.cancel(session_id, run_id, reason=reason)
 
     def _prepare(self, request: ChatRequest) -> ChatRequest:

@@ -1,5 +1,4 @@
 import { useCallback, useRef, useState } from "react";
-import { getAssistantTokenDelta, getAssistantTokenFullText } from "../lib/chatStream";
 
 export function useStreamReply() {
   const [streamReplyTarget, setStreamReplyTarget] = useState("");
@@ -59,25 +58,10 @@ export function useStreamReply() {
     writeStreamReplyDisplay("");
   }, [cancelStreamReplyFlush, writeStreamReplyDisplay, writeStreamReplyTarget]);
 
-  const applyStreamToken = useCallback((data: Record<string, unknown>) => {
-    const previousTarget = streamReplyTargetRef.current;
-    const fullText = getAssistantTokenFullText(data);
-    const explicitDelta = getAssistantTokenDelta(data);
-
-    if (fullText && fullText.length >= previousTarget.length) {
-      writeStreamReplyTarget(fullText);
-      const derivedDelta = fullText.startsWith(previousTarget)
-        ? fullText.slice(previousTarget.length)
-        : fullText;
-      enqueueStreamReplyDelta(derivedDelta);
-      return;
-    }
-
-    if (explicitDelta) {
-      const nextTarget = previousTarget + explicitDelta;
-      writeStreamReplyTarget(nextTarget);
-      enqueueStreamReplyDelta(explicitDelta);
-    }
+  // `text` is the assembled output so far; only `delta` is queued for display.
+  const appendStreamReply = useCallback((text: string, delta: string) => {
+    writeStreamReplyTarget(text);
+    enqueueStreamReplyDelta(delta);
   }, [enqueueStreamReplyDelta, writeStreamReplyTarget]);
 
   const syncStreamReply = useCallback((value: string) => {
@@ -87,16 +71,12 @@ export function useStreamReply() {
     writeStreamReplyDisplay(value);
   }, [cancelStreamReplyFlush, writeStreamReplyDisplay, writeStreamReplyTarget]);
 
-  const getStreamReplyTarget = useCallback(() => streamReplyTargetRef.current, []);
-
   return {
-    applyStreamToken,
+    appendStreamReply,
     cancelStreamReplyFlush,
-    getStreamReplyTarget,
     resetStreamReply,
     streamReplyDisplay,
     streamReplyTarget,
-    syncStreamReply,
-    writeStreamReplyTarget
+    syncStreamReply
   };
 }

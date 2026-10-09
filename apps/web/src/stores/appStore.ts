@@ -15,6 +15,14 @@ function resolveUpdater<T>(next: Updater<T>, previous: T): T {
   return typeof next === "function" ? (next as (value: T) => T)(previous) : next;
 }
 
+// An output of the live run that a later output_id superseded (an
+// intermediate reply between tool calls).
+export type SealedOutput = {
+  outputId: string;
+  text: string;
+  at: string;
+};
+
 type AppStore = {
   viewMode: ViewMode;
   sidebarOpen: boolean;
@@ -33,6 +41,11 @@ type AppStore = {
   streamItems: StreamProgressItem[];
   awaitingAssistant: boolean;
   activeMapArtifacts: ChatMapArtifacts | null;
+  // Run the chat view follows; it is live until its detail is loaded and it
+  // becomes committedRunId, whose reply is then part of `turns`.
+  activeRunId: string | null;
+  committedRunId: string | null;
+  sealedOutputs: SealedOutput[];
   setViewMode: (viewMode: ViewMode, options?: { replace?: boolean; syncUrl?: boolean }) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
@@ -51,6 +64,9 @@ type AppStore = {
   setStreamItems: (items: Updater<StreamProgressItem[]>) => void;
   setAwaitingAssistant: (awaiting: boolean) => void;
   setActiveMapArtifacts: (artifacts: Updater<ChatMapArtifacts | null>) => void;
+  setActiveRunId: (runId: string | null) => void;
+  setCommittedRunId: (runId: string | null) => void;
+  setSealedOutputs: (outputs: Updater<SealedOutput[]>) => void;
   resetActiveSessionState: () => void;
 };
 
@@ -72,6 +88,9 @@ export const useAppStore = create<AppStore>((set) => ({
   streamItems: [],
   awaitingAssistant: false,
   activeMapArtifacts: null,
+  activeRunId: null,
+  committedRunId: null,
+  sealedOutputs: [],
   setViewMode: (viewMode, options = {}) => {
     if (options.syncUrl !== false) {
       syncViewModeInUrl(viewMode, { replace: options.replace });
@@ -99,12 +118,20 @@ export const useAppStore = create<AppStore>((set) => ({
   setActiveMapArtifacts: (activeMapArtifacts) => set((state) => ({
     activeMapArtifacts: resolveUpdater(activeMapArtifacts, state.activeMapArtifacts)
   })),
+  setActiveRunId: (activeRunId) => set({ activeRunId }),
+  setCommittedRunId: (committedRunId) => set({ committedRunId }),
+  setSealedOutputs: (sealedOutputs) => set((state) => ({
+    sealedOutputs: resolveUpdater(sealedOutputs, state.sealedOutputs)
+  })),
   resetActiveSessionState: () => set({
     activeSessionId: null,
     activeSessionStatus: null,
     turns: [],
     activeSubagent: null,
     activeMapArtifacts: null,
+    activeRunId: null,
+    committedRunId: null,
+    sealedOutputs: [],
     awaitingAssistant: false
   })
 }));
