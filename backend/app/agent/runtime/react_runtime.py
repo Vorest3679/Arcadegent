@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from contextlib import aclosing
 from contextvars import ContextVar
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -12,7 +13,8 @@ from typing import Any
 from uuid import uuid4
 
 from app.agent.context.context_builder import ContextBuilder
-from app.agent.llm.provider_adapter import ProviderAdapter
+from app.agent.llm.provider_adapter import ModelResponse, ProviderAdapter
+from app.agent.llm.streaming import StreamDone, TextDelta
 from app.agent.runtime.loop_guard import LoopGuard
 from app.agent.skills.execution import SkillExecution, bind_skill_execution
 from app.agent.skills.registry import SkillRegistry
@@ -98,25 +100,8 @@ def _short(text: str | None, *, limit: int = 120) -> str:
     return f"{compact[: max(1, limit - 3)].rstrip()}..."
 
 
-def _chunk_stream_text(text: str, *, max_chars: int = 18) -> list[str]:
-    """Split final reply into stable SSE chunks to avoid per-char event flooding."""
-    source = text if isinstance(text, str) else ""
-    if not source:
-        return []
-    chunks: list[str] = []
-    current: list[str] = []
-    for char in source:
-        current.append(char)
-        if char in {"\n", "。", "！", "？", ".", "!", "?"} or len(current) >= max_chars:
-            piece = "".join(current)
-            if piece:
-                chunks.append(piece)
-            current = []
-    if current:
-        piece = "".join(current)
-        if piece:
-            chunks.append(piece)
-    return chunks
+def _new_output_id() -> str:
+    return f"out_{uuid4().hex[:12]}"
 
 
 class ReactRuntime:
@@ -259,7 +244,7 @@ class ReactRuntime:
 
         if self._skill_registry is not None:
             await asyncio.to_thread(self._skill_registry.refresh)
-        final_text, model_error = await self._run_main_agent(
+        final_text, model_error, output_id = await self._run_main_agent(
             request=request,
             session_id=session_id,
             state=state,
@@ -274,14 +259,13 @@ class ReactRuntime:
             )
             final_text = self._fallback_reply(state, request)
             reply_source = "fallback"
+            output_id = None
 
-        output_id = f"out_{uuid4().hex[:12]}"
-        if not bool(state.working_memory.get("assistant_token_emitted")):
-            self._emit_assistant_tokens(
-                text=final_text,
-                active_subagent="main_agent",
-                output_id=output_id,
-            )
+        if output_id is None:
+            # The reply was not published as model output (summary tool, fallback):
+            # show it as a new output so earlier outputs stay sealed.
+            output_id = _new_output_id()
+            self._publish_assistant_text(final_text, output_id=output_id, stream_mode="synthetic")
         self._append_turn(
             state,
             AgentTurn(
@@ -364,10 +348,12 @@ class ReactRuntime:
         request: ChatRequest,
         session_id: str,
         state: AgentSessionState,
-    ) -> tuple[str | None, dict[str, Any] | None]:
+    ) -> tuple[str | None, dict[str, Any] | None, str | None]:
+        """Return final text, model error and the output_id the final text was published under."""
         profile = self._subagent_builder.get("main_agent")
         guard = LoopGuard(self._max_steps)
         final_text: str | None = None
+        final_output_id: str | None = None
         model_error: dict[str, Any] | None = None
 
         while not guard.exhausted:
@@ -386,7 +372,9 @@ class ReactRuntime:
                 len(profile.allowed_tools),
                 len(context.messages),
             )
-            model_response = await self._provider_adapter.complete(
+            output_id = _new_output_id()
+            model_response, published = await self._call_main_model(
+                output_id=output_id,
                 instructions=context.instructions,
                 messages=context.messages,
                 tools=await self._tool_registry.tool_definitions(allowed_tools=profile.allowed_tools),
@@ -444,6 +432,7 @@ class ReactRuntime:
 
             if model_response.text:
                 final_text = model_response.text.strip()
+                final_output_id = output_id if published else None
                 break
 
             if state.working_memory.get("reply"):
@@ -452,7 +441,35 @@ class ReactRuntime:
 
         if final_text is None and model_error is None:
             model_error = {"type": "step_limit", "message": "agent exhausted its step budget"}
-        return final_text, model_error
+        return final_text, model_error, final_output_id
+
+    async def _call_main_model(self, *, output_id: str, **request: Any) -> tuple[ModelResponse, bool]:
+        """Run one main-agent model call, publishing its text as one output.
+
+        Returns the response and whether its text was published under ``output_id``.
+        Cancelling the run closes the provider stream through ``aclosing``.
+        """
+        adapter = self._provider_adapter
+        if not adapter.streaming:
+            response = await adapter.complete(**request)
+            text = (response.text or "").strip()
+            if response.error is not None or not text:
+                return response, False
+            self._publish_assistant_text(text, output_id=output_id, stream_mode="synthetic")
+            return response, True
+        published = False
+        final: ModelResponse | None = None
+        async with aclosing(adapter.stream(**request)) as events:
+            async for event in events:
+                if isinstance(event, TextDelta):
+                    self._publish_assistant_text(event.text, output_id=output_id, stream_mode="provider")
+                    published = True
+                elif isinstance(event, StreamDone):
+                    final = event.response
+        if final is None:
+            final = ModelResponse(error={"type": "provider_error", "message": "stream ended without a final response"},
+                                  status="failed")
+        return final, published
 
     def _record_model_call(
         self,
@@ -1409,7 +1426,6 @@ class ReactRuntime:
             prepared["artifacts"].pop(key, None)
             prepared.pop(key, None)
             prepared.get("artifact_meta", {}).pop(key, None)
-        prepared["assistant_token_emitted"] = False
         return prepared
 
     def _bind_client_scope(self, state: AgentSessionState, client_id: str | None) -> None:
@@ -1453,26 +1469,12 @@ class ReactRuntime:
             payload["worker_run_id"] = worker_run_id
         self._publish("subagent.changed", payload)
 
-    def _emit_assistant_tokens(
-        self,
-        *,
-        text: str,
-        active_subagent: str,
-        output_id: str,
-    ) -> None:
-        """Publish the final reply as delta-only assistant.token events of one output.
-
-        These events are chunked locally after the full reply text is available
-        (provider requests are non-streaming), so they must not be read as
-        provider TTFT or real token-throughput measurements.
-        """
-        for chunk in _chunk_stream_text(text):
-            self._publish(
-                "assistant.token",
-                {
-                    "delta": chunk,
-                    "active_subagent": active_subagent,
-                    "stream_mode": "synthetic",
-                },
-                output_id=output_id,
-            )
+    def _publish_assistant_text(self, text: str, *, output_id: str, stream_mode: str) -> None:
+        """Publish reply text as a delta of one output; reasoning is never published."""
+        if not text:
+            return
+        self._publish(
+            "assistant.token",
+            {"delta": text, "active_subagent": "main_agent", "stream_mode": stream_mode},
+            output_id=output_id,
+        )

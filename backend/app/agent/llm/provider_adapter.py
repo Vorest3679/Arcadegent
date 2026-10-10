@@ -77,6 +77,10 @@ class ProviderAdapter:
     def enabled(self) -> bool:
         return self._config.enabled
 
+    @property
+    def streaming(self) -> bool:
+        return self._config.stream
+
     async def complete(
         self,
         *,

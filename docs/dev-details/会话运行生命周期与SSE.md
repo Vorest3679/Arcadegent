@@ -50,7 +50,7 @@ run 状态只表示执行结果：模型失败、走兜底回复等业务失败�
 - 记录本封口且全部推送完毕后连接结束，不依赖 `assistant.completed` 等业务事件名。指定的 `run_id` 不在记录本中（从未运行、已被新一轮替换或进程重启）返回 404。
 - 等待期间按 `SSE_KEEPALIVE_SECONDS` 发送 `: keep-alive` 注释。
 - 每个会话只保留最近一轮的记录本，单轮上限为 `REPLAY_BUFFER_SIZE`（默认 2000），新一轮开始后旧 run 不能再订阅。
-- `assistant.token` 只携带增量 `delta`，同一回复的片段共用 `output_id`，`assistant.completed` 带相同 `output_id` 与完整 `reply`。当前片段仍是在完整回复生成后本地分块（`stream_mode: synthetic`）。
+- `assistant.token` 只携带增量 `delta`，同一回复的片段共用 `output_id`，`assistant.completed` 带相同 `output_id` 与完整 `reply`。每次主 agent 模型调用对应一个 `output_id`；`LLM_STREAM=true` 时片段随模型生成实时发出（`stream_mode: provider`），否则在调用结束后整段发出（`stream_mode: synthetic`），详见 [ReAct 运行时核心逻辑](./ReAct运行时核心逻辑.md)。
 
 ## 前端订阅
 

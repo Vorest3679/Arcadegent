@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from app.agent.llm.provider_adapter import ModelResponse
+from app.agent.llm.streaming import StreamDone, TextDelta
 from backend.app.tests.integration._api_test_support import (
     _build_client,
     _stream_events,
@@ -71,7 +73,15 @@ def test_stream_replays_after_last_event_id_without_duplicates(tmp_path: Path) -
 def test_evicted_cursor_receives_stream_reset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REPLAY_BUFFER_SIZE", "10")
     client = _build_client(tmp_path)
-    _stub_provider_adapter(client, reply="这是一段很长的回复。" * 30)
+    adapter = client.app.state.container.react_runtime._provider_adapter
+    adapter._config = replace(adapter._config, stream=True)
+
+    async def many_deltas(**kwargs):
+        for _ in range(30):
+            yield TextDelta("这是一段很长的回复。")
+        yield StreamDone(ModelResponse(text="这是一段很长的回复。" * 30, status="completed"))
+
+    adapter.stream = many_deltas  # type: ignore[method-assign]
     response = client.post("/api/chat", json={"message": "find Gamma"}).json()
 
     events = _stream_events(client, response["session_id"], run_id=response["run_id"], after_id=1)
