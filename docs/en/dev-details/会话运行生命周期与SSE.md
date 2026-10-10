@@ -50,7 +50,7 @@ Shutdown: on SIGTERM/SIGINT draining starts immediately (no new runs, active run
 - The connection ends once the book is sealed and fully delivered, independent of business event names such as `assistant.completed`. A `run_id` not in the event book (never ran, replaced by a newer run, or lost on restart) returns 404.
 - While waiting, a `: keep-alive` comment is sent every `SSE_KEEPALIVE_SECONDS`.
 - Only the latest run's book is kept per session, capped at `REPLAY_BUFFER_SIZE` events (default 2000); a previous run cannot be subscribed to after a new one starts.
-- `assistant.token` carries only the incremental `delta`; chunks of one reply share an `output_id`, and `assistant.completed` carries the same `output_id` with the full `reply`. The chunks are still produced locally after the full reply is available (`stream_mode: synthetic`).
+- `assistant.token` carries only the incremental `delta`; chunks of one reply share an `output_id`, and `assistant.completed` carries the same `output_id` with the full `reply`. Each main-agent model call has its own `output_id`. With `LLM_STREAM=true`, chunks are published as the model generates them (`stream_mode: provider`); otherwise the whole text of a call is published once the call finishes (`stream_mode: synthetic`). See [ReAct Runtime Core Logic](./ReAct运行时核心逻辑.md).
 
 ## Frontend subscription
 

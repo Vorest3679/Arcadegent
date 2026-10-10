@@ -50,7 +50,7 @@ run の状態は実行結果だけを表します。モデルエラーやフォ�
 - 記録が封印され、すべて送信された時点で接続を終了します。`assistant.completed` などの業務イベント名には依存しません。記録にない `run_id`（未実行、新しい run に置き換え済み、再起動で消失）は 404 です。
 - 待機中は `SSE_KEEPALIVE_SECONDS` ごとに `: keep-alive` コメントを送ります。
 - セッションごとに最新 run の記録のみを保持し、上限は `REPLAY_BUFFER_SIZE` 件（既定 2000）です。新しい run が始まると以前の run は購読できません。
-- `assistant.token` は増分 `delta` のみを持ち、同じ応答の断片は `output_id` を共有します。`assistant.completed` は同じ `output_id` と完全な `reply` を持ちます。断片は現在も完全な応答の生成後にローカルで分割しています（`stream_mode: synthetic`）。
+- `assistant.token` は増分 `delta` のみを持ち、同じ応答の断片は `output_id` を共有します。`assistant.completed` は同じ `output_id` と完全な `reply` を持ちます。主 agent のモデル呼び出しごとに `output_id` が 1 つ割り当てられます。`LLM_STREAM=true` のときは、モデルの生成に合わせて断片をリアルタイムに送信します（`stream_mode: provider`）。それ以外では、呼び出しの完了後にテキスト全体を 1 回で送信します（`stream_mode: synthetic`）。詳しくは [ReAct ランタイムの中核ロジック](./ReAct运行时核心逻辑.md) を参照してください。
 
 ## フロントエンドの購読
 
