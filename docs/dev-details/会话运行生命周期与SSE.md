@@ -55,7 +55,7 @@ run 状态只表示执行结果：模型失败、走兜底回复等业务失败�
 ## 前端订阅
 
 - `apps/web/src/lib/runStream.ts` 的 `openRunStream` 只订阅一个 run，不依赖 React：校验外壳（`session_id`/`run_id` 与订阅一致，其余帧丢弃）；`id <= 已收最大 id` 的重放帧丢弃；断线后按 500ms×2ⁿ 退避、带 `last_event_id` 重连，最多 3 次；收到终态 `run.state` 后关闭，不再重连。
-- 文本按 `output_id` 追加 `delta`。出现新的 `output_id` 时上一段**定格**（`onOutputSealed`），界面显示为「中间回复」，新的一段单独显示。目前后端只为最终回复发 token，多段输出要等真实流式接入后才会出现。
+- 文本按 `output_id` 追加 `delta`。出现新的 `output_id` 时上一段**定格**（`onOutputSealed`），界面显示为「中间回复」，新的一段单独显示。每次主 agent 模型调用对应一个 `output_id`；run 结束、重拉详情后，这些中间回复由详情的 `steps` 接替（见下节）。
 - 「当前 run 是否仍在显示中」由 store 的 `activeRunId` / `committedRunId` 决定：终态后重拉会话详情，详情与 `committedRunId` 在同一次更新中写入，流式气泡与进度卡片随之切换为历史消息。不再用文本前缀或长度猜测重复。
 - 刷新页面时，若详情的 `current_run` 未结束，则不带游标订阅该 run，从头回放；收到 `stream.reset` 时重拉详情后继续订阅。
 - 重连 3 次仍失败时，先拉详情确认该 run 仍在运行，再按 `run_id` 取消。
@@ -160,6 +160,20 @@ function applyToken(envelope: ChatStreamEnvelope): void {
 ```
 
 职责边界：`runStream.ts` 只懂外壳、游标、重连和按 output_id 拼文本，不认识 tool/worker/route 等业务事件；业务含义在 controller 的 `handleRunEvent` 和 `lib/chatStream.ts`（`mapArtifactsForEvent`、`toProgressText`）中解释；组件只读 store。
+
+## 回合过程（steps）与历史恢复
+
+SSE 里的中间回复只在 run 进行中可见。run 结束后前端重拉会话详情，过程由详情接口提供，刷新页面也靠它恢复。
+
+- **存储**：主 agent 每次模型调用的文本、每条工具执行记录，本来就随 `chat_sessions.turns` 持久化（模型证据放在 `payload.model`，对话界面不直接使用），不需要新表。
+- **投影**：`GET /api/chat/sessions/{id}` 的每个 user 回合带 `steps`（`api/http/chat.py` 的 `_round_steps`），归属为这条用户消息到下一条用户消息之间发生的过程，按发生顺序排列：
+  - `{"kind": "text", "agent", "content", "created_at"}`：主 agent 带着工具调用写下的文本（中间回复）。不带工具调用的那次调用就是最终回复，由 assistant 回合本身表示，不重复投影。
+  - `{"kind": "tool", "call_id", "name", "agent", "status", "created_at"}`：一次工具调用，`status` 为 `completed` 或 `failed`。worker 内部的工具调用也在其中，`agent` 为 worker 名。
+- **不下发**：模型证据（transcript、usage）、工具参数与结果、worker 的模型文本。
+- **前端**：`ChatPanel` 把历史消息、`steps` 中的中间回复和实时的流式气泡放进同一个带 key 的列表，历史与实时使用相同的 key，交接时复用 DOM 节点（不重新挂载、不重播入场动画、不重载地图卡片）。运行中刷新时，已落库的 steps 先显示，随后订阅从头回放，实时的中间回复接替它们，不会重复。
+- **后台重拉不显示加载横幅**：交接和 `stream.reset` 触发的详情重拉带 `preserveStreamState`，只更新内容，不显示「加载会话中...」。
+- **详情加载失败的兜底**：`commitRunLocally` 用 `assistant.completed` 的最终回复和实时中间回复在本地补一条历史，回复不会因为交接失败而消失。
+- 已知限制：工具类步骤目前只返回数据，界面还没有渲染（计划 2 Phase 3）；被取消的 run 中尚未写入的工具记录看不到。
 
 ## 状态来源
 

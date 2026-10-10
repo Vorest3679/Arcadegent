@@ -55,7 +55,7 @@ Shutdown: on SIGTERM/SIGINT draining starts immediately (no new runs, active run
 ## Frontend subscription
 
 - `openRunStream` in `apps/web/src/lib/runStream.ts` subscribes to exactly one run and has no React dependency. It checks the envelope (`session_id`/`run_id` must match the subscription; other frames are dropped), drops replayed frames with `id <=` the highest id seen, reconnects with `last_event_id` after 500ms×2ⁿ backoff up to 3 times, and closes on the terminal `run.state` without reconnecting.
-- Text appends `delta` per `output_id`. When a new `output_id` arrives the previous output is **sealed** (`onOutputSealed`) and shown as an intermediate reply; the new output is shown on its own. The backend currently emits tokens only for the final reply, so multiple outputs appear only once real provider streaming lands.
+- Text appends `delta` per `output_id`. When a new `output_id` arrives the previous output is **sealed** (`onOutputSealed`) and shown as an intermediate reply; the new output is shown on its own. Every main-agent model call has its own `output_id`; after the run ends and the detail is reloaded, the detail's `steps` take over these intermediate replies (see the next section).
 - Whether a run is still shown live is decided by `activeRunId` / `committedRunId` in the store: after the terminal state the session detail is reloaded and written together with `committedRunId`, so the streaming bubble and progress card hand over to the history turn in one update. Duplicates are no longer guessed from text prefixes or lengths.
 - On page reload, if the detail's `current_run` is unfinished, the client subscribes to it without a cursor and replays it from the start; on `stream.reset` it reloads the detail and keeps the subscription.
 - After 3 failed reconnects the client reloads the detail to confirm the run is still active, then cancels it by `run_id`.
@@ -160,6 +160,20 @@ function applyToken(envelope: ChatStreamEnvelope): void {
 ```
 
 Boundaries: `runStream.ts` only knows the envelope, cursor, reconnects, and assembling text per output_id; it does not know business events such as tool/worker/route. Their meaning is interpreted in the controller's `handleRunEvent` and in `lib/chatStream.ts` (`mapArtifactsForEvent`, `toProgressText`); components only read the store.
+
+## Round steps and history recovery
+
+Intermediate replies are visible over SSE only while a run is in progress. After the run ends the frontend reloads the session detail, which provides the process; a page reload recovers it the same way.
+
+- **Storage**: the text of every main-agent model call and every tool record is already persisted in `chat_sessions.turns` (model evidence lives in `payload.model` and is not used by the chat UI directly). No new table is needed.
+- **Projection**: each user turn of `GET /api/chat/sessions/{id}` carries `steps` (`_round_steps` in `api/http/chat.py`), covering what happened between that user message and the next one, in order:
+  - `{"kind": "text", "agent", "content", "created_at"}`: text the main agent wrote together with tool calls (an intermediate reply). The call without tool calls is the final reply, represented by the assistant turn itself and not projected again.
+  - `{"kind": "tool", "call_id", "name", "agent", "status", "created_at"}`: one tool call; `status` is `completed` or `failed`. Tool calls made inside workers are included, with the worker name as `agent`.
+- **Not sent**: model evidence (transcript, usage), tool arguments and results, and worker model text.
+- **Frontend**: `ChatPanel` puts history messages, intermediate replies from `steps`, and the live streaming bubble into one keyed list. History and live items share keys, so the hand-over reuses DOM nodes (no remount, no replayed entrance animation, no map card reload). On a mid-run reload the persisted steps show first, then the subscription replays from the start and the live intermediate replies take over without duplicates.
+- **Background reloads show no loading banner**: the detail reload triggered by hand-over or `stream.reset` uses `preserveStreamState` and only updates content, without the "loading session" text.
+- **Fallback when the detail cannot be loaded**: `commitRunLocally` writes a local history from the final reply of `assistant.completed` and the live intermediate replies, so the reply does not vanish because of a failed hand-over.
+- Known limits: tool steps are only returned as data for now and not rendered yet (plan 2 Phase 3); tool records not yet written when a run is cancelled are not visible.
 
 ## Source of status
 

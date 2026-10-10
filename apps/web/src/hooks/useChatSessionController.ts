@@ -19,7 +19,8 @@ import { useAppStore } from "../stores/appStore";
 import type {
   ChatMapArtifacts,
   ChatSessionDetail,
-  ChatStreamEnvelope
+  ChatStreamEnvelope,
+  ChatTurnStep
 } from "../types";
 import { useStreamReply } from "./useStreamReply";
 
@@ -205,22 +206,35 @@ export function useChatSessionController() {
     return () => generation === sessionGenerationRef.current && request === detailRequestRef.current;
   }
 
-  // Hand-over fallback when the detail cannot be loaded: keep the final reply
-  // as a local history turn and release the composer.
+  // 当 detail 无法加载时，保留本地的最终回复和中间输出作为历史记录。
   function commitRunLocally(runId: string): void {
     const store = useAppStore.getState();
     const reply = finalReplyRef.current?.trim();
-    if (reply) {
+    // 实时的中间回复将随着移交而消失；保留它们
+    // 随着回合用户转动的步骤，就像服务器细节一样。
+    const intermediates = store.sealedOutputs.map((output): ChatTurnStep => ({
+      kind: "text",
+      content: output.text,
+      created_at: output.at
+    }));
+    if (reply || intermediates.length > 0) {
       const artifacts = store.activeMapArtifacts;
-      store.setTurns((previous) => [
-        ...previous,
-        {
-          role: "assistant",
-          content: reply,
-          map_artifacts: artifacts ? { ...artifacts, route_pending: false } : null,
-          created_at: new Date().toISOString()
+      store.setTurns((previous) => {
+        const next = [...previous];// 找到最后一个来自用户的轮次并附加中间回复
+        const lastUser = next.map((turn) => turn.role).lastIndexOf("user");
+        if (lastUser >= 0 && intermediates.length > 0) {//如果有最终回复，则添加一个助手轮次。
+          next[lastUser] = { ...next[lastUser], steps: intermediates };
         }
-      ]);
+        if (reply) {
+          next.push({
+            role: "assistant",
+            content: reply,
+            map_artifacts: artifacts ? { ...artifacts, route_pending: false } : null,
+            created_at: new Date().toISOString()
+          });
+        }
+        return next;
+      });
     }
     finalReplyRef.current = null;
     store.setActiveRunId(runId);
@@ -429,7 +443,11 @@ export function useChatSessionController() {
     const reconnectStream = options?.reconnectStream ?? true;
     const isLatest = beginDetailRequest();
     const store = useAppStore.getState();
-    store.setTurnsLoading(true);
+    // A background reload (hand-over, reset) keeps the content on screen; only
+    // an explicit load shows the loading banner.
+    if (!preserveStreamState) {
+      store.setTurnsLoading(true);
+    }
     store.setChatError("");
 
     try {

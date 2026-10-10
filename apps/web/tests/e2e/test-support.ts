@@ -415,6 +415,10 @@ export async function installApiMocks(page: Page, options: { totalPages?: number
 
 export type ChatApiMockOptions = {
   reply?: string;
+  // Steps the server attaches to the user turn of the round (see ChatTurnStep).
+  steps?: object[];
+  // Steps already persisted while the run is still running (a mid-run reload).
+  runningSteps?: object[];
   // "follow-stream": running until the mocked stream sent its terminal state.
   detailStatus?: "running" | "completed" | "follow-stream";
   // A number delays every detail response; an array delays by request index.
@@ -476,9 +480,9 @@ export async function installChatApiMocks(page: Page, options: ChatApiMockOption
         created_at: "2026-04-15T00:00:00Z",
         updated_at: "2026-04-15T00:00:10Z",
         turns: running
-          ? [userTurn]
+          ? [{ ...userTurn, steps: options.runningSteps ?? [] }]
           : [
-            userTurn,
+            { ...userTurn, steps: options.steps ?? [] },
             {
               role: "assistant",
               content: reply,

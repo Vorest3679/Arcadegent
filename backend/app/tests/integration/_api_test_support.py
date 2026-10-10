@@ -185,6 +185,8 @@ def _build_client(
     os.environ["LLM_API_KEY"] = ""
     os.environ["LLM_BASE_URL"] = "https://api.example.invalid/v1"
     os.environ["LLM_MODEL"] = "test-model"
+    # Pin streaming off: a developer .env may enable it, but tests stub complete() only.
+    os.environ["LLM_STREAM"] = "false"
     os.environ["AMAP_API_KEY"] = "test-amap-key"
     os.environ["MCP_SERVERS_DIR"] = str(mcp_servers_dir or empty_mcp_dir)
     os.environ["SUPABASE_URL"] = "https://example.supabase.co"
@@ -229,6 +231,8 @@ def _build_client_with_rows(
     os.environ["LLM_API_KEY"] = ""
     os.environ["LLM_BASE_URL"] = "https://api.example.invalid/v1"
     os.environ["LLM_MODEL"] = "test-model"
+    # Pin streaming off: a developer .env may enable it, but tests stub complete() only.
+    os.environ["LLM_STREAM"] = "false"
     os.environ["AMAP_API_KEY"] = "test-amap-key"
     os.environ["MCP_SERVERS_DIR"] = str(empty_mcp_dir)
     os.environ["SUPABASE_URL"] = "https://example.supabase.co"

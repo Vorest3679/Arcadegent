@@ -21,7 +21,10 @@ from app.protocol.messages import (
     ChatSessionDispatchDto,
     ChatSessionDetailDto,
     ChatSessionSummaryDto,
+    ChatTextStepDto,
+    ChatToolStepDto,
     ChatTurnMapArtifactsDto,
+    ChatTurnStepDto,
     ClientLocationContext,
     IntentType,
 )
@@ -110,6 +113,41 @@ def _visible_turns(turns: list[AgentTurn]) -> list[AgentTurn]:
     ]
 
 
+def _to_step(turn: AgentTurn) -> ChatTurnStepDto | None:
+    """Project stored turn into a UI step, or None when it is not part of the round's story.
+
+    Only names, status and the main agent's own text leave the server; model
+    evidence (transcript, usage), tool arguments and tool results stay private.
+    """
+    if turn.role == "tool":
+        if not turn.name:
+            return None
+        status = "completed" if turn.payload.get("status") == "completed" else "failed"
+        return ChatToolStepDto(
+            call_id=turn.call_id, name=turn.name, agent=turn.agent, status=status, created_at=turn.created_at
+        )
+    model = turn.payload.get("model")
+    if turn.role == "assistant" and turn.scope == "conversation" and isinstance(model, dict):
+        text = turn.content.strip()
+        # A call without tool calls is the final reply, which is shown as the assistant turn itself.
+        if text and model.get("tool_calls"):
+            return ChatTextStepDto(agent=turn.agent, content=text, created_at=turn.created_at)
+    return None
+
+
+def _round_steps(turns: list[AgentTurn]) -> list[list[ChatTurnStepDto]]:
+    """Steps of every round, one list per user turn in order (a round ends at the next user turn)."""
+    rounds: list[list[ChatTurnStepDto]] = []
+    for turn in turns:
+        if turn.role == "user":
+            rounds.append([])
+            continue
+        step = _to_step(turn)
+        if step is not None and rounds:
+            rounds[-1].append(step)
+    return rounds
+
+
 def _turn_map_artifacts(turn: AgentTurn, *, container: AppContainer) -> ChatTurnMapArtifactsDto | None:
     raw = turn.payload.get("map_artifacts") if isinstance(turn.payload, dict) else None
     if not isinstance(raw, dict):
@@ -138,13 +176,16 @@ def _turn_map_artifacts(turn: AgentTurn, *, container: AppContainer) -> ChatTurn
     )
 
 
-def _to_turn(turn: AgentTurn, *, container: AppContainer) -> ChatHistoryTurnDto:
+def _to_turn(
+    turn: AgentTurn, *, container: AppContainer, steps: list[ChatTurnStepDto] | None = None
+) -> ChatHistoryTurnDto:
     return ChatHistoryTurnDto(
         role=turn.role,
         content=turn.content,
         name=turn.name,
         call_id=turn.call_id,
         map_artifacts=_turn_map_artifacts(turn, container=container),
+        steps=steps or [],
         created_at=turn.created_at,
     )
 
@@ -186,6 +227,17 @@ def _state_client_location(state: AgentSessionState) -> ClientLocationContext | 
         return None
 
 
+def _history_turns(
+    state: AgentSessionState, visible_turns: list[AgentTurn], *, container: AppContainer
+) -> list[ChatHistoryTurnDto]:
+    # Every user turn is visible, so visible user turns line up with the rounds.
+    rounds = iter(_round_steps(state.turns))
+    return [
+        _to_turn(turn, container=container, steps=next(rounds, []) if turn.role == "user" else None)
+        for turn in visible_turns
+    ]
+
+
 def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSessionDetailDto:
     visible_turns = _visible_turns(state.turns)
     raw_shops = _state_shop_rows(state)
@@ -219,7 +271,7 @@ def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSess
         turn_count=len(visible_turns),
         created_at=state.created_at,
         updated_at=state.updated_at,
-        turns=[_to_turn(turn, container=container) for turn in visible_turns],
+        turns=_history_turns(state, visible_turns, container=container),
     )
 
 

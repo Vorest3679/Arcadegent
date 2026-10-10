@@ -1,7 +1,8 @@
-import { Fragment, FormEvent, useEffect, useRef } from "react";
+import { FormEvent, ReactNode, useEffect, useRef } from "react";
 import { formatSubagentLabel, formatTimeLabel } from "../lib/chatStream";
 import { useAppStore } from "../stores/appStore";
 import { MarkdownMessage } from "./MarkdownMessage";
+import type { ChatHistoryTurn } from "../types";
 import { AgentMapCard } from "./map/AgentMapCard";
 
 const QUICK_PROMPTS = [
@@ -24,6 +25,7 @@ export function ChatPanel({
   streamReplyActive
 }: ChatPanelProps) {
   const turns = useAppStore((state) => state.turns);
+  const activeSessionId = useAppStore((state) => state.activeSessionId);
   const loading = useAppStore((state) => state.turnsLoading);
   const sending = useAppStore((state) => state.sending);
   const inputValue = useAppStore((state) => state.inputValue);
@@ -96,6 +98,91 @@ export function ChatPanel({
     );
   };
 
+  // One flat keyed list. Live items and history items share keys, so a run that
+  // is handed over to history keeps its DOM nodes (no remount, no replayed
+  // entrance animation, no map card reload).
+  const sessionKey = activeSessionId ?? "new";
+  const renderIntermediate = (key: string, text: string, animationIndex: number) => (
+    <li
+      key={key}
+      className="chat-message assistant intermediate"
+      style={{ animationDelay: `${Math.min(animationIndex, 8) * 45}ms` }}
+    >
+      <div className="chat-bubble">
+        <MarkdownMessage content={text} />
+        <small>中间回复</small>
+      </div>
+    </li>
+  );
+  // While the round streams, live sealed outputs are the source (a replay
+  // rebuilds all of them); history steps only fill in before the replay arrives.
+  const roundTexts = (turn: ChatHistoryTurn, index: number): string[] => {
+    if (turn.role !== "user") {
+      return [];
+    }
+    if (runLive && index === lastUserIndex && sealedOutputs.length > 0) {
+      return sealedOutputs.map((output) => output.text);
+    }
+    return (turn.steps ?? []).flatMap((step) => step.kind === "text" ? [step.content] : []);
+  };
+
+  const messageItems: ReactNode[] = [];
+  if (lastUserIndex < 0 && stageStatus) {
+    messageItems.push(stageStatus);
+  }
+  turns.forEach((turn, index) => {
+    messageItems.push(
+      <li
+        key={`${sessionKey}-${turn.role}-${index}`}
+        className={`chat-message ${turn.role}`}
+        style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
+      >
+        <div className="chat-bubble">
+          {turn.role === "assistant" ? (
+            <MarkdownMessage content={turn.content} />
+          ) : (
+            <p className="chat-plain-text">{turn.content}</p>
+          )}
+          <small>{formatTimeLabel(turn.created_at)}</small>
+        </div>
+      </li>
+    );
+    if (index === lastUserIndex && stageStatus) {
+      messageItems.push(stageStatus);
+    }
+    roundTexts(turn, index).forEach((text, order) => {
+      messageItems.push(renderIntermediate(`${sessionKey}-step-${index}-${order}`, text, index + order + 1));
+    });
+    if (turn.role === "assistant" && turn.map_artifacts) {
+      messageItems.push(renderMapCard(`${sessionKey}-map-${index}`, index + 1, turn.map_artifacts));
+    }
+  });
+  if (showStreamingBubble) {
+    // Same key as the history turn this run will become (the next index).
+    messageItems.push(
+      <li
+        key={`${sessionKey}-assistant-${turns.length}`}
+        className="chat-message assistant streaming"
+        style={{ animationDelay: `${Math.min(turns.length, 8) * 45}ms` }}
+      >
+        <div className="chat-bubble">
+          {streamReply.trim() ? (
+            <MarkdownMessage content={streamReply} className={streamReplyActive ? "is-streaming" : undefined} />
+          ) : (
+            <p className="chat-stream-placeholder">
+              正在生成回复...
+              {streamReplyActive ? <span className="chat-stream-caret" aria-hidden="true" /> : null}
+            </p>
+          )}
+          <small>{streamReplyActive ? "生成中..." : "已生成"}</small>
+        </div>
+      </li>
+    );
+    if (showMapCard) {
+      messageItems.push(renderMapCard(`${sessionKey}-map-${turns.length}`, turns.length + 1, mapArtifacts));
+    }
+  }
+
   return (
     <div className="chat-view">
       <div className="chat-scroll">
@@ -118,69 +205,7 @@ export function ChatPanel({
             </div>
           </div>
         ) : (
-          <ul className="chat-message-list">
-            {lastUserIndex < 0 ? stageStatus : null}
-            {turns.map((turn, index) => (
-              <Fragment key={`${turn.created_at}-${index}`}>
-                <li
-                  className={`chat-message ${turn.role}`}
-                  style={{ animationDelay: `${Math.min(index, 8) * 45}ms` }}
-                >
-                  <div className="chat-bubble">
-                    {turn.role === "assistant" ? (
-                      <MarkdownMessage content={turn.content} />
-                    ) : (
-                      <p className="chat-plain-text">{turn.content}</p>
-                    )}
-                    <small>{formatTimeLabel(turn.created_at)}</small>
-                  </div>
-                </li>
-                {index === lastUserIndex ? stageStatus : null}
-                {turn.role === "assistant" && turn.map_artifacts
-                  ? renderMapCard(`agent-map-card-history-${index}`, index + 1, turn.map_artifacts)
-                  : null}
-              </Fragment>
-            ))}
-
-            {showStreamingBubble
-              ? sealedOutputs.map((output, index) => (
-                <li
-                  key={`sealed-output-${output.outputId}`}
-                  className="chat-message assistant intermediate"
-                  style={{ animationDelay: `${Math.min(turns.length + index, 8) * 45}ms` }}
-                >
-                  <div className="chat-bubble">
-                    <MarkdownMessage content={output.text} />
-                    <small>中间回复</small>
-                  </div>
-                </li>
-              ))
-              : null}
-
-            {showStreamingBubble ? (
-              <li
-                key="streaming-assistant"
-                className="chat-message assistant streaming"
-                style={{ animationDelay: `${Math.min(turns.length, 8) * 45}ms` }}
-              >
-                <div className="chat-bubble">
-                  {streamReply.trim() ? (
-                    <MarkdownMessage content={streamReply} className={streamReplyActive ? "is-streaming" : undefined} />
-                  ) : (
-                    <p className="chat-stream-placeholder">
-                      正在生成回复...
-                      {streamReplyActive ? <span className="chat-stream-caret" aria-hidden="true" /> : null}
-                    </p>
-                  )}
-                  <small>{streamReplyActive ? "生成中..." : "已生成"}</small>
-                </div>
-              </li>
-            ) : null}
-
-            {showStreamingBubble && showMapCard
-              ? renderMapCard("agent-map-card-streaming", turns.length + 1, mapArtifacts)
-              : null}
-          </ul>
+          <ul className="chat-message-list">{messageItems}</ul>
         )}
 
         {loading ? <p className="chat-loading">加载会话中...</p> : null}

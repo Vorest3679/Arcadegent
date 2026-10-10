@@ -290,3 +290,134 @@ test("a stale stream.reset snapshot cannot overwrite the finished run", async ({
   expect(await page.getByPlaceholder(INPUT).isDisabled()).toBe(false);
   expect(await page.getByText(reply, { exact: true }).count()).toBe(1);
 });
+
+const INTERMEDIATE_STEPS = [
+  { kind: "text", agent: "main_agent", content: "我先查一下。", created_at: "2026-04-15T00:00:05Z" },
+  { kind: "tool", call_id: "c1", name: "db_query_tool", agent: "search_worker", status: "completed", created_at: "2026-04-15T00:00:06Z" }
+];
+
+function twoOutputScript(reply: string, doneAt = 400): StreamFrame[] {
+  return [
+    runStateFrame(10, 1, "running"),
+    token(20, 2, "我先查一下。", "out_a"),
+    eventFrame(40, 3, "tool.started", { tool: "db_query_tool", call_id: "c1" }),
+    eventFrame(60, 4, "tool.completed", { tool: "db_query_tool", call_id: "c1" }),
+    token(80, 5, reply, "out_b"),
+    eventFrame(doneAt, 6, "assistant.completed", { reply }, { output_id: "out_b" }),
+    runStateFrame(doneAt, 7, "completed")
+  ];
+}
+
+test("intermediate replies stay in the history after the run is handed over", async ({ page }) => {
+  const reply = "找到了 Arcade One。";
+  await installAmapMock(page);
+  await installStreamMock(page, [twoOutputScript(reply)]);
+  await installChatApiMocks(page, { reply, steps: INTERMEDIATE_STEPS });
+
+  await send(page);
+  await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
+  await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
+  // The intermediate reply is now a history item, exactly once, before the final reply.
+  const list = page.locator(".chat-message-list");
+  await expect(list.locator(".chat-message.intermediate")).toHaveCount(1);
+  await expect(list.locator(".chat-message.intermediate")).toContainText("我先查一下。");
+  // Message bubbles only; the map card item has no bubble.
+  const order = await list.locator(".chat-message:has(.chat-bubble):not(.stream-event)").evaluateAll((nodes) =>
+    nodes.map((node) => node.className.includes("intermediate") ? "intermediate" : node.className.includes("user") ? "user" : "assistant")
+  );
+  expect(order).toEqual(["user", "intermediate", "assistant"]);
+});
+
+test("intermediate replies are restored after a page reload", async ({ page }) => {
+  const reply = "找到了 Arcade One。";
+  await installAmapMock(page);
+  await installStreamMock(page);
+  await installChatApiMocks(page, { reply, sessionVisible: true, steps: INTERMEDIATE_STEPS });
+
+  await page.goto("/");
+  await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
+  await expect(page.locator(".chat-message.intermediate")).toHaveCount(1);
+  await expect(page.locator(".chat-message.intermediate")).toContainText("我先查一下。");
+});
+
+test("a mid-run reload shows each intermediate reply once", async ({ page }) => {
+  const reply = "找到了 Arcade One。";
+  await installAmapMock(page);
+  // The server already persisted the first intermediate reply; the replay delivers it again.
+  await installStreamMock(page, [twoOutputScript(reply, 1500)]);
+  await installChatApiMocks(page, {
+    reply,
+    sessionVisible: true,
+    detailStatus: "follow-stream",
+    runningSteps: INTERMEDIATE_STEPS,
+    steps: INTERMEDIATE_STEPS
+  });
+
+  await page.goto("/");
+  await expect(page.locator(".chat-message.streaming")).toContainText(reply);
+  expect(await page.locator(".chat-message.intermediate").count()).toBe(1);
+  await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
+  await expect(page.locator(".chat-message.intermediate")).toHaveCount(1);
+});
+
+test("handing over does not reload the page content", async ({ page }) => {
+  const reply = "找到了 Arcade One。";
+  await installAmapMock(page);
+  await installStreamMock(page, [twoOutputScript(reply)]);
+  await installChatApiMocks(page, { reply, steps: INTERMEDIATE_STEPS, detailDelayMs: 600 });
+
+  await send(page);
+  const userBubble = page.locator(".chat-message.user").first();
+  await expect(page.locator(".chat-message.intermediate")).toHaveCount(1);
+  await userBubble.evaluate((node) => node.setAttribute("data-marker", "same-node"));
+  // Watch for the loading banner while the detail is fetched in the background,
+  // and sample every frame for a moment where the reply is missing or not opaque.
+  await page.evaluate((replyText) => {
+    const frames = { total: 0, hidden: 0 };
+    let seen = false;
+    (window as any).__FRAMES__ = frames;
+    const sample = () => {
+      const bubbles = Array.from(document.querySelectorAll(".chat-message.assistant"))
+        .filter((node) => node.textContent?.includes(replyText));
+      const visible = bubbles.some((node) => Number(getComputedStyle(node).opacity) > 0.99);
+      // Count from the first frame the reply is visible; before that it is not streamed yet.
+      if (visible) seen = true;
+      if (seen) {
+        frames.total += 1;
+        if (!visible) frames.hidden += 1;
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+    (window as any).__SAW_LOADING__ = false;
+    new MutationObserver(() => {
+      if (document.querySelector(".chat-loading")) (window as any).__SAW_LOADING__ = true;
+    }).observe(document.body, { childList: true, subtree: true });
+  }, reply);
+
+  await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
+  await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
+  expect(await page.evaluate(() => (window as any).__SAW_LOADING__)).toBe(false);
+  await expect(page.locator(".chat-message.user").first()).toHaveAttribute("data-marker", "same-node");
+  // Every frame of the hand-over showed the full reply in a fully opaque bubble.
+  const frames = await page.evaluate(() => (window as any).__FRAMES__ as { total: number; hidden: number });
+  expect(frames.total).toBeGreaterThan(10);
+  expect(frames.hidden).toBe(0);
+});
+
+test("a failed hand-over keeps the intermediate replies too", async ({ page }) => {
+  const reply = "找到了 Arcade One。";
+  await installAmapMock(page);
+  await installStreamMock(page, [twoOutputScript(reply)]);
+  await installChatApiMocks(page, { reply });
+  await page.route("**/api/chat/sessions/s_e2e?**", async (route) => {
+    await route.fulfill({ status: 500, body: "boom" });
+  });
+
+  await send(page);
+  await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
+  await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
+  await expect(page.locator(".chat-message.intermediate")).toHaveCount(1);
+  await expect(page.locator(".chat-message.intermediate")).toContainText("我先查一下。");
+  await expect(page.getByPlaceholder(INPUT)).toBeEnabled();
+});

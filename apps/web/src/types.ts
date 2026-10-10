@@ -166,12 +166,26 @@ export type ChatSessionDispatch = {
   status: ChatSessionStatus;
 };
 
+// One step of the round a user message started, in the order it happened.
+export type ChatTurnStep =
+  | { kind: "text"; agent?: string | null; content: string; created_at: string }
+  | {
+    kind: "tool";
+    call_id?: string | null;
+    name: string;
+    agent?: string | null;
+    status: "completed" | "failed";
+    created_at: string;
+  };
+
 export type ChatHistoryTurn = {
   role: "user" | "assistant" | "tool";
   content: string;
   name?: string | null;
   call_id?: string | null;
   map_artifacts?: ChatMapArtifacts | null;
+  // Only on user turns: the intermediate replies and tool calls of that round.
+  steps?: ChatTurnStep[];
   created_at: string;
 };
 
