@@ -162,3 +162,22 @@ def test_cancel_and_stream_require_run_id(tmp_path: Path) -> None:
 def test_stream_for_unknown_run_is_not_found(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
     assert client.get("/api/stream/s_never_ran", params={"run_id": "r_missing"}).status_code == 404
+
+
+def test_request_refused_while_draining_leaves_session_unchanged(tmp_path: Path) -> None:
+    client = _build_client(tmp_path)
+    _stub_provider_adapter(client)
+    first = client.post("/api/chat", json={"session_id": "s_drain1", "message": "find Gamma"}).json()
+    before = client.get("/api/chat/sessions/s_drain1").json()
+    assert before["status"] == "completed"
+
+    manager = client.app.state.container.run_manager
+    assert client.portal.call(manager.drain, 0.1) == 0  # type: ignore[union-attr]
+
+    for path in ("/api/chat/sessions", "/api/chat"):
+        refused = client.post(path, json={"session_id": "s_drain1", "message": "again"})
+        assert refused.status_code == 503
+    after = client.get("/api/chat/sessions/s_drain1").json()
+    assert (after["status"], after["last_error"], after["updated_at"]) == (
+        before["status"], before["last_error"], before["updated_at"])
+    assert after["current_run"] == {"run_id": first["run_id"], "status": "completed"}

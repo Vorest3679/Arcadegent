@@ -91,8 +91,8 @@ class ProviderAdapter:
     ) -> ModelResponse:
         if self._config.stream:
             final: ModelResponse | None = None
-            async with aclosing(self.stream(instructions=instructions, messages=messages,
-                                            tools=tools, runtime_hints=runtime_hints)) as events:
+            async with aclosing(self._stream_events(instructions=instructions, messages=messages,
+                                                    tools=tools, runtime_hints=runtime_hints)) as events:
                 async for event in events:
                     if isinstance(event, StreamDone):
                         final = event.response
@@ -142,6 +142,21 @@ class ProviderAdapter:
 
         Closing this generator (or cancelling its consumer) closes the upstream connection.
         """
+        async with aclosing(self._stream_events(instructions=instructions, messages=messages,
+                                                tools=tools, runtime_hints=runtime_hints)) as events:
+            async for event in events:
+                yield event
+
+    async def _stream_events(
+        self,
+        *,
+        instructions: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        runtime_hints: dict[str, Any] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        # complete() consumes this directly so subclasses wrapping stream() and
+        # complete() (e.g. evaluation budget/recording) never count one call twice.
         started = perf_counter()
         protocol = "chat_completions"
         stream_error: dict[str, Any] | None = None

@@ -16,7 +16,7 @@ from app.infra.db.protocols import SessionStateRepository
 from app.infra.observability.logger import get_logger, log_ref
 from app.protocol.messages import ChatRequest, ChatResponse
 from app.session.injector import RunContext, RunPublisher
-from app.session.models import RunRecord, SessionBusyError
+from app.session.models import RunRecord, ServiceDrainingError, SessionBusyError
 from app.session.runs import RunManager
 
 logger = get_logger(__name__)
@@ -76,6 +76,10 @@ class ChatRunService:
         soon as the dispatch response is returned.
         """
         session_id = request.session_id or f"s_{uuid4().hex[:12]}"
+        # Check what RunManager would reject before touching the stored session,
+        # so a refused request leaves it unchanged.
+        if self._runs.draining:
+            raise ServiceDrainingError()
         if self._runs.is_active(session_id):
             raise SessionBusyError(session_id)
         state = self._session_store.get_or_create_session(session_id)

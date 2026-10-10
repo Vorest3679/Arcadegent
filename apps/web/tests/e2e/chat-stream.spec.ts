@@ -249,6 +249,26 @@ test("a failed hand-over keeps the final reply and releases the composer", async
   await expect(page.getByPlaceholder(INPUT)).toBeEnabled();
 });
 
+test("a model-failure fallback reply survives a failed hand-over", async ({ page }) => {
+  const reply = "模型暂时不可用，这是兜底回复。";
+  await installAmapMock(page);
+  await installStreamMock(page, [[
+    runStateFrame(10, 1, "running"),
+    token(20, 2, reply, "out_fallback"),
+    eventFrame(60, 3, "session.failed", { reply, error: "provider error" }, { output_id: "out_fallback" }),
+    runStateFrame(60, 4, "completed")
+  ]]);
+  await installChatApiMocks(page, { reply });
+  await page.route("**/api/chat/sessions/s_e2e?**", async (route) => {
+    await route.fulfill({ status: 500, body: "boom" });
+  });
+
+  await send(page);
+  await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
+  await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
+  await expect(page.getByPlaceholder(INPUT)).toBeEnabled();
+});
+
 test("a stale stream.reset snapshot cannot overwrite the finished run", async ({ page }) => {
   const reply = "终态详情不被覆盖。";
   await installAmapMock(page);

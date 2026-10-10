@@ -71,7 +71,7 @@ export function useChatSessionController() {
   // running snapshot requested on stream.reset) must not overwrite a newer one.
   const detailRequestRef = useRef(0);
   // Final reply of the live run, kept until its detail hand-over succeeds.
-  const completedReplyRef = useRef<string | null>(null);
+  const finalReplyRef = useRef<string | null>(null);
   const clientIdRef = useRef("");
   if (!clientIdRef.current) {
     clientIdRef.current = getChatClientId();
@@ -136,32 +136,40 @@ export function useChatSessionController() {
 
     if (envelope.event === "assistant.completed") {
       store.setActiveSessionStatus("completed");
-      const reply = envelope.data.reply;
-      if (typeof reply === "string" && reply) {
-        // The completed reply is authoritative for the final output.
-        completedReplyRef.current = reply;
-        syncStreamReply(reply);
-        store.setSessions((previous) => previous.map((item) =>
-          item.session_id === sessionId
-            ? {
-                ...item,
-                preview: reply.replace(/\s+/g, " ").trim().slice(0, 72),
-                status: "completed",
-                turn_count: item.turn_count + 1,
-                updated_at: envelope.at
-              }
-            : item
-        ));
-      }
+      acceptFinalReply(sessionId, envelope, "completed");
     }
 
     if (envelope.event === "session.failed") {
       store.setActiveSessionStatus("failed");
       const error = envelope.data.error;
       store.setChatError(typeof error === "string" && error.trim() ? error : "会话执行失败");
+      // A model failure still ends with a stored fallback reply; interruptions carry none.
+      acceptFinalReply(sessionId, envelope, "failed");
     }
 
     pushStreamEnvelope(envelope);
+  }
+
+  // The terminal reply is authoritative for the final output and is kept for
+  // the local hand-over in case the session detail cannot be loaded.
+  function acceptFinalReply(sessionId: string, envelope: ChatStreamEnvelope, status: "completed" | "failed"): void {
+    const reply = envelope.data.reply;
+    if (typeof reply !== "string" || !reply) {
+      return;
+    }
+    finalReplyRef.current = reply;
+    syncStreamReply(reply);
+    useAppStore.getState().setSessions((previous) => previous.map((item) =>
+      item.session_id === sessionId
+        ? {
+            ...item,
+            preview: reply.replace(/\s+/g, " ").trim().slice(0, 72),
+            status,
+            turn_count: item.turn_count + 1,
+            updated_at: envelope.at
+          }
+        : item
+    ));
   }
 
   async function giveUpRun(sessionId: string, runId: string): Promise<void> {
@@ -201,7 +209,7 @@ export function useChatSessionController() {
   // as a local history turn and release the composer.
   function commitRunLocally(runId: string): void {
     const store = useAppStore.getState();
-    const reply = completedReplyRef.current?.trim();
+    const reply = finalReplyRef.current?.trim();
     if (reply) {
       const artifacts = store.activeMapArtifacts;
       store.setTurns((previous) => [
@@ -214,7 +222,7 @@ export function useChatSessionController() {
         }
       ]);
     }
-    completedReplyRef.current = null;
+    finalReplyRef.current = null;
     store.setActiveRunId(runId);
     store.setCommittedRunId(runId);
     store.setActiveMapArtifacts(null);
@@ -227,7 +235,7 @@ export function useChatSessionController() {
     store.setActiveRunId(runId);
     store.setStreamItems([]);
     store.setSealedOutputs([]);
-    completedReplyRef.current = null;
+    finalReplyRef.current = null;
     store.setActiveSessionStatus("running");
     resetStreamReply();
 

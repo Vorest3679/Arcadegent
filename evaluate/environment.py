@@ -2,10 +2,12 @@
 from copy import deepcopy
 from dataclasses import asdict
 import asyncio
+from contextlib import aclosing
 from time import perf_counter
 from uuid import uuid4
 
 from app.agent.llm.provider_adapter import ProviderAdapter
+from app.agent.llm.streaming import StreamDone
 from app.agent.runtime.session_state import AgentSessionState, _client_can_access, _client_matches_list_scope
 from app.agent.tools.mcp_gateway import MCPToolGateway
 from app.core.config import Settings
@@ -65,6 +67,36 @@ class RecordedProvider(ProviderAdapter):
         self.calls, self.records = 0, []
 
     async def complete(self, **kwargs):
+        record = await self._begin(kwargs)
+        start = perf_counter()
+        try:
+            response = await super().complete(**kwargs)
+            record = {**record, "response": asdict(response)}
+            return response
+        except BaseException as exc:
+            record = {**record, "response": {"error": {"type": type(exc).__name__}, "usage": {}}}
+            raise
+        finally:
+            self._finish(record, start)
+
+    async def stream(self, **kwargs):
+        # The runtime streams main-agent calls; budget and evidence must match complete().
+        record = await self._begin(kwargs)
+        start = perf_counter()
+        try:
+            async with aclosing(super().stream(**kwargs)) as events:
+                async for event in events:
+                    if isinstance(event, StreamDone):
+                        record = {**record, "response": asdict(event.response)}
+                    yield event
+        except BaseException as exc:
+            if "response" not in record:
+                record = {**record, "response": {"error": {"type": type(exc).__name__}, "usage": {}}}
+            raise
+        finally:
+            self._finish(record, start)
+
+    async def _begin(self, kwargs):
         if self.calls >= self.per_attempt:
             raise BudgetExceeded("attempt_call_budget_exhausted")
         if self.interval:
@@ -76,18 +108,12 @@ class RecordedProvider(ProviderAdapter):
                   "requested_model": self._config.model, "api_mode": self._config.api_mode,
                   "request": kwargs}
         self.write("requests", record)
-        start = perf_counter()
-        try:
-            response = await super().complete(**kwargs)
-            record = {**record, "response": asdict(response)}
-            return response
-        except BaseException as exc:
-            record = {**record, "response": {"error": {"type": type(exc).__name__}, "usage": {}}}
-            raise
-        finally:
-            record["duration_ms"] = (perf_counter() - start) * 1000
-            self.records.append(record)
-            self.write("calls", record)
+        return record
+
+    def _finish(self, record, start):
+        record["duration_ms"] = (perf_counter() - start) * 1000
+        self.records.append(record)
+        self.write("calls", record)
 
 
 class RecordedEvents:

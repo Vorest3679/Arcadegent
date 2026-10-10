@@ -203,12 +203,19 @@ class ChatStreamCollector:
         }
 
 
+def _has_output_text(item: dict[str, Any]) -> bool:
+    content = item.get("content")
+    return isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("type") == "output_text" and part.get("text") for part in content
+    )
+
+
 class ResponsesStreamCollector:
     """Accumulates Responses API server-sent events."""
 
     def __init__(self) -> None:
         """初始化文本、输出项、工具参数片段及终态响应的收集状态。"""
-        self._text: list[str] = []
+        self._parts: dict[int, dict[int, str]] = {}  # output_index -> content_index -> text
         self._items: dict[int, dict[str, Any]] = {}
         self._arguments: dict[int, str] = {}
         self._completed: dict[str, Any] | None = None
@@ -245,7 +252,9 @@ class ResponsesStreamCollector:
         elif kind == "response.output_text.delta":
             delta = payload.get("delta")
             if isinstance(delta, str) and delta:
-                self._text.append(delta)
+                part = payload.get("content_index") if isinstance(payload.get("content_index"), int) else 0
+                parts = self._parts.setdefault(index, {})
+                parts[part] = parts.get(part, "") + delta
                 return [TextDelta(delta)]
         elif kind in {"response.reasoning_summary_text.delta", "response.reasoning_text.delta"}:
             delta = payload.get("delta")
@@ -279,8 +288,9 @@ class ResponsesStreamCollector:
     def decoded(self) -> dict[str, Any]:
         """以终态响应为基础重建 Responses 非流式响应结构。
 
-        缺少 output 时按索引组装已收集的输出项，并补齐工具参数；没有消息项时
-        用累计文本填充 output_text。未收到终态响应则标记为 incomplete。
+        缺少 output 时按索引组装已收集的输出项，并补齐工具参数；断流时消息项
+        可能仍是 added 时的空内容，用按索引累计的文本补齐；没有对应消息项的文本
+        填入 output_text。未收到终态响应则标记为 incomplete。
         """
         base = dict(self._completed or {})
         base.setdefault("id", self._response_id)
@@ -291,10 +301,19 @@ class ResponsesStreamCollector:
                 item = dict(item)
                 if item.get("type") == "function_call" and not item.get("arguments"):
                     item["arguments"] = self._arguments.get(index, "")
+                elif item.get("type") == "message" and index in self._parts and not _has_output_text(item):
+                    item["content"] = [{"type": "output_text", "text": text}
+                                       for _, text in sorted(self._parts[index].items())]
                 output.append(item)
             base["output"] = output
-            if not any(item.get("type") == "message" for item in output) and self._text:
-                base["output_text"] = "".join(self._text)
+            orphan = "".join(
+                text
+                for index, parts in sorted(self._parts.items())
+                if self._items.get(index, {}).get("type") != "message"
+                for _, text in sorted(parts.items())
+            )
+            if orphan:
+                base["output_text"] = orphan
         if self._completed is None:
             base["status"] = "incomplete"
         return base

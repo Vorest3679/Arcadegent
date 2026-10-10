@@ -54,6 +54,11 @@ class RunManager:
         """Whether the session still holds an unfinished run."""
         return session_id in self._active
 
+    @property
+    def draining(self) -> bool:
+        """Whether new runs are refused because the service is shutting down."""
+        return self._draining
+
     # -- execution --------------------------------------------------------
     def dispatch(
         self,
