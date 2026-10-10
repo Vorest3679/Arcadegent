@@ -391,8 +391,9 @@ async def judge(config, attempt, budget, evidence):
 async def run_attempt(config, model, case, attempt, budget, evidence):
     directory = evidence.directory / "snapshots" / attempt["attempt_id"]
     directory.mkdir(parents=True)
-    container, provider = environment(config, model, budget, directory, attempt["attempt_id"], evidence.write)
     session_id = "eval_" + uuid4().hex
+    container, provider, events = environment(config, model, budget, directory, attempt["attempt_id"],
+                                              evidence.write, session_id)
     attempt.update(session_id=session_id, snapshots=[], turn_scores=[], status="completed", hard_pass=False,
                    started_at=utc_now())
     start = perf_counter()
@@ -401,7 +402,8 @@ async def run_attempt(config, model, case, attempt, budget, evidence):
             for index, oracle in enumerate(case.turns):
                 previous = container.session_store.get_or_create_session(session_id)
                 response = await container.react_runtime.run_chat(ChatRequest(
-                    session_id=session_id, client_id=attempt["attempt_id"], message=oracle.message, location=oracle.location))
+                    session_id=session_id, client_id=attempt["attempt_id"], message=oracle.message, location=oracle.location),
+                    events=events)
                 state = container.session_store.get_session(session_id)
                 snapshot = {"evidence_id": f"{attempt['attempt_id']}/turn/{index+1}", "turn_start": len(previous.turns),
                             "state": state_to_dict(state), "response": response.model_dump(mode="json")}
@@ -413,10 +415,10 @@ async def run_attempt(config, model, case, attempt, budget, evidence):
                     break
         attempt["hard_pass"] = len(attempt["turn_scores"]) == len(case.turns) and all(s["hard_pass"] for s in attempt["turn_scores"])
     except TimeoutError:
-        container.react_runtime.cancel_session(session_id, reason="evaluation_timeout")
+        container.chat_runs.record_interrupted(session_id, reason="evaluation_timeout", events=events)
         attempt["status"] = "timeout"
     except asyncio.CancelledError:
-        container.react_runtime.cancel_session(session_id, reason="evaluation_cancelled")
+        container.chat_runs.record_interrupted(session_id, reason="evaluation_cancelled", events=events)
         attempt["status"] = "cancelled"
         raise
     except Exception as exc:

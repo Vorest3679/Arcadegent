@@ -83,6 +83,13 @@
   background: linear-gradient(140deg, #f4fbf8, #ffffff);
 }
 
+.chat-message.intermediate .chat-bubble {
+  border-color: #dbe7e3;
+  background: #f8fbfa;
+  color: #3d5550;
+  box-shadow: none;
+}
+
 .chat-message.stream-event .chat-bubble {
   border-color: #c9e0d9;
   background: #f4faf8;

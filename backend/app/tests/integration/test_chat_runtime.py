@@ -14,6 +14,7 @@ from backend.app.tests.integration._api_test_support import (
     InMemorySessionStateRepository,
     _build_client,
     _build_client_with_rows,
+    _stream_events,
     _stub_provider_adapter,
     _wait_for_session_status,
 )
@@ -266,38 +267,41 @@ def test_chat_marks_session_failed_when_model_errors(tmp_path: Path) -> None:
     assert detail["status"] == "failed"
     assert detail["last_error"]
 
-    replay_buffer = client.app.state.container.replay_buffer
-    events = replay_buffer.list_events(payload["session_id"])
-    assert any(event.event == "session.failed" for event in events)
-    completed = [event for event in events if event.event == "assistant.completed"]
-    assert not completed
-    stream = client.get(f"/api/stream/{payload['session_id']}")
-    assert "event: session.failed" in stream.text
+    events = _stream_events(client, payload["session_id"], run_id=payload["run_id"])
+    assert any(event["event"] == "session.failed" for event in events)
+    assert not any(event["event"] == "assistant.completed" for event in events)
+    # Model failure is business data; the run itself executed to completion.
+    assert events[-1]["kind"] == "control"
+    assert events[-1]["status"] == "completed"
 
-def test_second_turn_resets_stream_replay_buffer(tmp_path: Path) -> None:
+def test_second_turn_streams_only_its_own_run(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
     _stub_provider_adapter(client)
 
     first_resp = client.post("/api/chat", json={"message": "松江区有哪些机厅可以去？", "page_size": 3})
     assert first_resp.status_code == 200
     session_id = first_resp.json()["session_id"]
+    first_run = first_resp.json()["run_id"]
 
-    replay_buffer = client.app.state.container.replay_buffer
-    first_events = replay_buffer.list_events(session_id)
+    first_events = _stream_events(client, session_id, run_id=first_run)
     assert first_events
-    first_event_ids = {event.id for event in first_events}
-    assert any(event.event == "assistant.completed" for event in first_events)
+    assert {event["run_id"] for event in first_events} == {first_run}
+    assert any(event["event"] == "assistant.completed" for event in first_events)
 
     second_resp = client.post(
         "/api/chat",
         json={"session_id": session_id, "message": "上海松江区", "page_size": 3},
     )
     assert second_resp.status_code == 200
+    second_run = second_resp.json()["run_id"]
+    assert second_run != first_run
 
-    second_events = replay_buffer.list_events(session_id)
-    assert second_events
-    assert all(event.id not in first_event_ids for event in second_events)
-    assert any(event.event == "assistant.completed" for event in second_events)
+    second_events = _stream_events(client, session_id, run_id=second_run)
+    assert {event["run_id"] for event in second_events} == {second_run}
+    assert [event["id"] for event in second_events] == list(range(1, len(second_events) + 1))
+    assert any(event["event"] == "assistant.completed" for event in second_events)
+    # The previous run's log is replaced and can no longer be subscribed to.
+    assert client.get(f"/api/stream/{session_id}", params={"run_id": first_run}).status_code == 404
 
 def test_incomplete_text_fails_without_success_event(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
@@ -307,9 +311,9 @@ def test_incomplete_text_fails_without_success_event(tmp_path: Path) -> None:
     response = client.post("/api/chat", json={"message": "find Gamma"}).json()
     state = client.app.state.container.session_store.get_session(response["session_id"])
     assert state.status == "failed"
-    stream = client.get(f"/api/stream/{state.session_id}").text
-    assert "event: session.failed" in stream
-    assert "event: assistant.completed" not in stream
+    names = [event["event"] for event in _stream_events(client, state.session_id, run_id=response["run_id"])]
+    assert "session.failed" in names
+    assert "assistant.completed" not in names
 
 def test_invalid_json_cannot_be_hydrated_into_success(tmp_path: Path) -> None:
     from app.agent.llm.provider_adapter import ModelToolCall
@@ -323,8 +327,8 @@ def test_invalid_json_cannot_be_hydrated_into_success(tmp_path: Path) -> None:
         return ModelResponse(text="Unable to summarize")
     client.app.state.container.react_runtime._provider_adapter.complete = fake_complete
     response = client.post("/api/chat", json={"message": "find Gamma"}).json()
-    events = client.app.state.container.replay_buffer.list_events(response["session_id"])
-    assert [event.event for event in events if event.event.startswith("tool.")] == ["tool.started", "tool.failed"]
+    events = _stream_events(client, response["session_id"], run_id=response["run_id"])
+    assert [event["event"] for event in events if event["event"].startswith("tool.")] == ["tool.started", "tool.failed"]
     state = client.app.state.container.session_store.get_session(response["session_id"])
     evidence = next(turn.payload["argument_evidence"] for turn in state.turns if turn.role == "tool")
     assert evidence["parse_error"] == "invalid JSON"
@@ -378,10 +382,10 @@ def test_incomplete_worker_call_is_not_executed(tmp_path: Path) -> None:
         return ModelResponse(text="partial", tool_calls=[ModelToolCall("partial", "db_query_tool", {"page": 1, "page_size": 3})], error={"type": "incomplete_response", "message": "length"})
     client.app.state.container.react_runtime._provider_adapter.complete = fake_complete
     response = client.post("/api/chat", json={"message": "find Gamma"}).json()
-    events = client.app.state.container.replay_buffer.list_events(response["session_id"])
-    assert any(event.event == "worker.failed" for event in events)
-    assert not any(event.event == "tool.started" and event.data.get("call_id") == "partial" for event in events)
-    assert any(event.event == "tool.failed" and event.data.get("call_id") == "dispatch" for event in events)
+    events = _stream_events(client, response["session_id"], run_id=response["run_id"])
+    assert any(event["event"] == "worker.failed" for event in events)
+    assert not any(event["event"] == "tool.started" and event["data"].get("call_id") == "partial" for event in events)
+    assert any(event["event"] == "tool.failed" and event["data"].get("call_id") == "dispatch" for event in events)
 
 def test_route_metrics_without_geometry_does_not_invent_polyline() -> None:
     from app.agent.tools.mcp.dispatcher import _extract_route_from_mapping

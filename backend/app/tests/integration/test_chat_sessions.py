@@ -298,9 +298,9 @@ def test_chat_dispatch_rejects_duplicate_running_session(tmp_path: Path) -> None
     runtime = client.app.state.container.react_runtime
     original_run_chat = runtime.run_chat
 
-    async def slow_run_chat(request):
+    async def slow_run_chat(request, *, events):
         await asyncio.sleep(0.2)
-        return await original_run_chat(request)
+        return await original_run_chat(request, events=events)
 
     runtime.run_chat = slow_run_chat  # type: ignore[method-assign]
 
@@ -335,7 +335,7 @@ def test_cancel_running_chat_preserves_context_for_the_next_input(tmp_path: Path
     )
     assert first.status_code == 202
 
-    cancelled = client.post(f"/api/chat/sessions/{session_id}/cancel")
+    cancelled = client.post(f"/api/chat/sessions/{session_id}/runs/{first.json()['run_id']}/cancel")
     assert cancelled.status_code == 200
     cancelled_detail = cancelled.json()
     assert cancelled_detail["status"] == "failed"

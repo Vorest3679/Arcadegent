@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.agent.tools.builtin.executors import db_query as db_query_executor
 from app.agent.tools.builtin.executors import summary as summary_executor
 from app.agent.tools.builtin.executors import result_selection as result_selection_executor
-from app.agent.runtime.react_runtime import ReactRuntime, _chunk_stream_text
+from app.agent.runtime.react_runtime import ReactRuntime
 from app.agent.runtime.session_state import (
     AgentTurn,
     AgentSessionState,
@@ -196,16 +196,6 @@ def test_prepare_tool_arguments_overrides_default_sort_with_title_quantity_conte
     assert "sort_by" in hydrated
 
 
-def test_chunk_stream_text_keeps_order_and_sentence_boundary() -> None:
-    text = "First sentence. Second sentence is a little longer and should be chunked!"
-
-    chunks = _chunk_stream_text(text, max_chars=8)
-
-    assert "".join(chunks) == text
-    assert any(item.endswith(".") for item in chunks)
-    assert any(item.endswith("!") for item in chunks)
-
-
 def test_build_worker_memory_snapshot_copies_promotable_artifacts() -> None:
     runtime = _runtime()
     state = AgentSessionState(session_id="s_snapshot")
@@ -224,15 +214,9 @@ def test_build_worker_memory_snapshot_copies_promotable_artifacts() -> None:
 
 def test_prepare_turn_memory_clears_stale_reply() -> None:
     runtime = _runtime()
-    memory = {
-        "reply": "old reply",
-        "assistant_token_emitted": True,
-    }
-
-    prepared = runtime._prepare_turn_memory(memory)
+    prepared = runtime._prepare_turn_memory({"reply": "old reply"})
 
     assert "reply" not in prepared
-    assert prepared["assistant_token_emitted"] is False
 
 
 def test_apply_tool_memory_keeps_mcp_resolved_locations() -> None:

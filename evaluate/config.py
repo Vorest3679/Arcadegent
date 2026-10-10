@@ -147,6 +147,7 @@ def profile(values, prefix):
         auth_header=values.get(prefix + "AUTH_HEADER", "Authorization"),
         send_temperature=boolean(values, prefix + "SEND_TEMPERATURE"),
         token_limit_parameter=values.get(prefix + "TOKEN_PARAMETER", "max_tokens"), extra_parameters=extra,
+        stream=boolean(values, prefix + "STREAM", False),
     )
 
 

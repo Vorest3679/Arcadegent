@@ -34,7 +34,7 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
-            on_shutdown()
+            await on_shutdown(container)
 
     app = FastAPI(
         title=settings.app_name,

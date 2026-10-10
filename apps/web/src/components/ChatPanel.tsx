@@ -1,4 +1,4 @@
-import { Fragment, FormEvent, useEffect, useMemo, useRef } from "react";
+import { Fragment, FormEvent, useEffect, useRef } from "react";
 import { formatSubagentLabel, formatTimeLabel } from "../lib/chatStream";
 import { useAppStore } from "../stores/appStore";
 import { MarkdownMessage } from "./MarkdownMessage";
@@ -13,7 +13,6 @@ const QUICK_PROMPTS = [
 type ChatPanelProps = {
   onSubmit: (event: FormEvent) => Promise<void>;
   onQuickAsk: (prompt: string) => void;
-  streamReplyTarget: string;
   streamReply: string;
   streamReplyActive: boolean;
 };
@@ -21,7 +20,6 @@ type ChatPanelProps = {
 export function ChatPanel({
   onSubmit,
   onQuickAsk,
-  streamReplyTarget,
   streamReply,
   streamReplyActive
 }: ChatPanelProps) {
@@ -36,68 +34,21 @@ export function ChatPanel({
   const streamItems = useAppStore((state) => state.streamItems);
   const awaitingAssistant = useAppStore((state) => state.awaitingAssistant);
   const mapArtifacts = useAppStore((state) => state.activeMapArtifacts);
+  const activeRunId = useAppStore((state) => state.activeRunId);
+  const committedRunId = useAppStore((state) => state.committedRunId);
+  const sealedOutputs = useAppStore((state) => state.sealedOutputs);
   const endRef = useRef<HTMLDivElement | null>(null);
 
-  const turnsForRender = useMemo(() => {
-    if (!turns.length) {
-      return turns;
-    }
-
-    const last = turns[turns.length - 1];
-    if (last.role !== "assistant") {
-      return turns;
-    }
-
-    const hasStreamingContext =
-      awaitingAssistant || sending || streamConnected || streamReplyActive;
-    if (!hasStreamingContext) {
-      return turns;
-    }
-
-    if (awaitingAssistant) {
-      return turns.slice(0, -1);
-    }
-
-    const streamText = streamReplyTarget.trim();
-    if (!streamText) {
-      return turns.slice(0, -1);
-    }
-
-    const lastText = last.content.trim();
-    const overlaps =
-      lastText === streamText || lastText.startsWith(streamText) || streamText.startsWith(lastText);
-
-    if (overlaps) {
-      return turns.slice(0, -1);
-    }
-
-    return turns;
-  }, [awaitingAssistant, sending, streamConnected, streamReplyActive, streamReplyTarget, turns]);
-
-  const lastAssistantReply = useMemo(() => {
-    for (let idx = turnsForRender.length - 1; idx >= 0; idx -= 1) {
-      const turn = turnsForRender[idx];
-      if (turn.role === "assistant") {
-        return turn.content;
-      }
-    }
-    return "";
-  }, [turnsForRender]);
-
-  const showStreamReply =
-    streamReply.trim().length > 0 &&
-    (streamReplyActive || !lastAssistantReply || !lastAssistantReply.startsWith(streamReply));
-  const showStreamStage = streamItems.length > 0 || sending || streamConnected || streamReplyActive || awaitingAssistant;
-  const showStreamingBubble = showStreamReply || awaitingAssistant;
-  // While the final text is still flushing, its history row is hidden for
-  // deduplication. Keep that row's archived card with the streaming bubble.
-  const streamingArtifacts = mapArtifacts ?? (turnsForRender.length < turns.length
-    ? turns[turns.length - 1]?.map_artifacts ?? null
-    : null);
+  // runLive为了判断当前是否有正在进行的执行阶段，
+  // 主要用于过渡阶段显示状态、流式气泡和地图卡片等UI元素。
+  //（如等待assistant,RunId暂未committed时）
+  const runLive = awaitingAssistant || (activeRunId !== null && activeRunId !== committedRunId);
+  const showStreamStage = runLive;
+  const showStreamingBubble = runLive;
   const showMapCard = Boolean(
-    streamingArtifacts && (streamingArtifacts.route || streamingArtifacts.shops.length > 0 || streamingArtifacts.view_payload)
+    runLive && mapArtifacts && (mapArtifacts.route || mapArtifacts.shops.length > 0 || mapArtifacts.view_payload)
   );
-  const showEmptyState = turns.length === 0 && !showStreamingBubble && !showStreamStage && !showMapCard;
+  const showEmptyState = turns.length === 0 && !runLive;
   const latestStreamItem = streamItems.length ? streamItems[streamItems.length - 1] : null;
   const composerBusy = sending || awaitingAssistant;
   const stageStatusText =
@@ -110,7 +61,7 @@ export function ChatPanel({
           ? "等待会话继续..."
           : "阶段已结束");
   const stageStatusMeta = latestStreamItem ? formatTimeLabel(latestStreamItem.at) : "实时同步中...";
-  const lastUserIndex = turnsForRender.reduce(
+  const lastUserIndex = turns.reduce(
     (lastIndex, turn, index) => turn.role === "user" ? index : lastIndex,
     -1
   );
@@ -126,7 +77,7 @@ export function ChatPanel({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turnsForRender, loading, sending, streamItems, streamReply, awaitingAssistant, showStreamStage, showMapCard]);
+  }, [turns, loading, sending, streamItems, streamReply, sealedOutputs, awaitingAssistant, showStreamStage, showMapCard]);
 
   const renderMapCard = (key: string, animationIndex: number, artifacts = mapArtifacts) => {
     if (!artifacts) {
@@ -169,7 +120,7 @@ export function ChatPanel({
         ) : (
           <ul className="chat-message-list">
             {lastUserIndex < 0 ? stageStatus : null}
-            {turnsForRender.map((turn, index) => (
+            {turns.map((turn, index) => (
               <Fragment key={`${turn.created_at}-${index}`}>
                 <li
                   className={`chat-message ${turn.role}`}
@@ -191,11 +142,26 @@ export function ChatPanel({
               </Fragment>
             ))}
 
+            {showStreamingBubble
+              ? sealedOutputs.map((output, index) => (
+                <li
+                  key={`sealed-output-${output.outputId}`}
+                  className="chat-message assistant intermediate"
+                  style={{ animationDelay: `${Math.min(turns.length + index, 8) * 45}ms` }}
+                >
+                  <div className="chat-bubble">
+                    <MarkdownMessage content={output.text} />
+                    <small>中间回复</small>
+                  </div>
+                </li>
+              ))
+              : null}
+
             {showStreamingBubble ? (
               <li
                 key="streaming-assistant"
                 className="chat-message assistant streaming"
-                style={{ animationDelay: `${Math.min(turnsForRender.length, 8) * 45}ms` }}
+                style={{ animationDelay: `${Math.min(turns.length, 8) * 45}ms` }}
               >
                 <div className="chat-bubble">
                   {streamReply.trim() ? (
@@ -212,7 +178,7 @@ export function ChatPanel({
             ) : null}
 
             {showStreamingBubble && showMapCard
-              ? renderMapCard("agent-map-card-streaming", turnsForRender.length + 1, streamingArtifacts)
+              ? renderMapCard("agent-map-card-streaming", turns.length + 1, mapArtifacts)
               : null}
           </ul>
         )}

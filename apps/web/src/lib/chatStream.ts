@@ -1,20 +1,4 @@
-import type { ChatHistoryTurn, ChatStreamEnvelope, ChatStreamEventName } from "../types";
-
-export const STREAM_EVENT_NAMES: ChatStreamEventName[] = [
-  "session.started",
-  "subagent.changed",
-  "worker.started",
-  "worker.completed",
-  "worker.failed",
-  "assistant.token",
-  "tool.started",
-  "tool.progress",
-  "tool.completed",
-  "tool.failed",
-  "navigation.route_ready",
-  "assistant.completed",
-  "session.failed"
-];
+import type { ChatHistoryTurn, ChatMapArtifacts, ChatStreamEnvelope, RouteSummary } from "../types";
 
 const SUBAGENT_LABEL: Record<string, string> = {
   intent_router: "意图路由",
@@ -36,7 +20,8 @@ const TOOL_LABEL: Record<string, string> = {
 
 export type StreamProgressItem = {
   id: number;
-  event: ChatStreamEventName | "stream.reconnecting";
+  // Server event label, or "stream.reconnecting" for local transport status.
+  event: string;
   text: string;
   at: string;
 };
@@ -72,39 +57,6 @@ function formatToolLabel(toolName: string | undefined): string {
   return TOOL_LABEL[toolName] ?? toolName;
 }
 
-function shortText(value: string, limit = 48): string {
-  const compact = value.replace(/\s+/g, " ").trim();
-  if (!compact) {
-    return "";
-  }
-  if (compact.length <= limit) {
-    return compact;
-  }
-  return `${compact.slice(0, Math.max(1, limit - 3))}...`;
-}
-
-function readStreamTextField(data: Record<string, unknown>, keys: string[]): string | null {
-  for (const key of keys) {
-    const value = data[key];
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-  return null;
-}
-
-function getAssistantTokenPreview(data: Record<string, unknown>): string | null {
-  return readStreamTextField(data, ["text_preview", "textPreview", "textpreview", "content", "delta"]);
-}
-
-export function getAssistantTokenFullText(data: Record<string, unknown>): string | null {
-  return readStreamTextField(data, ["content", "text_preview", "textPreview", "textpreview"]);
-}
-
-export function getAssistantTokenDelta(data: Record<string, unknown>): string | null {
-  return readStreamTextField(data, ["delta"]);
-}
-
 export function toProgressText(envelope: ChatStreamEnvelope): string {
   const toolNameRaw = envelope.data.tool;
   const toolName = typeof toolNameRaw === "string" ? toolNameRaw : undefined;
@@ -130,10 +82,6 @@ export function toProgressText(envelope: ChatStreamEnvelope): string {
     return `${formatSubagentLabel(worker)} 失败`;
   }
   if (envelope.event === "assistant.token") {
-    const preview = getAssistantTokenPreview(envelope.data);
-    if (preview) {
-      return `正在生成回复：${shortText(preview, 56)}`;
-    }
     return "正在生成回复";
   }
   if (envelope.event === "tool.started") {
@@ -158,4 +106,80 @@ export function toProgressText(envelope: ChatStreamEnvelope): string {
     return "会话执行失败";
   }
   return envelope.event;
+}
+
+export function coerceStreamRoute(data: Record<string, unknown>): RouteSummary | null {
+  const provider = data.provider;
+  const mode = data.mode;
+  if (provider !== "amap" && provider !== "google" && provider !== "none") {
+    return null;
+  }
+  if (typeof mode !== "string" || !mode.trim()) {
+    return null;
+  }
+  return {
+    provider,
+    mode,
+    distance_m: typeof data.distance_m === "number" ? data.distance_m : null,
+    duration_s: typeof data.duration_s === "number" ? data.duration_s : null,
+    origin: typeof data.origin === "object" && data.origin !== null ? data.origin as RouteSummary["origin"] : null,
+    destination:
+      typeof data.destination === "object" && data.destination !== null
+        ? data.destination as RouteSummary["destination"]
+        : null,
+    polyline: Array.isArray(data.polyline) ? data.polyline as RouteSummary["polyline"] : [],
+    hint: typeof data.hint === "string" ? data.hint : null
+  };
+}
+
+function pendingRouteArtifacts(): ChatMapArtifacts {
+  return {
+    shops: [],
+    route: null,
+    client_location: null,
+    destination: null,
+    view_payload: { version: 1, scene: "agent_route" },
+    route_pending: true
+  };
+}
+
+// Map artifacts shown while a run streams. Returns undefined when the event
+// does not change them.
+export function mapArtifactsForEvent(
+  envelope: ChatStreamEnvelope,
+  previous: ChatMapArtifacts | null
+): ChatMapArtifacts | null | undefined {
+  const { event, data } = envelope;
+  if (event === "subagent.changed") {
+    const next = data.to_subagent ?? data.active_subagent;
+    return next === "navigation_worker" ? pendingRouteArtifacts() : undefined;
+  }
+  if (event === "worker.started") {
+    return data.worker === "navigation_worker" ? pendingRouteArtifacts() : undefined;
+  }
+  if (event === "tool.started" && data.tool === "route_plan_tool") {
+    return {
+      shops: previous?.shops ?? [],
+      route: null,
+      client_location: previous?.client_location ?? null,
+      destination: previous?.destination ?? null,
+      view_payload: { version: 1, scene: "agent_route" },
+      route_pending: true
+    };
+  }
+  if (event === "navigation.route_ready") {
+    const route = coerceStreamRoute(data);
+    if (!route) {
+      return undefined;
+    }
+    return {
+      shops: previous?.shops ?? [],
+      route,
+      client_location: previous?.client_location ?? null,
+      destination: previous?.destination ?? null,
+      view_payload: { version: 1, scene: "agent_route" },
+      route_pending: true
+    };
+  }
+  return undefined;
 }

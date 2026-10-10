@@ -15,4 +15,5 @@ RUN python -m pip install --upgrade pip \
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--access-log"]
+# Bound the wait for open connections (SSE) on shutdown; runs are drained on the signal.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--access-log", "--timeout-graceful-shutdown", "15"]

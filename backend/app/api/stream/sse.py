@@ -1,8 +1,14 @@
-"""Stream API layer: SSE endpoint with replay support and heartbeat."""
+"""Stream API layer: SSE encoding and the run event stream endpoint.
+
+``format_sse`` and ``sse_response`` know nothing about runs or business
+events and can serve any async source of StreamEvent/Heartbeat items. Every
+frame uses the default ``message`` event name; the business label travels in the
+JSON envelope. The endpoint subscribes to one named run of a session; the run
+log ends the stream once the run is sealed and every event was delivered.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 
@@ -11,15 +17,41 @@ from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_container
 from app.core.container import AppContainer
+from app.session.run_log import Heartbeat, StreamEvent
 
 router = APIRouter(tags=["stream"])
 
+KEEP_ALIVE = ": keep-alive\n\n"
 
-def _format_sse(*, event: str, data: dict, event_id: int) -> str:
-    body = json.dumps(data, ensure_ascii=False)
+
+def format_sse(event: StreamEvent) -> str:
+    body = json.dumps(event.to_json(), ensure_ascii=False)
     # Tell native EventSource clients a conservative reconnect delay. The web
     # client also applies its own bounded retry policy and replays by event id.
-    return f"retry: 1000\nid: {event_id}\nevent: {event}\ndata: {body}\n\n"
+    return f"retry: 1000\nid: {event.id}\nevent: message\ndata: {body}\n\n"
+
+
+def sse_response(source: AsyncIterator[StreamEvent | Heartbeat], *, request: Request) -> StreamingResponse:
+    """Encode an async event source as an SSE response; stops when the client leaves."""
+
+    async def iterator() -> AsyncIterator[str]:
+        async for item in source:
+            if await request.is_disconnected():
+                return
+            yield KEEP_ALIVE if isinstance(item, Heartbeat) else format_sse(item)
+
+    return StreamingResponse(iterator(), media_type="text/event-stream")
+
+
+def _parse_cursor(query_value: int | None, header_value: str | None) -> int | None:
+    if query_value is not None:
+        return query_value
+    if isinstance(header_value, str):
+        try:
+            return int(header_value)
+        except ValueError:
+            return None
+    return None
 
 
 @router.get("/api/stream/{session_id}")
@@ -27,48 +59,22 @@ async def stream(
     session_id: str,
     request: Request,
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
-    last_event_id: int | None = Query(default=None),
+    run_id: str = Query(min_length=1, max_length=64),
+    last_event_id: int | None = Query(default=None, ge=0),
     last_event_id_header: str | None = Header(default=None, alias="Last-Event-ID"),
     container: AppContainer = Depends(get_container),
 ) -> StreamingResponse:
     if client_id is not None and container.session_store.get_session(session_id, client_id=client_id) is None:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
 
-    async def iterator() -> AsyncIterator[str]:
-        cursor = last_event_id
-        if cursor is None and isinstance(last_event_id_header, str):
-            try:
-                cursor = int(last_event_id_header)
-            except ValueError:
-                cursor = None
-        waited = 0
-        while True:
-            if await request.is_disconnected():
-                return
-            events = container.replay_buffer.list_events(session_id, cursor)
-            if events:
-                for evt in events:
-                    cursor = evt.id
-                    yield _format_sse(
-                        event=evt.event,
-                        data=evt.model_dump(mode="json"),
-                        event_id=evt.id,
-                    )
-                    if evt.event in {"assistant.completed", "session.failed"}:
-                        return
-                waited = 0
-            else:
-                session = container.session_store.get_session(session_id, client_id=client_id)
-                session_status = session.status if session is not None else None
-                if session_status in {"completed", "failed"}:
-                    return
-                yield ": keep-alive\n\n"
-                waited += 1
-                if (
-                    session_status not in {"running"}
-                    and waited >= container.settings.sse_max_wait_seconds
-                ):
-                    return
-            await asyncio.sleep(container.settings.sse_keepalive_seconds)
+    run_log = container.run_log
+    if not run_log.has_run(session_id, run_id):
+        raise HTTPException(status_code=404, detail=f"run '{run_id}' of session '{session_id}' not found")
 
-    return StreamingResponse(iterator(), media_type="text/event-stream")
+    source = run_log.subscribe(
+        session_id,
+        run_id,
+        after_id=_parse_cursor(last_event_id, last_event_id_header),
+        heartbeat_seconds=container.settings.sse_keepalive_seconds,
+    )
+    return sse_response(source, request=request)

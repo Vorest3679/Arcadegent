@@ -394,3 +394,35 @@ def test_judge_evidence_removes_recursive_raw_and_model_history():
 def test_judge_has_independent_output_budget(tmp_path, monkeypatch):
     cfg = config(tmp_path, monkeypatch, "EVAL_JUDGE_ENABLED=true\nEVAL_MAX_OUTPUT_TOKENS=1024\n")
     assert cfg.judge.max_tokens == 4096
+
+
+@pytest.mark.parametrize("entry", ["stream", "complete"])
+def test_streamed_calls_share_budget_and_evidence_with_complete(tmp_path, monkeypatch, entry):
+    from dataclasses import replace
+    from evaluate.environment import BudgetExceeded
+
+    cfg = config(tmp_path, monkeypatch, "EVAL_LLM_STREAM=true\n")
+    body = ('data: {"id":"c","choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}],'
+            '"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}\n\ndata: [DONE]\n\n')
+    sent = []
+    transport(monkeypatch, lambda req: sent.append(req) or httpx.Response(200, content=body.encode()))
+    written = []
+    budget = Budget(1)
+    provider = RecordedProvider(replace(cfg.models["default"], api_mode="chat_completions"), budget, 5, 0,
+                                lambda kind, record: written.append(kind), "a")
+    assert provider.streaming
+    request = {"instructions": "s", "messages": [{"role": "user", "content": "hi"}], "tools": []}
+
+    async def call():
+        if entry == "complete":
+            return await provider.complete(**request)
+        return [event async for event in provider.stream(**request)][-1].response
+
+    response = asyncio.run(call())
+    assert response.text == "ok" and response.stream_mode == "provider"
+    assert (budget.used, provider.calls, len(provider.records), len(sent)) == (1, 1, 1, 1)
+    assert provider.records[0]["response"]["usage"]["total_tokens"] == 4
+    assert written == ["requests", "calls"]
+    with pytest.raises(BudgetExceeded):
+        asyncio.run(call())
+    assert len(sent) == 1

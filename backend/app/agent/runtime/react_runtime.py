@@ -5,14 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from contextlib import aclosing
+from contextvars import ContextVar
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from app.agent.context.context_builder import ContextBuilder
-from app.agent.events.replay_buffer import ReplayBuffer
-from app.agent.llm.provider_adapter import ProviderAdapter
+from app.agent.llm.provider_adapter import ModelResponse, ProviderAdapter
+from app.agent.llm.streaming import StreamDone, TextDelta
 from app.agent.runtime.loop_guard import LoopGuard
 from app.agent.skills.execution import SkillExecution, bind_skill_execution
 from app.agent.skills.registry import SkillRegistry
@@ -35,8 +37,14 @@ from app.protocol.messages import (
     IntentType,
 )
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
+from app.session.injector import NullPublisher, RunPublisher
 
 logger = get_logger(__name__)
+
+# ContextVar 按当前异步上下文保存 run 发布器，避免并发请求之间互相串用。
+# run_chat 开始时绑定、结束时恢复；因此主 Agent、子 Agent 和工具的嵌套调用
+# 都能读取并发布事件，无需在调用链中逐层传递该对象。
+_run_events: ContextVar[RunPublisher] = ContextVar("arcadegent_run_events", default=NullPublisher())
 
 
 def _infer_intent(message: str) -> IntentType:
@@ -92,25 +100,8 @@ def _short(text: str | None, *, limit: int = 120) -> str:
     return f"{compact[: max(1, limit - 3)].rstrip()}..."
 
 
-def _chunk_stream_text(text: str, *, max_chars: int = 18) -> list[str]:
-    """Split final reply into stable SSE chunks to avoid per-char event flooding."""
-    source = text if isinstance(text, str) else ""
-    if not source:
-        return []
-    chunks: list[str] = []
-    current: list[str] = []
-    for char in source:
-        current.append(char)
-        if char in {"\n", "。", "！", "？", ".", "!", "?"} or len(current) >= max_chars:
-            piece = "".join(current)
-            if piece:
-                chunks.append(piece)
-            current = []
-    if current:
-        piece = "".join(current)
-        if piece:
-            chunks.append(piece)
-    return chunks
+def _new_output_id() -> str:
+    return f"out_{uuid4().hex[:12]}"
 
 
 class ReactRuntime:
@@ -124,7 +115,6 @@ class ReactRuntime:
         tool_registry: ToolRegistry,
         provider_adapter: ProviderAdapter,
         session_store: SessionStateRepository,
-        replay_buffer: ReplayBuffer,
         arcade_payload_mapper: ArcadePayloadMapper,
         max_steps: int,
         skill_registry: SkillRegistry | None = None,
@@ -134,41 +124,19 @@ class ReactRuntime:
         self._tool_registry = tool_registry
         self._provider_adapter = provider_adapter
         self._session_store = session_store
-        self._replay_buffer = replay_buffer
         self._arcade_payload_mapper = arcade_payload_mapper
         self._max_steps = max(2, max_steps)
         self._skill_registry = skill_registry
 
-    def prepare_session(self, session_id: str, *, client_id: str | None = None) -> None:
-        """Clear stale stream events and mark the session as running for a fresh turn."""
-        state = self._session_store.get_or_create_session(session_id)
-        self._bind_client_scope(state, client_id)
-        state.status = "running"
-        state.last_error = None
-        state.updated_at = _utc_now_iso()
-        state.working_memory = ensure_working_memory_shape(state.working_memory)
-        self._session_store.save_session(state)
-        self._replay_buffer.reset(session_id)
+    async def run_chat(self, request: ChatRequest, *, events: RunPublisher) -> ChatResponse:
+        """Session-aware chat execution; stream events go to ``events``."""
+        token = _run_events.set(events)
+        try:
+            return await self._run_chat(request)
+        finally:
+            _run_events.reset(token)
 
-    def cancel_session(self, session_id: str, *, reason: str) -> None:
-        """Mark an interrupted background run as terminal without clearing its context."""
-        state = self._session_store.get_or_create_session(session_id)
-        if state.status != "running":
-            return
-        state.status = "failed"
-        state.last_error = reason
-        state.working_memory = ensure_working_memory_shape(state.working_memory)
-        state.working_memory["last_error"] = {"message": reason, "source": "stream"}
-        state.updated_at = _utc_now_iso()
-        self._session_store.save_session(state)
-        self._replay_buffer.append(
-            session_id,
-            "session.failed",
-            {"error": reason, "active_subagent": state.active_subagent},
-        )
-
-    async def run_chat(self, request: ChatRequest) -> ChatResponse:
-        """Session-aware chat execution with main-agent orchestration."""
+    async def _run_chat(self, request: ChatRequest) -> ChatResponse:
         session_id = request.session_id or f"s_{uuid4().hex[:12]}"
         state = self._session_store.get_or_create_session(session_id)
         self._bind_client_scope(state, request.client_id)
@@ -180,8 +148,8 @@ class ReactRuntime:
         try:
             return await self._run_chat_session(request=request, session_id=session_id, state=state)
         except asyncio.CancelledError:
-            # The orchestrator records the terminal state after the task has
-            # stopped. Do not overwrite that preserved session context here.
+            # The session layer's terminal hook records the cancelled state
+            # after the task has stopped; keep the saved context untouched.
             raise
         except Exception as exc:
             error_message = _short(f"{type(exc).__name__}: {exc}", limit=280) if str(exc) else type(exc).__name__
@@ -190,8 +158,7 @@ class ReactRuntime:
             state.working_memory["last_error"] = {"message": error_message}
             state.updated_at = _utc_now_iso()
             self._session_store.save_session(state)
-            self._replay_buffer.append(
-                session_id,
+            self._publish(
                 "session.failed",
                 {
                     "error": error_message,
@@ -261,8 +228,7 @@ class ReactRuntime:
                 payload=request_payload,
             ),
         )
-        self._replay_buffer.append(
-            session_id,
+        self._publish(
             "session.started",
             {
                 "intent": state.intent,
@@ -278,7 +244,7 @@ class ReactRuntime:
 
         if self._skill_registry is not None:
             await asyncio.to_thread(self._skill_registry.refresh)
-        final_text, model_error = await self._run_main_agent(
+        final_text, model_error, output_id = await self._run_main_agent(
             request=request,
             session_id=session_id,
             state=state,
@@ -293,13 +259,13 @@ class ReactRuntime:
             )
             final_text = self._fallback_reply(state, request)
             reply_source = "fallback"
+            output_id = None
 
-        if not bool(state.working_memory.get("assistant_token_emitted")):
-            self._emit_assistant_tokens(
-                session_id=session_id,
-                text=final_text,
-                active_subagent="main_agent",
-            )
+        if output_id is None:
+            # The reply was not published as model output (summary tool, fallback):
+            # show it as a new output so earlier outputs stay sealed.
+            output_id = _new_output_id()
+            self._publish_assistant_text(final_text, output_id=output_id, stream_mode="synthetic")
         self._append_turn(
             state,
             AgentTurn(
@@ -328,8 +294,7 @@ class ReactRuntime:
             state.status = "completed"
             state.last_error = None
         self._session_store.save_session(state)
-        self._replay_buffer.append(
-            session_id,
+        self._publish(
             "session.failed" if model_error else "assistant.completed",
             {
                 "reply": final_text,
@@ -338,6 +303,7 @@ class ReactRuntime:
                 "model_error": model_error,
                 "error": state.last_error,
             },
+            output_id=output_id,
         )
         logger.info(
             "chat.done session_ref=%s intent=%s shops=%s reply_chars=%s",
@@ -382,10 +348,12 @@ class ReactRuntime:
         request: ChatRequest,
         session_id: str,
         state: AgentSessionState,
-    ) -> tuple[str | None, dict[str, Any] | None]:
+    ) -> tuple[str | None, dict[str, Any] | None, str | None]:
+        """Return final text, model error and the output_id the final text was published under."""
         profile = self._subagent_builder.get("main_agent")
         guard = LoopGuard(self._max_steps)
         final_text: str | None = None
+        final_output_id: str | None = None
         model_error: dict[str, Any] | None = None
 
         while not guard.exhausted:
@@ -404,7 +372,9 @@ class ReactRuntime:
                 len(profile.allowed_tools),
                 len(context.messages),
             )
-            model_response = await self._provider_adapter.complete(
+            output_id = _new_output_id()
+            model_response, published = await self._call_main_model(
+                output_id=output_id,
                 instructions=context.instructions,
                 messages=context.messages,
                 tools=await self._tool_registry.tool_definitions(allowed_tools=profile.allowed_tools),
@@ -462,6 +432,7 @@ class ReactRuntime:
 
             if model_response.text:
                 final_text = model_response.text.strip()
+                final_output_id = output_id if published else None
                 break
 
             if state.working_memory.get("reply"):
@@ -470,7 +441,35 @@ class ReactRuntime:
 
         if final_text is None and model_error is None:
             model_error = {"type": "step_limit", "message": "agent exhausted its step budget"}
-        return final_text, model_error
+        return final_text, model_error, final_output_id
+
+    async def _call_main_model(self, *, output_id: str, **request: Any) -> tuple[ModelResponse, bool]:
+        """Run one main-agent model call, publishing its text as one output.
+
+        Returns the response and whether its text was published under ``output_id``.
+        Cancelling the run closes the provider stream through ``aclosing``.
+        """
+        adapter = self._provider_adapter
+        if not adapter.streaming:
+            response = await adapter.complete(**request)
+            text = (response.text or "").strip()
+            if response.error is not None or not text:
+                return response, False
+            self._publish_assistant_text(text, output_id=output_id, stream_mode="synthetic")
+            return response, True
+        published = False
+        final: ModelResponse | None = None
+        async with aclosing(adapter.stream(**request)) as events:
+            async for event in events:
+                if isinstance(event, TextDelta):
+                    self._publish_assistant_text(event.text, output_id=output_id, stream_mode="provider")
+                    published = True
+                elif isinstance(event, StreamDone):
+                    final = event.response
+        if final is None:
+            final = ModelResponse(error={"type": "provider_error", "message": "stream ended without a final response"},
+                                  status="failed")
+        return final, published
 
     def _record_model_call(
         self,
@@ -583,8 +582,7 @@ class ReactRuntime:
         for call in tool_calls:
             # The trace starts when the model proposes the tool, so argument
             # preparation failures are also captured as a complete tool span.
-            self._replay_buffer.append(
-                session_id,
+            self._publish(
                 "tool.started",
                 {
                     "tool": call.name,
@@ -754,8 +752,7 @@ class ReactRuntime:
             reason="worker.started",
             worker_run_id=run_id,
         )
-        self._replay_buffer.append(
-            session_id,
+        self._publish(
             "worker.started",
             {
                 "worker": worker_name,
@@ -879,8 +876,7 @@ class ReactRuntime:
         if envelope["status"] == "failed":
             state.last_error = envelope["error"]
             state.working_memory["last_error"] = {"message": envelope["error"]}
-            self._replay_buffer.append(
-                session_id,
+            self._publish(
                 "worker.failed",
                 {
                     "worker": worker_name,
@@ -892,8 +888,7 @@ class ReactRuntime:
         else:
             state.last_error = None
             state.working_memory.pop("last_error", None)
-            self._replay_buffer.append(
-                session_id,
+            self._publish(
                 "worker.completed",
                 {
                     "worker": worker_name,
@@ -939,8 +934,8 @@ class ReactRuntime:
             route = result.output.get("route")
             if isinstance(route, dict):
                 payload["distance_m"] = route.get("distance_m")
-                self._replay_buffer.append(session_id, "navigation.route_ready", route)
-            self._replay_buffer.append(session_id, "tool.completed", payload)
+                self._publish("navigation.route_ready", route)
+            self._publish("tool.completed", payload)
             logger.info(
                 "tool.completed session_ref=%s tool_ref=%s agent_ref=%s",
                 log_ref(session_id),
@@ -949,8 +944,7 @@ class ReactRuntime:
             )
         else:
             error_message = result.error_message or "tool execution failed"
-            self._replay_buffer.append(
-                session_id,
+            self._publish(
                 "tool.failed",
                 {
                     "tool": result.tool_name,
@@ -1432,7 +1426,6 @@ class ReactRuntime:
             prepared["artifacts"].pop(key, None)
             prepared.pop(key, None)
             prepared.get("artifact_meta", {}).pop(key, None)
-        prepared["assistant_token_emitted"] = False
         return prepared
 
     def _bind_client_scope(self, state: AgentSessionState, client_id: str | None) -> None:
@@ -1450,6 +1443,10 @@ class ReactRuntime:
         state.updated_at = _utc_now_iso()
         if persist:
             self._session_store.save_session(state)
+
+    @staticmethod
+    def _publish(event: str, data: dict[str, Any] | None = None, *, output_id: str | None = None) -> None:
+        _run_events.get().publish(event, data, output_id=output_id)
 
     def _emit_agent_changed(
         self,
@@ -1470,38 +1467,14 @@ class ReactRuntime:
             payload["from_subagent"] = from_agent
         if worker_run_id:
             payload["worker_run_id"] = worker_run_id
-        self._replay_buffer.append(session_id, "subagent.changed", payload)
+        self._publish("subagent.changed", payload)
 
-    def _emit_assistant_tokens(
-        self,
-        *,
-        session_id: str,
-        text: str,
-        active_subagent: str,
-    ) -> None:
-        """Emit assistant token events to the replay buffer, splitting the text into chunks if necessary.
-
-        These events are chunked locally after the full reply text is available
-        (provider requests are non-streaming), so they must not be read as
-        provider TTFT or real token-throughput measurements.
-        """
-        chunks = _chunk_stream_text(text)
-        if not chunks:
+    def _publish_assistant_text(self, text: str, *, output_id: str, stream_mode: str) -> None:
+        """Publish reply text as a delta of one output; reasoning is never published."""
+        if not text:
             return
-        total = len(chunks)
-        merged = ""
-        for idx, chunk in enumerate(chunks, start=1):
-            merged += chunk
-            self._replay_buffer.append(
-                session_id,
-                "assistant.token",
-                {
-                    "delta": chunk,
-                    "content": merged,
-                    "index": idx,
-                    "total": total,
-                    "active_subagent": active_subagent,
-                    "text_preview": _short(merged, limit=120),
-                    "stream_mode": "synthetic",
-                },
-            )
+        self._publish(
+            "assistant.token",
+            {"delta": text, "active_subagent": "main_agent", "stream_mode": stream_mode},
+            output_id=output_id,
+        )

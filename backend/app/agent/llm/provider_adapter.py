@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
+from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from time import perf_counter
 from copy import deepcopy
@@ -12,6 +14,13 @@ from uuid import uuid4
 import httpx
 
 from app.agent.llm.llm_config import LLMConfig
+from app.agent.llm.streaming import (
+    ChatStreamCollector,
+    ResponsesStreamCollector,
+    StreamDone,
+    StreamEvent,
+    parse_sse_line,
+)
 from app.infra.observability.logger import get_logger, log_ref
 
 logger = get_logger(__name__)
@@ -68,6 +77,10 @@ class ProviderAdapter:
     def enabled(self) -> bool:
         return self._config.enabled
 
+    @property
+    def streaming(self) -> bool:
+        return self._config.stream
+
     async def complete(
         self,
         *,
@@ -76,6 +89,14 @@ class ProviderAdapter:
         tools: list[dict[str, Any]],
         runtime_hints: dict[str, Any] | None = None,
     ) -> ModelResponse:
+        if self._config.stream:
+            final: ModelResponse | None = None
+            async with aclosing(self._stream_events(instructions=instructions, messages=messages,
+                                                    tools=tools, runtime_hints=runtime_hints)) as events:
+                async for event in events:
+                    if isinstance(event, StreamDone):
+                        final = event.response
+            return final or self._error_response("stream ended without a final response")
         started = perf_counter()
         protocol = "chat_completions"
         try:
@@ -101,6 +122,124 @@ class ProviderAdapter:
         self._log_response_summary(provider=protocol, response=response)
         return response
 
+    def _headers(self, accept: str = "application/json") -> dict[str, str]:
+        key = self._config.api_key
+        return {
+            self._config.auth_header: f"Bearer {key}" if self._config.auth_header.lower() == "authorization" else key,
+            "Content-Type": "application/json",
+            "Accept": accept,
+        }
+
+    async def stream(
+        self,
+        *,
+        instructions: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        runtime_hints: dict[str, Any] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Yield normalized deltas, then one StreamDone with the collected response.
+
+        Closing this generator (or cancelling its consumer) closes the upstream connection.
+        """
+        async with aclosing(self._stream_events(instructions=instructions, messages=messages,
+                                                tools=tools, runtime_hints=runtime_hints)) as events:
+            async for event in events:
+                yield event
+
+    async def _stream_events(
+        self,
+        *,
+        instructions: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        runtime_hints: dict[str, Any] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        # complete() consumes this directly so subclasses wrapping stream() and
+        # complete() (e.g. evaluation budget/recording) never count one call twice.
+        started = perf_counter()
+        protocol = "chat_completions"
+        stream_error: dict[str, Any] | None = None
+        ttft_ms: float | None = None
+        try:
+            protocol = "chat_completions" if self._prefer_chat_completions() else "responses"
+            if not self.enabled:
+                raise ValueError("llm provider disabled or missing API key")
+            tool_choice = self._resolve_tool_choice(tools=tools, runtime_hints=runtime_hints)
+            self._log_request_summary(
+                active_subagent=str((runtime_hints or {}).get("active_subagent") or "").strip(),
+                tool_choice=tool_choice, instructions=instructions, messages=messages,
+                tools=tools, protocol=protocol,
+            )
+            if protocol == "chat_completions":
+                collector: ChatStreamCollector | ResponsesStreamCollector = ChatStreamCollector()
+                endpoint, payload = self._build_chat_request(
+                    instructions=instructions, messages=messages, tools=tools,
+                    tool_choice=tool_choice, stream=True)
+                parse = self._parse_chat_body
+            else:
+                collector = ResponsesStreamCollector()
+                endpoint, payload = self._build_responses_request(
+                    instructions=instructions, messages=messages, tools=tools,
+                    tool_choice=tool_choice, stream=True)
+                parse = self._parse_responses_body
+        except (ValueError, TypeError) as exc:
+            yield StreamDone(self._finish_response(self._error_response(str(exc)), started, protocol))
+            return
+
+        skipped = 0
+        try:
+            async with httpx.AsyncClient(timeout=self._config.timeout_seconds) as client:
+                async with client.stream("POST", endpoint, json=payload,
+                                         headers=self._headers("text/event-stream")) as http_response:
+                    if http_response.status_code >= 400:
+                        stream_error = {"type": "http_error",
+                                        "message": f"http_error status={http_response.status_code}"}
+                    else:
+                        async for line in http_response.aiter_lines():
+                            parsed = parse_sse_line(line)
+                            if parsed is None:
+                                continue
+                            kind, body = parsed
+                            if kind == "invalid":
+                                skipped += 1
+                                continue
+                            if kind == "done":
+                                collector.mark_done()
+                                break
+                            for event in collector.feed(body):
+                                if ttft_ms is None:
+                                    ttft_ms = (perf_counter() - started) * 1000
+                                yield event
+                            if collector.finished:
+                                break
+        except httpx.TimeoutException:
+            stream_error = {"type": "timeout_error", "message": "timeout_error stream timed out"}
+        except httpx.RequestError as exc:
+            stream_error = {"type": "url_error", "message": f"url_error {type(exc).__name__}"}
+        except Exception as exc:  # pragma: no cover
+            stream_error = {"type": "unexpected_error", "message": f"unexpected_error {type(exc).__name__}"}
+        if skipped:
+            logger.warning("llm.stream.invalid_lines count=%s", skipped)
+        stream_error = stream_error or collector.error
+        if stream_error is None and not collector.complete:
+            stream_error = {"type": "stream_incomplete", "message": "stream ended before completion"}
+
+        response, parse_error = parse(collector.decoded(), tool_choice)
+        if response is None or (stream_error is not None and not response.text and not response.tool_calls):
+            response = ModelResponse(
+                error=stream_error or {"type": "provider_error", "message": parse_error or "empty provider response"},
+                status="failed")
+        elif stream_error is not None:
+            response = replace(response, status="incomplete", error=stream_error)
+        response = replace(response, stream_mode="provider", provider_ttft_ms=ttft_ms)
+        yield StreamDone(self._finish_response(response, started, protocol))
+
+    def _finish_response(self, response: ModelResponse, started: float, protocol: str) -> ModelResponse:
+        response = replace(response, duration_ms=(perf_counter() - started) * 1000, protocol=protocol)
+        self._log_response_summary(provider=protocol, response=response)
+        return response
+
     async def _post_json(
         self,
         *,
@@ -112,11 +251,7 @@ class ProviderAdapter:
                 response = await client.post(
                     endpoint,
                     json=payload,
-                    headers={
-                        self._config.auth_header: (f"Bearer {self._config.api_key}" if self._config.auth_header.lower() == "authorization" else self._config.api_key),
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                    },
+                    headers=self._headers(),
                 )
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -132,14 +267,15 @@ class ProviderAdapter:
             return None, "response body is not a JSON object"
         return decoded, None
 
-    async def _try_responses_api(
+    def _build_responses_request(
         self,
         *,
         instructions: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         tool_choice: str,
-    ) -> tuple[ModelResponse | None, str | None]:
+        stream: bool = False,
+    ) -> tuple[str, dict[str, Any]]:
         endpoint = self._config.base_url.rstrip("/") + "/responses"
         payload: dict[str, Any] = {
             "model": self._config.model,
@@ -153,13 +289,31 @@ class ProviderAdapter:
             "parallel_tool_calls": self._config.parallel_tool_calls,
         }
         self._apply_parameters(payload, "responses")
+        if stream:
+            payload["stream"] = True
         if tools:
             payload["tools"] = [self._to_responses_tool(tool) for tool in tools]
+        return endpoint, payload
 
+    async def _try_responses_api(
+        self,
+        *,
+        instructions: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str,
+    ) -> tuple[ModelResponse | None, str | None]:
+        endpoint, payload = self._build_responses_request(
+            instructions=instructions, messages=messages, tools=tools, tool_choice=tool_choice,
+        )
         decoded, request_error = await self._post_json(endpoint=endpoint, payload=payload)
         if not isinstance(decoded, dict):
             return None, request_error or "responses api returned no data"
+        return self._parse_responses_body(decoded, tool_choice)
 
+    def _parse_responses_body(
+        self, decoded: dict[str, Any], tool_choice: str
+    ) -> tuple[ModelResponse | None, str | None]:
         tool_calls: list[ModelToolCall] = []
         reasoning: list[dict[str, Any]] = []
         text_chunks: list[str] = []
@@ -246,14 +400,15 @@ class ProviderAdapter:
                         chunks.append(text)
         return chunks
 
-    async def _try_chat_completions(
+    def _build_chat_request(
         self,
         *,
         instructions: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         tool_choice: str,
-    ) -> tuple[ModelResponse | None, str | None]:
+        stream: bool = False,
+    ) -> tuple[str, dict[str, Any]]:
         endpoint = self._config.base_url.rstrip("/") + "/chat/completions"
         raw_tool_messages = sum(
             1
@@ -273,12 +428,29 @@ class ProviderAdapter:
             messages=normalized_messages,
             tools=tools,
             tool_choice=tool_choice,
+            stream=stream,
         )
+        return endpoint, payload
 
+    async def _try_chat_completions(
+        self,
+        *,
+        instructions: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str,
+    ) -> tuple[ModelResponse | None, str | None]:
+        endpoint, payload = self._build_chat_request(
+            instructions=instructions, messages=messages, tools=tools, tool_choice=tool_choice,
+        )
         decoded, request_error = await self._post_json(endpoint=endpoint, payload=payload)
         if not isinstance(decoded, dict):
             return None, request_error or "chat completions api returned no data"
+        return self._parse_chat_body(decoded, tool_choice)
 
+    def _parse_chat_body(
+        self, decoded: dict[str, Any], tool_choice: str
+    ) -> tuple[ModelResponse | None, str | None]:
         choices = decoded.get("choices")
         if not isinstance(choices, list) or not choices:
             return None, "chat completions api returned empty choices"
@@ -317,14 +489,17 @@ class ProviderAdapter:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         tool_choice: str,
+        stream: bool = False,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self._config.model,
             "messages": [{"role": "system", "content": instructions}] + messages,
             "temperature": self._config.temperature,
             "max_tokens": self._config.max_tokens,
-            "stream": False,
+            "stream": stream,
         }
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice

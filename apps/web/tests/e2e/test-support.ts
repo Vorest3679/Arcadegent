@@ -256,8 +256,39 @@ export async function installAmapMock(page: Page) {
   });
 }
 
-export async function installStreamMock(page: Page) {
-  await page.addInitScript((routePayload) => {
+// One scripted SSE connection: frames are emitted `at` ms after the
+// connection opens. Envelope fields left out (session_id, run_id, kind, at)
+// are filled from the connection URL, so a frame may override run_id to
+// simulate a late frame of another run. `error` drops the connection.
+export type StreamFrame =
+  | { at: number; envelope: Record<string, unknown> }
+  | { at: number; error: true };
+
+export const E2E_RUN_ID = "r_e2e1";
+export const DEFAULT_REPLY = "路线已经准备好了，建议步行前往 Arcade One。";
+
+export function eventFrame(at: number, id: number, event: string, data: object = {}, extra: object = {}): StreamFrame {
+  return { at, envelope: { id, kind: "event", event, data, ...extra } };
+}
+
+export function runStateFrame(at: number, id: number, status: string): StreamFrame {
+  return { at, envelope: { id, kind: "control", event: "run.state", status, data: {} } };
+}
+
+const DEFAULT_SCRIPT: StreamFrame[][] = [[
+  runStateFrame(10, 1, "running"),
+  eventFrame(20, 2, "worker.started", { worker: "navigation_worker" }),
+  eventFrame(180, 3, "navigation.route_ready", CHAT_ROUTE),
+  eventFrame(500, 4, "assistant.completed", { reply: DEFAULT_REPLY, active_subagent: "main_agent" }),
+  runStateFrame(500, 5, "completed")
+]];
+
+// Each new EventSource plays the next script; the last one repeats.
+export async function installStreamMock(page: Page, scripts: StreamFrame[][] = DEFAULT_SCRIPT) {
+  await page.addInitScript((connectionScripts) => {
+    const urls: string[] = [];
+    (window as any).__ARCADEGENT_SSE_URLS__ = urls;
+
     class MockEventSource {
       static CONNECTING = 0;
       static OPEN = 1;
@@ -271,48 +302,42 @@ export async function installStreamMock(page: Page) {
 
       constructor(url: string) {
         this.url = url;
+        urls.push(url);
+        const parsed = new URL(url);
+        const sessionId = decodeURIComponent(parsed.pathname.split("/").pop() ?? "");
+        const runId = parsed.searchParams.get("run_id");
+        const script = connectionScripts[Math.min(urls.length - 1, connectionScripts.length - 1)];
+
         window.setTimeout(() => {
           if (this.readyState === MockEventSource.CLOSED) {
             return;
           }
           this.readyState = MockEventSource.OPEN;
           this.onopen?.(new Event("open"));
-          this.emit("worker.started", {
-            id: 1,
-            session_id: "s_e2e",
-            event: "worker.started",
-            at: new Date().toISOString(),
-            data: { worker: "navigation_worker" }
-          });
-        }, 20);
-        window.setTimeout(() => {
-          if (this.readyState === MockEventSource.CLOSED) {
-            return;
-          }
-          this.emit("navigation.route_ready", {
-            id: 2,
-            session_id: "s_e2e",
-            event: "navigation.route_ready",
-            at: new Date().toISOString(),
-            data: routePayload
-          });
-        }, 180);
-        window.setTimeout(() => {
-          if (this.readyState === MockEventSource.CLOSED) {
-            return;
-          }
-          this.emit("assistant.completed", {
-            id: 3,
-            session_id: "s_e2e",
-            event: "assistant.completed",
-            at: new Date().toISOString(),
-            data: {
-              reply: "路线已经准备好了，建议步行前往 Arcade One。",
-              active_subagent: "main_agent"
+        }, 5);
+        script.forEach((frame: any) => {
+          window.setTimeout(() => {
+            if (this.readyState === MockEventSource.CLOSED) {
+              return;
             }
-          });
-          this.close();
-        }, 500);
+            if (frame.error) {
+              this.onerror?.(new Event("error"));
+              return;
+            }
+            const envelope = {
+              session_id: sessionId,
+              run_id: runId,
+              kind: "event",
+              at: new Date().toISOString(),
+              ...frame.envelope
+            };
+            if (envelope.event === "run.state" && ["completed", "failed", "cancelled"].includes(envelope.status)) {
+              (window as any).__ARCADEGENT_SSE_TERMINAL__ = true;
+            }
+            const event = new MessageEvent("message", { data: JSON.stringify(envelope) });
+            this.listeners.get("message")?.forEach((handler) => handler(event));
+          }, 5 + frame.at);
+        });
       }
 
       addEventListener(eventName: string, handler: (event: MessageEvent<string>) => void) {
@@ -328,17 +353,14 @@ export async function installStreamMock(page: Page) {
       close() {
         this.readyState = MockEventSource.CLOSED;
       }
-
-      private emit(eventName: string, payload: object) {
-        const event = new MessageEvent(eventName, {
-          data: JSON.stringify(payload)
-        });
-        this.listeners.get(eventName)?.forEach((handler) => handler(event));
-      }
     }
 
     window.EventSource = MockEventSource as typeof EventSource;
-  }, CHAT_ROUTE);
+  }, scripts);
+}
+
+export async function readStreamUrls(page: Page): Promise<string[]> {
+  return page.evaluate(() => (window as any).__ARCADEGENT_SSE_URLS__ as string[]);
 }
 
 export async function installApiMocks(page: Page, options: { totalPages?: number } = {}) {
@@ -391,19 +413,50 @@ export async function installApiMocks(page: Page, options: { totalPages?: number
   });
 }
 
-export async function installChatApiMocks(page: Page) {
-  let sessionVisible = false;
+export type ChatApiMockOptions = {
+  reply?: string;
+  // "follow-stream": running until the mocked stream sent its terminal state.
+  detailStatus?: "running" | "completed" | "follow-stream";
+  // A number delays every detail response; an array delays by request index.
+  detailDelayMs?: number | number[];
+  sessionVisible?: boolean;
+};
+
+export async function installChatApiMocks(page: Page, options: ChatApiMockOptions = {}) {
+  const reply = options.reply ?? DEFAULT_REPLY;
+  const detailStatus = options.detailStatus ?? "completed";
+  let sessionVisible = options.sessionVisible ?? false;
+  let detailCalls = 0;
+  const userTurn = {
+    role: "user",
+    content: "给我一条到 Arcade One 的路线",
+    created_at: "2026-04-15T00:00:00Z"
+  };
+
   await page.route("**/api/chat/sessions/s_e2e?**", async (route) => {
+    detailCalls += 1;
+    const status = detailStatus !== "follow-stream"
+      ? detailStatus
+      : await page.evaluate(() => (window as any).__ARCADEGENT_SSE_TERMINAL__ === true)
+        ? "completed"
+        : "running";
+    const delays = options.detailDelayMs;
+    const delayMs = Array.isArray(delays) ? delays[Math.min(detailCalls - 1, delays.length - 1)] : delays;
+    if (delayMs) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    const running = status === "running";
     await route.fulfill({
       json: {
         session_id: "s_e2e",
         intent: "navigate",
         active_subagent: "main_agent",
-        status: "completed",
+        status: running ? "running" : "completed",
+        current_run: { run_id: E2E_RUN_ID, status },
         last_error: null,
-        reply: "路线已经准备好了，建议步行前往 Arcade One。",
-        shops: [ARCADES[0], ARCADES[2]],
-        route: CHAT_ROUTE,
+        reply: running ? null : reply,
+        shops: running ? [] : [ARCADES[0], ARCADES[2]],
+        route: running ? null : CHAT_ROUTE,
         client_location: {
           lng: 121.4,
           lat: 31.2,
@@ -411,27 +464,27 @@ export async function installChatApiMocks(page: Page) {
           city: "上海市",
           region_text: "上海市"
         },
-        destination: ARCADES[0],
-        view_payload: {
-          version: 1,
-          scene: "agent_route",
-          title: "从当前位置前往 Arcade One"
-        },
-        turn_count: 2,
+        destination: running ? null : ARCADES[0],
+        view_payload: running
+          ? null
+          : {
+            version: 1,
+            scene: "agent_route",
+            title: "从当前位置前往 Arcade One"
+          },
+        turn_count: running ? 1 : 2,
         created_at: "2026-04-15T00:00:00Z",
         updated_at: "2026-04-15T00:00:10Z",
-        turns: [
-          {
-            role: "user",
-            content: "给我一条到 Arcade One 的路线",
-            created_at: "2026-04-15T00:00:00Z"
-          },
-          {
-            role: "assistant",
-            content: "路线已经准备好了，建议步行前往 Arcade One。",
-            created_at: "2026-04-15T00:00:10Z"
-          }
-        ]
+        turns: running
+          ? [userTurn]
+          : [
+            userTurn,
+            {
+              role: "assistant",
+              content: reply,
+              created_at: "2026-04-15T00:00:10Z"
+            }
+          ]
       }
     });
   });
@@ -459,6 +512,7 @@ export async function installChatApiMocks(page: Page) {
       status: 202,
       json: {
         session_id: "s_e2e",
+        run_id: E2E_RUN_ID,
         status: "running"
       }
     });
@@ -474,4 +528,8 @@ export async function installChatApiMocks(page: Page) {
       }
     });
   });
+
+  return {
+    detailCalls: () => detailCalls
+  };
 }

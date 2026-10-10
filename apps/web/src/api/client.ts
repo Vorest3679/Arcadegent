@@ -70,8 +70,12 @@ async function fetchJson<T>(url: string): Promise<T> {
   return parseJsonResponse<T>(resp, url);
 }
 
-async function postJson<T>(path: string, payload: unknown): Promise<T> {
-  const resp = await fetch(buildUrl(path), {
+async function postJson<T>(
+  path: string,
+  payload: unknown,
+  query?: Record<string, string | number | boolean | undefined | null>
+): Promise<T> {
+  const resp = await fetch(buildUrl(path, query), {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -135,17 +139,23 @@ export async function dispatchChatSession(payload: ChatRequest): Promise<ChatSes
   return postJson<ChatSessionDispatch>("/api/chat/sessions", payload);
 }
 
-export async function cancelChatSession(sessionId: string, clientId?: string): Promise<ChatSessionDetail> {
+export async function cancelChatSession(
+  sessionId: string,
+  runId: string,
+  clientId?: string
+): Promise<ChatSessionDetail> {
   return postJson<ChatSessionDetail>(
-    `/api/chat/sessions/${encodeURIComponent(sessionId)}/cancel${clientId ? `?client_id=${encodeURIComponent(clientId)}` : ""}`,
-    {}
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    {},
+    { client_id: clientId }
   );
 }
 
-export function buildChatStreamUrl(sessionId: string, lastEventId?: number, clientId?: string): string {
+export function buildChatStreamUrl(sessionId: string, runId: string, afterId?: number, clientId?: string): string {
   return buildUrl(`/api/stream/${encodeURIComponent(sessionId)}`, {
+    run_id: runId,
     client_id: clientId,
-    last_event_id: typeof lastEventId === "number" ? lastEventId : undefined
+    last_event_id: typeof afterId === "number" ? afterId : undefined
   });
 }
 

@@ -21,6 +21,8 @@ services:
       retries: 12
       start_period: 20s
     restart: unless-stopped
+    # Longer than the run drain and uvicorn graceful-shutdown timeouts.
+    stop_grace_period: 30s
 
   web:
     image: localhost/arcadegent-web:latest

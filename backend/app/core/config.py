@@ -85,9 +85,8 @@ class Settings:
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
     supabase_timeout_seconds: float = 8.0
-    replay_buffer_size: int = 200
+    replay_buffer_size: int = 2000
     sse_keepalive_seconds: float = 1.0
-    sse_max_wait_seconds: int = 20
     enable_provider_fallback: bool = True
     llm_api_key: str = ""
     llm_base_url: str = "https://api.openai.com/v1"
@@ -95,6 +94,7 @@ class Settings:
     llm_timeout_seconds: float = 20.0
     llm_temperature: float = 0.2
     llm_max_tokens: int = 500
+    llm_stream: bool = False
     agent_max_steps: int = 20
     agent_context_window: int = 24
     agent_nodes_definitions_dir: Path = Path("app/agent/nodes/definitions")
@@ -141,9 +141,6 @@ class Settings:
             sse_keepalive_seconds=float(
                 os.getenv("SSE_KEEPALIVE_SECONDS", str(cls.sse_keepalive_seconds))
             ),
-            sse_max_wait_seconds=int(
-                os.getenv("SSE_MAX_WAIT_SECONDS", str(cls.sse_max_wait_seconds))
-            ),
             enable_provider_fallback=_env_bool(
                 "ENABLE_PROVIDER_FALLBACK", cls.enable_provider_fallback
             ),
@@ -159,6 +156,7 @@ class Settings:
             llm_max_tokens=int(
                 os.getenv("LLM_MAX_TOKENS", str(cls.llm_max_tokens))
             ),
+            llm_stream=_env_bool("LLM_STREAM", cls.llm_stream),
             agent_max_steps=int(
                 os.getenv("AGENT_MAX_STEPS", str(cls.agent_max_steps))
             ),

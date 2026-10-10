@@ -2,15 +2,17 @@
 from copy import deepcopy
 from dataclasses import asdict
 import asyncio
+from contextlib import aclosing
 from time import perf_counter
 from uuid import uuid4
 
-from app.agent.events.replay_buffer import ReplayBuffer
 from app.agent.llm.provider_adapter import ProviderAdapter
+from app.agent.llm.streaming import StreamDone
 from app.agent.runtime.session_state import AgentSessionState, _client_can_access, _client_matches_list_scope
 from app.agent.tools.mcp_gateway import MCPToolGateway
 from app.core.config import Settings
 from app.core.container import build_container
+from app.session.models import utc_now_iso
 from evaluate.config import ROOT
 
 
@@ -65,6 +67,36 @@ class RecordedProvider(ProviderAdapter):
         self.calls, self.records = 0, []
 
     async def complete(self, **kwargs):
+        record = await self._begin(kwargs)
+        start = perf_counter()
+        try:
+            response = await super().complete(**kwargs)
+            record = {**record, "response": asdict(response)}
+            return response
+        except BaseException as exc:
+            record = {**record, "response": {"error": {"type": type(exc).__name__}, "usage": {}}}
+            raise
+        finally:
+            self._finish(record, start)
+
+    async def stream(self, **kwargs):
+        # The runtime streams main-agent calls; budget and evidence must match complete().
+        record = await self._begin(kwargs)
+        start = perf_counter()
+        try:
+            async with aclosing(super().stream(**kwargs)) as events:
+                async for event in events:
+                    if isinstance(event, StreamDone):
+                        record = {**record, "response": asdict(event.response)}
+                    yield event
+        except BaseException as exc:
+            if "response" not in record:
+                record = {**record, "response": {"error": {"type": type(exc).__name__}, "usage": {}}}
+            raise
+        finally:
+            self._finish(record, start)
+
+    async def _begin(self, kwargs):
         if self.calls >= self.per_attempt:
             raise BudgetExceeded("attempt_call_budget_exhausted")
         if self.interval:
@@ -76,37 +108,36 @@ class RecordedProvider(ProviderAdapter):
                   "requested_model": self._config.model, "api_mode": self._config.api_mode,
                   "request": kwargs}
         self.write("requests", record)
-        start = perf_counter()
-        try:
-            response = await super().complete(**kwargs)
-            record = {**record, "response": asdict(response)}
-            return response
-        except BaseException as exc:
-            record = {**record, "response": {"error": {"type": type(exc).__name__}, "usage": {}}}
-            raise
-        finally:
-            record["duration_ms"] = (perf_counter() - start) * 1000
-            self.records.append(record)
-            self.write("calls", record)
+        return record
+
+    def _finish(self, record, start):
+        record["duration_ms"] = (perf_counter() - start) * 1000
+        self.records.append(record)
+        self.write("calls", record)
 
 
-class RecordedReplay(ReplayBuffer):
-    def __init__(self, write, attempt_id, tool_limit):
-        super().__init__()
-        self.write, self.attempt_id, self.tool_limit = write, attempt_id, tool_limit
+class RecordedEvents:
+    """Run publisher that records evaluation events and enforces the tool budget."""
+
+    def __init__(self, write, attempt_id, session_id, tool_limit):
+        self.write, self.attempt_id, self.session_id, self.tool_limit = write, attempt_id, session_id, tool_limit
         self.tools = 0
+        self.next_id = 1
 
-    def append(self, session_id, event_name, data=None):
+    def publish(self, event_name, data=None, *, output_id=None):
         if event_name == "tool.started":
             if self.tools >= self.tool_limit:
                 raise BudgetExceeded("tool_budget_exhausted")
             self.tools += 1
-        event = super().append(session_id, event_name, data)
-        self.write("events", {"attempt_id": self.attempt_id, "event": event.model_dump(mode="json")})
-        return event
+        event = {"id": self.next_id, "session_id": self.session_id, "event": event_name,
+                 "at": utc_now_iso(), "data": dict(data or {})}
+        if output_id is not None:
+            event["output_id"] = output_id
+        self.next_id += 1
+        self.write("events", {"attempt_id": self.attempt_id, "event": event})
 
 
-def environment(config, model, budget, directory, attempt_id, write):
+def environment(config, model, budget, directory, attempt_id, write, session_id):
     provider = RecordedProvider(model, budget, config.per_attempt, config.interval_s, write, attempt_id)
     sessions = MemorySessions()
     app = ROOT / "backend/app"
@@ -129,7 +160,5 @@ def environment(config, model, budget, directory, attempt_id, write):
         request_timeout_seconds=1, sync_limit=0, max_workers=1)))
     container.arcade_payload_mapper = mapper
     container.react_runtime._arcade_payload_mapper = mapper
-    replay = RecordedReplay(write, attempt_id, config.max_tools)
-    container.replay_buffer = replay
-    container.react_runtime._replay_buffer = replay
-    return container, provider
+    events = RecordedEvents(write, attempt_id, session_id, config.max_tools)
+    return container, provider, events

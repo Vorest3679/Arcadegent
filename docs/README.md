@@ -26,6 +26,8 @@
 | --- | --- |
 | [智能体地图结果渲染](./dev-details/智能体地图结果渲染.md) | 后端 artifacts 契约与前端地图渲染 |
 | [浏览器定位与逆地理编码](./dev-details/浏览器定位与逆地理编码.md) | 定位、逆地理与 Agent 上下文注入 |
+| [会话运行生命周期与 SSE](./dev-details/会话运行生命周期与SSE.md) | run 的接受、取消、收尾与 SSE 回放/结束条件 |
+| [ReAct 运行时核心逻辑](./dev-details/ReAct运行时核心逻辑.md) | 主 agent 循环、模型输出流式发布与 output_id 规则 |
 | [智能体上下文载荷设计](./dev-details/智能体上下文载荷设计.md) | Agent 上下文 payload 结构与约束 |
 | [动态工具注册实现说明](./dev-details/动态工具注册实现.md) | 内建工具与 MCP 工具注册链路 |
 | [技能资源目录支持](./dev-details/技能资源目录支持.md) | 技能资源目录能力与扩展边界 |

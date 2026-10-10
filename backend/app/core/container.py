@@ -8,12 +8,10 @@ from pathlib import Path
 from app.agent.context.context_builder import ContextBuilder
 from app.agent.skills.config import load_skill_config
 from app.agent.skills.registry import SkillRegistry
-from app.agent.events.replay_buffer import ReplayBuffer
 from app.agent.llm.llm_config import resolve_llm_config
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.react_runtime import ReactRuntime
 from app.agent.subagents.subagent_builder import SubAgentBuilder
-from app.agent.runtime.orchestrator import Orchestrator
 from app.agent.tools.builtin import BuiltinToolProvider
 from app.agent.tools.builtin.route_plan_tool import AMapConfig
 from app.agent.tools.permission import ToolPermissionChecker
@@ -26,6 +24,9 @@ from app.infra.db.protocols import ArcadeRepository, SessionStateRepository
 from app.services.arcade_geo_resolver import ArcadeGeoResolver, ArcadeGeoResolverConfig
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
 from app.services.amap_reverse_geocoder import AMapReverseGeocoder, AMapReverseGeocoderConfig
+from app.services.chat_run_service import ChatRunService
+from app.session.run_log import RunLog
+from app.session.runs import RunManager
 
 
 @dataclass
@@ -34,7 +35,8 @@ class AppContainer:
 
     settings: Settings
     store: ArcadeRepository
-    replay_buffer: ReplayBuffer
+    run_log: RunLog
+    run_manager: RunManager
     session_store: SessionStateRepository
     reverse_geocoder: AMapReverseGeocoder
     arcade_geo_resolver: ArcadeGeoResolver
@@ -42,7 +44,7 @@ class AppContainer:
     tool_registry: ToolRegistry
     skill_registry: SkillRegistry
     react_runtime: ReactRuntime
-    orchestrator: Orchestrator
+    chat_runs: ChatRunService
 
 
 def build_container(
@@ -54,7 +56,8 @@ def build_container(
 ) -> AppContainer:
     """Construct runtime dependencies in one place."""
     store = _build_arcade_repository(settings)
-    replay_buffer = ReplayBuffer(max_events_per_session=settings.replay_buffer_size)
+    run_log = RunLog(max_events_per_run=settings.replay_buffer_size)
+    run_manager = RunManager(log=run_log)
     provider_adapter = provider_adapter if provider_adapter is not None else ProviderAdapter(resolve_llm_config(settings))
     reverse_geocoder = AMapReverseGeocoder(
         config=AMapReverseGeocoderConfig(
@@ -118,18 +121,20 @@ def build_container(
         tool_registry=tool_registry,
         provider_adapter=provider_adapter,
         session_store=session_store,
-        replay_buffer=replay_buffer,
         arcade_payload_mapper=arcade_payload_mapper,
         max_steps=settings.agent_max_steps,
         skill_registry=skill_registry,
     )
-    orchestrator = Orchestrator(
-        react_runtime=react_runtime,
+    chat_runs = ChatRunService(
+        runtime=react_runtime,
+        runs=run_manager,
+        session_store=session_store,
     )
     return AppContainer(
         settings=settings,
         store=store,
-        replay_buffer=replay_buffer,
+        run_log=run_log,
+        run_manager=run_manager,
         session_store=session_store,
         reverse_geocoder=reverse_geocoder,
         arcade_geo_resolver=arcade_geo_resolver,
@@ -137,7 +142,7 @@ def build_container(
         tool_registry=tool_registry,
         skill_registry=skill_registry,
         react_runtime=react_runtime,
-        orchestrator=orchestrator,
+        chat_runs=chat_runs,
     )
 
 
