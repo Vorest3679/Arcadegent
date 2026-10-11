@@ -5,7 +5,7 @@ AmapRouteOverlay 组件负责在高德地图上渲染路线覆盖物，
 并在组件卸载时清除覆盖物，确保地图上的显示与当前路线数据保持一致。
 */
 import { useEffect, useRef } from "react";
-import { normalizePointToGcj02, normalizeRoutePolyline, toLngLatTuple } from "../../lib/amapCoords";
+import { normalizePointToGcj02, normalizeRoutePolyline, toLngLatTuple } from "../../lib/amap/coords";
 import type { RouteSummary } from "../../types";
 import type { AmapRuntime } from "./AmapMapCanvas";
 

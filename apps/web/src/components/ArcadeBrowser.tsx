@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef } from "react";
 import { getArcadeDetail, listArcades, listCities, listCounties, listProvinces } from "../api/client";
-import { convertClientLocationToGcj02, geocodeAddressToGcj02, getArcadeGcjPoint } from "../lib/amapCoords";
-import { buildAmapMarkerUri, buildAmapNavigationUri } from "../lib/amapUri";
+import { convertClientLocationToGcj02, geocodeAddressToGcj02, getArcadeGcjPoint } from "../lib/amap/coords";
+import { buildAmapMarkerUri, buildAmapNavigationUri } from "../lib/amap/uri";
 import { warmupClientLocationCache } from "../lib/clientLocation";
 import { useArcadeBrowserStore } from "../stores/arcadeBrowserStore";
 import type { ArcadeSummary, GeoPoint } from "../types";

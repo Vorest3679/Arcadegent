@@ -6,7 +6,7 @@ AmapShopMarkers 组件负责在高德地图上渲染机厅位置的标记，
 */
 import { useEffect, useRef } from "react";
 import type { ArcadeSummary, GeoPoint } from "../../types";
-import { getArcadeGcjPoint, toLngLatTuple } from "../../lib/amapCoords";
+import { getArcadeGcjPoint, toLngLatTuple } from "../../lib/amap/coords";
 import type { AmapRuntime } from "./AmapMapCanvas";
 
 type AmapShopMarkersProps = {

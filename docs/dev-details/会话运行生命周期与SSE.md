@@ -1,6 +1,6 @@
 # 会话运行生命周期与 SSE
 
-本文说明一次 Agent 对话（一个 run）如何被接受、执行、取消和结束，SSE 事件流如何回放与结束，以及前端如何订阅。对应源码：`backend/app/session/`、`backend/app/services/chat_run_service.py`、`backend/app/api/stream/sse.py`、`apps/web/src/lib/runStream.ts`。
+本文说明一次 Agent 对话（一个 run）如何被接受、执行、取消和结束，SSE 事件流如何回放与结束，以及前端如何订阅。对应源码：`backend/app/session/`、`backend/app/services/chat_run_service.py`、`backend/app/api/stream/sse.py`、`apps/web/src/lib/sse/runStream.ts`。
 
 ## 模块划分
 
@@ -54,7 +54,7 @@ run 状态只表示执行结果：模型失败、走兜底回复等业务失败�
 
 ## 前端订阅
 
-- `apps/web/src/lib/runStream.ts` 的 `openRunStream` 只订阅一个 run，不依赖 React：校验外壳（`session_id`/`run_id` 与订阅一致，其余帧丢弃）；`id <= 已收最大 id` 的重放帧丢弃；断线后按 500ms×2ⁿ 退避、带 `last_event_id` 重连，最多 3 次；收到终态 `run.state` 后关闭，不再重连。
+- `apps/web/src/lib/sse/runStream.ts` 的 `openRunStream` 只订阅一个 run，不依赖 React：校验外壳（`session_id`/`run_id` 与订阅一致，其余帧丢弃）；`id <= 已收最大 id` 的重放帧丢弃；断线后按 500ms×2ⁿ 退避、带 `last_event_id` 重连，最多 3 次；收到终态 `run.state` 后关闭，不再重连。
 - 文本按 `output_id` 追加 `delta`。出现新的 `output_id` 时上一段**定格**（`onOutputSealed`），界面显示为「中间回复」，新的一段单独显示。每次主 agent 模型调用对应一个 `output_id`；run 结束、重拉详情后，这些中间回复由详情的 `steps` 接替（见下节）。
 - 「当前 run 是否仍在显示中」由 store 的 `activeRunId` / `committedRunId` 决定：终态后重拉会话详情，详情与 `committedRunId` 在同一次更新中写入，流式气泡与进度卡片随之切换为历史消息。不再用文本前缀或长度猜测重复。
 - 刷新页面时，若详情的 `current_run` 未结束，则不带游标订阅该 run，从头回放；收到 `stream.reset` 时重拉详情后继续订阅。
@@ -117,7 +117,7 @@ function startStream(sessionId: string, runId: string): void {
 **3. runStream 在 connect 时挂上 handleMessage**，处理传输层逻辑后再分发给 handlers：
 
 ```ts
-// apps/web/src/lib/runStream.ts
+// apps/web/src/lib/sse/runStream.ts
 function connect(): void {
   const current = new EventSource(url(lastId));      // 重连时带 last_event_id
   source = current;
@@ -159,7 +159,7 @@ function applyToken(envelope: ChatStreamEnvelope): void {
 }
 ```
 
-职责边界：`runStream.ts` 只懂外壳、游标、重连和按 output_id 拼文本，不认识 tool/worker/route 等业务事件；业务含义在 controller 的 `handleRunEvent` 和 `lib/chatStream.ts`（`mapArtifactsForEvent`、`toProgressText`）中解释；组件只读 store。
+职责边界：`runStream.ts` 只懂外壳、游标、重连和按 output_id 拼文本，不认识 tool/worker/route 等业务事件；业务含义在 controller 的 `handleRunEvent` 和 `lib/sse/chatStream.ts`（`mapArtifactsForEvent`、`toProgressText`）中解释；组件只读 store。
 
 ## 回合过程（steps）与历史恢复
 

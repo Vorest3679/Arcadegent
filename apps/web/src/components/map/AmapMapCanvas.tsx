@@ -6,8 +6,8 @@ AmapMapCanvas 组件负责在 Web 端渲染高德地图，
 */
 import { useEffect, useRef } from "react";
 import type { GeoPoint } from "../../types";
-import { toLngLatTuple } from "../../lib/amapCoords";
-import { isAmapConfigured, loadAmapSdk } from "../../lib/amapLoader";
+import { toLngLatTuple } from "../../lib/amap/coords";
+import { isAmapConfigured, loadAmapSdk } from "../../lib/amap/loader";
 
 export type AmapRuntime = {
   AMap: any;

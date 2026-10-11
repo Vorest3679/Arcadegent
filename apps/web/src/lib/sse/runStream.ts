@@ -1,4 +1,4 @@
-import type { ChatRunStatus, ChatStreamEnvelope } from "../types";
+import type { ChatRunStatus, ChatStreamEnvelope } from "../../types";
 
 // Subscribes to the event stream of one run. Owns the transport concerns:
 // envelope checks, cursor de-duplication, bounded reconnects and assembling

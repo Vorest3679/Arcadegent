@@ -1,6 +1,6 @@
 # セッション run のライフサイクルと SSE
 
-1 回の Agent 対話（run）がどのように受け付け・実行・キャンセル・終了されるか、SSE ストリームがどのように再送・終了するか、フロントエンドがどのように購読するかを説明します。対応ソース：`backend/app/session/`、`backend/app/services/chat_run_service.py`、`backend/app/api/stream/sse.py`、`apps/web/src/lib/runStream.ts`。
+1 回の Agent 対話（run）がどのように受け付け・実行・キャンセル・終了されるか、SSE ストリームがどのように再送・終了するか、フロントエンドがどのように購読するかを説明します。対応ソース：`backend/app/session/`、`backend/app/services/chat_run_service.py`、`backend/app/api/stream/sse.py`、`apps/web/src/lib/sse/runStream.ts`。
 
 ## モジュール構成
 
@@ -54,7 +54,7 @@ run の状態は実行結果だけを表します。モデルエラーやフォ�
 
 ## フロントエンドの購読
 
-- `apps/web/src/lib/runStream.ts` の `openRunStream` は 1 つの run だけを購読し、React に依存しません。エンベロープを検証し（`session_id`/`run_id` が購読対象と一致しないフレームは破棄）、受信済み最大 id 以下の再送フレームを捨て、切断時は 500ms×2ⁿ のバックオフで `last_event_id` 付きで最大 3 回再接続し、終端の `run.state` を受けたら再接続せずに閉じます。
+- `apps/web/src/lib/sse/runStream.ts` の `openRunStream` は 1 つの run だけを購読し、React に依存しません。エンベロープを検証し（`session_id`/`run_id` が購読対象と一致しないフレームは破棄）、受信済み最大 id 以下の再送フレームを捨て、切断時は 500ms×2ⁿ のバックオフで `last_event_id` 付きで最大 3 回再接続し、終端の `run.state` を受けたら再接続せずに閉じます。
 - テキストは `output_id` ごとに `delta` を追記します。新しい `output_id` が来ると直前の出力を**確定**（`onOutputSealed`）し「途中の返信」として表示し、新しい出力は別に表示します。メイン agent の各モデル呼び出しは独自の `output_id` を持ち、run の終了と詳細の再取得後は、これらの途中の返信を詳細の `steps` が引き継ぎます（次節）。
 - run がまだライブ表示中かどうかは store の `activeRunId` / `committedRunId` で決まります。終端後にセッション詳細を再取得し、`committedRunId` と同じ更新で書き込むため、ストリーミング吹き出しと進捗カードは 1 回の更新で履歴メッセージに切り替わります。テキストの接頭辞や長さによる重複推測は行いません。
 - ページ再読み込み時、詳細の `current_run` が未終了ならカーソルなしで購読して先頭から再送します。`stream.reset` を受けたら詳細を再取得して購読を続けます。
@@ -117,7 +117,7 @@ function startStream(sessionId: string, runId: string): void {
 **3. runStream は connect() で handleMessage を登録**し、転送層の処理後に handlers へ渡します：
 
 ```ts
-// apps/web/src/lib/runStream.ts
+// apps/web/src/lib/sse/runStream.ts
 function connect(): void {
   const current = new EventSource(url(lastId));      // 再接続時は last_event_id 付き
   source = current;
@@ -159,7 +159,7 @@ function applyToken(envelope: ChatStreamEnvelope): void {
 }
 ```
 
-責務の境界：`runStream.ts` はエンベロープ・カーソル・再接続・output_id ごとのテキスト組み立てだけを扱い、tool/worker/route などの業務イベントは知りません。業務上の意味は controller の `handleRunEvent` と `lib/chatStream.ts`（`mapArtifactsForEvent`、`toProgressText`）で解釈し、コンポーネントは store を読むだけです。
+責務の境界：`runStream.ts` はエンベロープ・カーソル・再接続・output_id ごとのテキスト組み立てだけを扱い、tool/worker/route などの業務イベントは知りません。業務上の意味は controller の `handleRunEvent` と `lib/sse/chatStream.ts`（`mapArtifactsForEvent`、`toProgressText`）で解釈し、コンポーネントは store を読むだけです。
 
 ## ラウンドのステップと履歴の復元
 

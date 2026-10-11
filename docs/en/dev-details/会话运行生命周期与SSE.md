@@ -1,6 +1,6 @@
 # Session Run Lifecycle and SSE
 
-This note explains how one Agent conversation turn (a run) is accepted, executed, cancelled, and finished, how the SSE stream replays and ends, and how the frontend subscribes. Source: `backend/app/session/`, `backend/app/services/chat_run_service.py`, `backend/app/api/stream/sse.py`, `apps/web/src/lib/runStream.ts`.
+This note explains how one Agent conversation turn (a run) is accepted, executed, cancelled, and finished, how the SSE stream replays and ends, and how the frontend subscribes. Source: `backend/app/session/`, `backend/app/services/chat_run_service.py`, `backend/app/api/stream/sse.py`, `apps/web/src/lib/sse/runStream.ts`.
 
 ## Modules
 
@@ -54,7 +54,7 @@ Shutdown: on SIGTERM/SIGINT draining starts immediately (no new runs, active run
 
 ## Frontend subscription
 
-- `openRunStream` in `apps/web/src/lib/runStream.ts` subscribes to exactly one run and has no React dependency. It checks the envelope (`session_id`/`run_id` must match the subscription; other frames are dropped), drops replayed frames with `id <=` the highest id seen, reconnects with `last_event_id` after 500ms×2ⁿ backoff up to 3 times, and closes on the terminal `run.state` without reconnecting.
+- `openRunStream` in `apps/web/src/lib/sse/runStream.ts` subscribes to exactly one run and has no React dependency. It checks the envelope (`session_id`/`run_id` must match the subscription; other frames are dropped), drops replayed frames with `id <=` the highest id seen, reconnects with `last_event_id` after 500ms×2ⁿ backoff up to 3 times, and closes on the terminal `run.state` without reconnecting.
 - Text appends `delta` per `output_id`. When a new `output_id` arrives the previous output is **sealed** (`onOutputSealed`) and shown as an intermediate reply; the new output is shown on its own. Every main-agent model call has its own `output_id`; after the run ends and the detail is reloaded, the detail's `steps` take over these intermediate replies (see the next section).
 - Whether a run is still shown live is decided by `activeRunId` / `committedRunId` in the store: after the terminal state the session detail is reloaded and written together with `committedRunId`, so the streaming bubble and progress card hand over to the history turn in one update. Duplicates are no longer guessed from text prefixes or lengths.
 - On page reload, if the detail's `current_run` is unfinished, the client subscribes to it without a cursor and replays it from the start; on `stream.reset` it reloads the detail and keeps the subscription.
@@ -117,7 +117,7 @@ function startStream(sessionId: string, runId: string): void {
 **3. runStream attaches handleMessage in connect()**, handles transport concerns, then dispatches to handlers:
 
 ```ts
-// apps/web/src/lib/runStream.ts
+// apps/web/src/lib/sse/runStream.ts
 function connect(): void {
   const current = new EventSource(url(lastId));      // carries last_event_id on reconnect
   source = current;
@@ -159,7 +159,7 @@ function applyToken(envelope: ChatStreamEnvelope): void {
 }
 ```
 
-Boundaries: `runStream.ts` only knows the envelope, cursor, reconnects, and assembling text per output_id; it does not know business events such as tool/worker/route. Their meaning is interpreted in the controller's `handleRunEvent` and in `lib/chatStream.ts` (`mapArtifactsForEvent`, `toProgressText`); components only read the store.
+Boundaries: `runStream.ts` only knows the envelope, cursor, reconnects, and assembling text per output_id; it does not know business events such as tool/worker/route. Their meaning is interpreted in the controller's `handleRunEvent` and in `lib/sse/chatStream.ts` (`mapArtifactsForEvent`, `toProgressText`); components only read the store.
 
 ## Round steps and history recovery
 

@@ -1,4 +1,4 @@
-import { formatTimeLabel } from "../lib/chatStream";
+import { formatTimeLabel } from "../lib/sse/chatStream";
 import { useAppStore } from "../stores/appStore";
 import type { ChatSessionSummary } from "../types";
 

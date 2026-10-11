@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { StreamProgressItem } from "../lib/chatStream";
+import type { StreamProgressItem } from "../lib/sse/chatStream";
 import { readInitialViewMode, syncViewModeInUrl } from "../lib/viewMode";
 import type {
   ChatHistoryTurn,

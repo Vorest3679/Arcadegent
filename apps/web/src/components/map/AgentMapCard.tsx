@@ -4,8 +4,8 @@ import {
   getArcadeGcjPoint,
   normalizePointToGcj02,
   normalizeRouteToGcj02
-} from "../../lib/amapCoords";
-import { buildAmapMarkerUri, buildAmapNavigationUri } from "../../lib/amapUri";
+} from "../../lib/amap/coords";
+import { buildAmapMarkerUri, buildAmapNavigationUri } from "../../lib/amap/uri";
 import type { AgentMapScene, ArcadeSummary, ChatMapArtifacts, GeoPoint, RouteSummary } from "../../types";
 import { AmapMapCanvas, type AmapRuntime } from "./AmapMapCanvas";
 import { AmapRouteOverlay } from "./AmapRouteOverlay";

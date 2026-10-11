@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
-import { getArcadeGcjPoint } from "../../lib/amapCoords";
+import { getArcadeGcjPoint } from "../../lib/amap/coords";
 import { useArcadeBrowserStore } from "../../stores/arcadeBrowserStore";
 import type { ArcadeSortBy, ArcadeSummary, SortOrder } from "../../types";
 import { ARCADE_TITLE_OPTIONS } from "./titleOptions";

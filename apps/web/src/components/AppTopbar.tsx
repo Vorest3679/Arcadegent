@@ -1,4 +1,4 @@
-import { formatTimeLabel } from "../lib/chatStream";
+import { formatTimeLabel } from "../lib/sse/chatStream";
 import { useAppStore } from "../stores/appStore";
 
 export function AppTopbar() {

@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useRef } from "react";
-import { formatSubagentLabel, formatTimeLabel } from "../lib/chatStream";
+import { formatSubagentLabel, formatTimeLabel } from "../lib/sse/chatStream";
 import { useAppStore } from "../stores/appStore";
 import { MarkdownMessage } from "./MarkdownMessage";
 import type { ChatHistoryTurn } from "../types";

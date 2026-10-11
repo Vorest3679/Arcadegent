@@ -1,4 +1,4 @@
-import type { ChatHistoryTurn, ChatMapArtifacts, ChatStreamEnvelope, RouteSummary } from "../types";
+import type { ChatHistoryTurn, ChatMapArtifacts, ChatStreamEnvelope, RouteSummary } from "../../types";
 
 const SUBAGENT_LABEL: Record<string, string> = {
   intent_router: "意图路由",
