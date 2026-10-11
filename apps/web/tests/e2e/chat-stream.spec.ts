@@ -16,6 +16,13 @@ function token(at: number, id: number, delta: string, outputId = "out_a"): Strea
   return eventFrame(at, id, "assistant.token", { delta }, { output_id: outputId });
 }
 
+// The process area is folded once a round has ended.
+async function expandSteps(page: Page) {
+  const toggle = page.locator(".round-steps-toggle").first();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+}
+
 async function send(page: Page, message = "给我一条到 Arcade One 的路线") {
   await page.goto("/");
   await page.getByPlaceholder(INPUT).fill(message);
@@ -116,11 +123,13 @@ test("a second output_id seals the first as an intermediate reply", async ({ pag
   await installChatApiMocks(page, { reply, detailDelayMs: 1500 });
 
   await send(page);
-  const intermediate = page.locator(".chat-message.intermediate");
+  const intermediate = page.locator(".step-text");
   const bubble = page.locator(".chat-message.streaming");
+  // The process area folds once the round ends; open it again.
+  await expandSteps(page);
   await expect(intermediate).toHaveCount(1);
   await expect(intermediate).toContainText("我先查一下。");
-  await expect(intermediate).toContainText("中间回复");
+  await expect(page.locator(".step-tool")).toHaveCount(1);
   await expect(bubble).toContainText(reply);
   await expect(bubble).not.toContainText("我先查一下");
 });
@@ -319,13 +328,16 @@ test("intermediate replies stay in the history after the run is handed over", as
   await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
   // The intermediate reply is now a history item, exactly once, before the final reply.
   const list = page.locator(".chat-message-list");
-  await expect(list.locator(".chat-message.intermediate")).toHaveCount(1);
-  await expect(list.locator(".chat-message.intermediate")).toContainText("我先查一下。");
-  // Message bubbles only; the map card item has no bubble.
-  const order = await list.locator(".chat-message:has(.chat-bubble):not(.stream-event)").evaluateAll((nodes) =>
-    nodes.map((node) => node.className.includes("intermediate") ? "intermediate" : node.className.includes("user") ? "user" : "assistant")
+  // Folded into a one-line summary until opened.
+  await expect(list.locator(".round-steps-toggle")).toContainText("调用了 1 个工具 · 1 段中间回复");
+  await expect(list.locator(".step-text")).toHaveCount(0);
+  await expandSteps(page);
+  await expect(list.locator(".step-text")).toHaveCount(1);
+  await expect(list.locator(".step-text")).toContainText("我先查一下。");
+  const order = await list.locator("> li").evaluateAll((nodes) =>
+    nodes.map((node) => node.className.includes("round-steps-item") ? "steps" : node.className.includes("user") ? "user" : "assistant")
   );
-  expect(order).toEqual(["user", "intermediate", "assistant"]);
+  expect(order).toEqual(["user", "steps", "assistant"]);
 });
 
 test("intermediate replies are restored after a page reload", async ({ page }) => {
@@ -336,8 +348,9 @@ test("intermediate replies are restored after a page reload", async ({ page }) =
 
   await page.goto("/");
   await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
-  await expect(page.locator(".chat-message.intermediate")).toHaveCount(1);
-  await expect(page.locator(".chat-message.intermediate")).toContainText("我先查一下。");
+  await expandSteps(page);
+  await expect(page.locator(".step-text")).toHaveCount(1);
+  await expect(page.locator(".step-text")).toContainText("我先查一下。");
 });
 
 test("a mid-run reload shows each intermediate reply once", async ({ page }) => {
@@ -355,9 +368,10 @@ test("a mid-run reload shows each intermediate reply once", async ({ page }) => 
 
   await page.goto("/");
   await expect(page.locator(".chat-message.streaming")).toContainText(reply);
-  expect(await page.locator(".chat-message.intermediate").count()).toBe(1);
+  expect(await page.locator(".step-text").count()).toBe(1);
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
-  await expect(page.locator(".chat-message.intermediate")).toHaveCount(1);
+  await expandSteps(page);
+  await expect(page.locator(".step-text")).toHaveCount(1);
 });
 
 test("handing over does not reload the page content", async ({ page }) => {
@@ -368,7 +382,7 @@ test("handing over does not reload the page content", async ({ page }) => {
 
   await send(page);
   const userBubble = page.locator(".chat-message.user").first();
-  await expect(page.locator(".chat-message.intermediate")).toHaveCount(1);
+  await expect(page.locator(".step-text")).toHaveCount(1);
   await userBubble.evaluate((node) => node.setAttribute("data-marker", "same-node"));
   // Watch for the loading banner while the detail is fetched in the background,
   // and sample every frame for a moment where the reply is missing or not opaque.
@@ -417,7 +431,8 @@ test("a failed hand-over keeps the intermediate replies too", async ({ page }) =
   await send(page);
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
   await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
-  await expect(page.locator(".chat-message.intermediate")).toHaveCount(1);
-  await expect(page.locator(".chat-message.intermediate")).toContainText("我先查一下。");
+  await expandSteps(page);
+  await expect(page.locator(".step-text")).toHaveCount(1);
+  await expect(page.locator(".step-text")).toContainText("我先查一下。");
   await expect(page.getByPlaceholder(INPUT)).toBeEnabled();
 });

@@ -77,6 +77,39 @@
   }
 }
 
+@media (max-width: 960px) {
+  .map-dock-bar {
+    padding: 0 12px;
+  }
+
+  .map-dock-body {
+    height: min(40vh, 360px);
+    max-height: none;
+    padding: 0 8px 8px;
+    touch-action: pan-x pan-y;
+  }
+
+  .chat-composer {
+    padding-bottom: max(12px, var(--safe-bottom));
+  }
+}
+
+@media (max-width: 620px) {
+  .step-tool {
+    grid-template-columns: 1fr auto;
+  }
+
+  .step-tool-agent {
+    grid-column: 1;
+    font-size: 0.74rem;
+  }
+
+  .step-tool .step-status-icon {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+}
+
 @media (min-width: 961px) {
   .menu-btn,
   .sidebar-backdrop {

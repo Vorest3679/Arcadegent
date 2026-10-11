@@ -10,6 +10,7 @@ from app.agent.runtime.session_state import (
     ensure_working_memory_shape,
 )
 from app.protocol.session_dto import AgentTurnRecord, ChatSessionRecord
+from app.services.chat_session_summary import summarize_state
 
 
 def _utc_now_iso() -> str:
@@ -25,6 +26,7 @@ class ChatSessionMapper:
     @staticmethod
     def to_record(state: AgentSessionState) -> ChatSessionRecord:
         """Serialize a runtime state into a DB row DTO."""
+        summary = summarize_state(state)
         return ChatSessionRecord(
             session_id=state.session_id,
             client_id=state.client_id,
@@ -36,6 +38,9 @@ class ChatSessionMapper:
             previous_response_id=state.previous_response_id,
             working_memory=ensure_working_memory_shape(state.working_memory),
             turns=[ChatSessionMapper._turn_to_record(turn) for turn in state.turns],
+            title=summary.title,
+            preview=summary.preview,
+            visible_turn_count=summary.visible_turn_count,
             created_at=state.created_at or _utc_now_iso(),
             updated_at=state.updated_at or _utc_now_iso(),
         )

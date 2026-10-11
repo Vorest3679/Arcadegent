@@ -15,7 +15,10 @@ const TOOL_LABEL: Record<string, string> = {
   db_query_tool: "数据检索",
   geo_resolve_tool: "位置解析",
   route_plan_tool: "路线规划",
-  summary_tool: "结果总结"
+  summary_tool: "结果总结",
+  result_selection_tool: "结果筛选",
+  list_skills: "查看技能列表",
+  read_skill: "读取技能"
 };
 
 export type StreamProgressItem = {
@@ -54,7 +57,7 @@ function formatToolLabel(toolName: string | undefined): string {
   if (!toolName) {
     return "工具";
   }
-  return TOOL_LABEL[toolName] ?? "外部工具";
+  return TOOL_LABEL[toolName] ?? toolName;
 }
 
 export function toProgressText(envelope: ChatStreamEnvelope): string {
@@ -181,12 +184,14 @@ export function mapArtifactsForEvent(
   return undefined;
 }
 
+// A name with a Chinese alias shows the alias; any other tool (e.g. an MCP
+// tool) shows its own name.
 export function formatToolName(name: string): string {
-  return TOOL_LABEL[name] ?? "外部工具";
+  return TOOL_LABEL[name] ?? name;
 }
 
 export function formatAgentName(agent: string): string {
-  return agent ? SUBAGENT_LABEL[agent] ?? "外部代理" : "";
+  return SUBAGENT_LABEL[agent] ?? agent;
 }
 
 export const STEP_STATUS_LABEL = {

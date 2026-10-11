@@ -19,6 +19,8 @@ from app.agent.runtime.session_state import (
     state_from_dict,
 )
 from app.infra.db.protocols import SessionStateRepository
+from app.protocol.session_dto import ChatSessionSummaryRecord
+from app.services.chat_session_summary import summarize_state
 
 
 def _stub_provider_adapter(client: TestClient, reply: str = "stubbed model reply") -> None:
@@ -79,6 +81,33 @@ class InMemorySessionStateRepository:
         ]
         snapshots.sort(key=lambda s: s.updated_at, reverse=True)
         return snapshots[:limit]
+
+    def get_session_for_display(self, session_id: str, *, client_id: str | None = None) -> AgentSessionState | None:
+        return self.get_session(session_id, client_id=client_id)
+
+    def list_session_summaries(
+        self,
+        *,
+        limit: int = 50,
+        client_id: str | None = None,
+    ) -> list[ChatSessionSummaryRecord]:
+        summaries = []
+        for state in self.list_sessions(limit=limit, client_id=client_id):
+            summary = summarize_state(state)
+            summaries.append(
+                ChatSessionSummaryRecord(
+                    session_id=state.session_id,
+                    client_id=state.client_id,
+                    intent=state.intent,
+                    status=state.status,
+                    title=summary.title,
+                    preview=summary.preview,
+                    turn_count=summary.visible_turn_count,
+                    created_at=state.created_at,
+                    updated_at=state.updated_at,
+                )
+            )
+        return summaries
 
     def delete_session(self, session_id: str, *, client_id: str | None = None) -> bool:
         state = self._states.get(session_id)

@@ -140,7 +140,13 @@ export function openRunStream(options: {
         handlers.onConnection(true);
       }
     };
+
+
+    //关键：addlistener监听sse事件并处理message
     current.addEventListener("message", (event) => handleMessage(event as MessageEvent<string>, current));
+    
+    
+    
     current.onerror = () => {
       if (closed || source !== current) {
         return;

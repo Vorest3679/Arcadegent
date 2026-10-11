@@ -28,6 +28,7 @@ from app.protocol.messages import (
     ClientLocationContext,
     IntentType,
 )
+from app.services.chat_session_summary import visible_turns as _visible_turns
 from app.session.models import (
     RunConflictError,
     RunNotFoundError,
@@ -72,45 +73,6 @@ def _normalize_intent(raw: str) -> IntentType:
     if raw == "search_nearby":
         return "search_nearby"
     return "search"
-
-
-def _single_line(text: str, *, limit: int) -> str:
-    compact = " ".join(text.split())
-    if len(compact) <= limit:
-        return compact
-    return f"{compact[: max(1, limit - 3)].rstrip()}..."
-
-
-def _build_title(turns: list[AgentTurn]) -> str:
-    for turn in turns:
-        if turn.role != "user":
-            continue
-        title = _single_line(turn.content, limit=32)
-        if title:
-            return title
-    return "New chat"
-
-
-def _build_preview(turns: list[AgentTurn]) -> str | None:
-    for turn in reversed(_visible_turns(turns)):
-        preview = _single_line(turn.content, limit=72)
-        if preview:
-            return preview
-    return None
-
-
-def _visible_turns(turns: list[AgentTurn]) -> list[AgentTurn]:
-    """Keep model/tool traces for context while excluding them from the chat UI."""
-    return [
-        turn
-        for turn in turns
-        if turn.role == "user"
-        or (
-            turn.role == "assistant"
-            and turn.scope == "conversation"
-            and not isinstance(turn.payload.get("model"), dict)
-        )
-    ]
 
 
 def _to_step(turn: AgentTurn) -> ChatTurnStepDto | None:
@@ -187,19 +149,6 @@ def _to_turn(
         map_artifacts=_turn_map_artifacts(turn, container=container),
         steps=steps or [],
         created_at=turn.created_at,
-    )
-
-
-def _to_summary(state: AgentSessionState, *, container: AppContainer) -> ChatSessionSummaryDto:
-    return ChatSessionSummaryDto(
-        session_id=state.session_id,
-        title=_build_title(state.turns),
-        preview=_build_preview(state.turns),
-        intent=_normalize_intent(state.intent),
-        status=_live_status(state, container=container),
-        turn_count=len(_visible_turns(state.turns)),
-        created_at=state.created_at,
-        updated_at=state.updated_at,
     )
 
 
@@ -348,12 +297,25 @@ def list_chat_sessions(
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
     container: AppContainer = Depends(get_container),
 ) -> list[ChatSessionSummaryDto]:
-    sessions = container.session_store.list_sessions(limit=limit, client_id=client_id)
-    return [
-        _to_summary(state, container=container)
-        for state in sessions
-        if state.turns or _live_status(state, container=container) == "running"
-    ]
+    records = container.session_store.list_session_summaries(limit=limit, client_id=client_id)
+    summaries: list[ChatSessionSummaryDto] = []
+    for record in records:
+        running = container.run_manager.is_active(record.session_id)
+        if record.turn_count == 0 and not running:
+            continue
+        summaries.append(
+            ChatSessionSummaryDto(
+                session_id=record.session_id,
+                title=record.title,
+                preview=record.preview,
+                intent=_normalize_intent(record.intent),
+                status="running" if running else record.status,
+                turn_count=record.turn_count,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
+            )
+        )
+    return summaries
 
 
 @router.get("/chat/sessions/{session_id}", response_model=ChatSessionDetailDto)
@@ -362,7 +324,7 @@ def get_chat_session(
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
     container: AppContainer = Depends(get_container),
 ) -> ChatSessionDetailDto:
-    session = container.session_store.get_session(session_id, client_id=client_id)
+    session = container.session_store.get_session_for_display(session_id, client_id=client_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
     return _to_detail(session, container=container)
@@ -374,10 +336,10 @@ def delete_chat_session(
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
     container: AppContainer = Depends(get_container),
 ) -> Response:
-    session = container.session_store.get_session(session_id, client_id=client_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
     if container.run_manager.is_active(session_id):
+        # Only here is a full read needed: a foreign session must stay a 404, not a 409.
+        if container.session_store.get_session(session_id, client_id=client_id) is None:
+            raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
         raise HTTPException(status_code=409, detail=f"session '{session_id}' is currently running")
     deleted = container.session_store.delete_session(session_id, client_id=client_id)
     if not deleted:

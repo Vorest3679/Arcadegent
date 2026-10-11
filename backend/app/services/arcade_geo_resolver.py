@@ -28,6 +28,9 @@ class ArcadeGeoResolverConfig:
     sync_limit: int = 8
     max_workers: int = 4
     request_interval_seconds: float = 0.0
+    # How long a failed lookup is not retried. Without it every read of a shop that
+    # cannot be geocoded (bad address, key or quota error) pays the full AMap round trip.
+    failure_ttl_seconds: float = 600.0
 
 
 class ArcadeGeoResolver:
@@ -39,6 +42,7 @@ class ArcadeGeoResolver:
         self._request_lock = Lock()
         self._last_request_at = 0.0
         self._cache = self._load_cache()
+        self._failed_until: dict[str, float] = {}
 
     def resolve_one(self, raw: Mapping[str, Any]) -> ArcadeGeoDto | None:
         """Resolve one shop geo payload without raising on failures."""
@@ -54,9 +58,14 @@ class ArcadeGeoResolver:
         if cached is not None:
             return cached
 
+        if self._recently_failed(key):
+            return None
+
         geocoded = self._geocode(raw)
         if geocoded is not None:
             self._write_cache_entry(key=key, raw=raw, geo=geocoded)
+        else:
+            self._remember_failure(key)
         return geocoded
 
     def geocode_one(self, raw: Mapping[str, Any]) -> ArcadeGeoDto | None:
@@ -96,6 +105,8 @@ class ArcadeGeoResolver:
                 resolved[source_id] = cached
                 continue
             resolved[source_id] = None
+            if key is not None and self._recently_failed(key):
+                continue
             pending.append(row)
 
         if not pending:
@@ -113,6 +124,23 @@ class ArcadeGeoResolver:
                 if source_id is not None:
                     resolved[source_id] = geo
         return resolved
+
+    def _recently_failed(self, key: str) -> bool:
+        with self._lock:
+            until = self._failed_until.get(key)
+            if until is None:
+                return False
+            if until <= time.monotonic():
+                self._failed_until.pop(key, None)
+                return False
+            return True
+
+    def _remember_failure(self, key: str) -> None:
+        ttl = max(0.0, float(self._config.failure_ttl_seconds or 0.0))
+        if ttl <= 0:
+            return
+        with self._lock:
+            self._failed_until[key] = time.monotonic() + ttl
 
     def _geo_from_catalog(self, raw: Mapping[str, Any]) -> ArcadeGeoDto | None:
         embedded = raw.get("geo")

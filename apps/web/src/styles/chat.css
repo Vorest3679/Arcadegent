@@ -3,12 +3,21 @@
   border: 1px solid var(--line);
   background: var(--panel);
   border-radius: 18px;
-  display: grid;
-  grid-template-rows: 1fr auto auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 
+.chat-error,
+.chat-composer,
+.map-dock {
+  flex: none;
+}
+
 .chat-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   padding: 24px 22px 12px;
 }
@@ -268,9 +277,20 @@
 }
 
 .chat-loading {
-  margin: 10px 0 0;
-  color: var(--muted);
-  font-size: 0.9rem;
+  margin: 28px 0;
+  display: flex;
+  justify-content: center;
+  color: #237965;
+}
+
+.chat-loading-spinner {
+  stroke: currentColor;
+  transform-origin: center;
+  animation: step-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-loading-spinner { animation-duration: 2.4s; }
 }
 
 .chat-stage-board {
@@ -409,4 +429,337 @@
 .sidebar-history-head button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+/* Map dock: one map above the message list */
+.map-dock {
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-strong);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.map-dock-bar {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.map-dock-toggle-text {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.map-dock-map-icon,
+.map-dock-chevron {
+  display: none;
+}
+
+.map-dock.is-highlight {
+  box-shadow: inset 3px 0 0 #dc9b2d;
+  background: #fff8e8;
+}
+
+.map-dock.is-highlight .map-dock-summary::after {
+  content: " · 新";
+  color: #8a6426;
+}
+
+.map-dock-body {
+  max-height: min(46vh, 420px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 12px 12px;
+}
+
+/* Round process area */
+.round-steps {
+  width: min(560px, 92%);
+  max-width: none;
+  background: transparent;
+  border: 1px dashed var(--line);
+  padding: 4px 10px;
+  color: var(--muted);
+}
+
+.round-steps-toggle {
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.round-steps-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.step-row {
+  font-size: 0.85rem;
+}
+
+.step-tool {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 28px;
+}
+
+.step-tool-name {
+  color: var(--ink);
+}
+
+.step-tool-agent {
+  font-size: 0.78rem;
+}
+
+.step-tool .step-status-icon {
+  grid-column: 3;
+  justify-self: end;
+}
+
+.step-text {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.step-status-icon {
+  stroke: currentColor;
+  flex: none;
+}
+
+.step-status-icon.is-running { color: #237965; }
+.step-status-icon.is-completed { color: #2f9a62; }
+.step-status-icon.is-failed { color: var(--danger); }
+.step-status-icon.is-cancelled { color: #8a948f; }
+
+.step-spinner {
+  transform-origin: 10px 10px;
+  animation: step-spin 0.9s linear infinite;
+}
+
+@keyframes step-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-spinner { animation: none; }
+}
+
+/* Desktop: the map sits at the right, beside the conversation */
+@media (min-width: 961px) {
+  .chat-view {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+  }
+
+  .chat-scroll,
+  .chat-error,
+  .chat-composer {
+    grid-column: 1;
+  }
+
+  .map-dock {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    position: static;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-bottom: 0;
+    border-left: 1px solid var(--line);
+  }
+
+  .map-dock.is-open {
+    position: relative;
+    width: clamp(320px, 30vw, 440px);
+  }
+
+  .map-dock-body {
+    flex: 1 1 auto;
+    max-height: none;
+    padding: 12px;
+  }
+
+  .map-dock .agent-map-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Desktop: expand at the chat's right edge, collapse at the map's left edge */
+@media (min-width: 961px) {
+  .chat-view {
+    position: relative;
+  }
+
+  .map-dock:not(.is-open) {
+    width: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .map-dock .map-dock-bar {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    z-index: 10;
+    width: 44px;
+    height: 100px;
+    min-height: 0;
+    padding: 0;
+    justify-content: center;
+    gap: 2px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel-strong);
+    box-shadow: 0 4px 12px rgba(20, 54, 47, 0.12);
+  }
+
+  .map-dock.is-open .map-dock-bar {
+    left: -22px;
+    right: auto;
+  }
+
+  .map-dock .map-dock-summary,
+  .map-dock .map-dock-toggle-text {
+    display: none;
+  }
+
+  .map-dock .map-dock-map-icon,
+  .map-dock .map-dock-chevron {
+    display: block;
+    flex: none;
+  }
+
+  .map-dock .map-dock-chevron {
+    width: 14px;
+    height: 14px;
+  }
+
+  .map-dock .map-dock-bar[aria-expanded="true"] .map-dock-chevron {
+    transform: rotate(180deg);
+  }
+
+  .map-dock.is-highlight {
+    box-shadow: none;
+  }
+
+  .map-dock.is-highlight .map-dock-bar {
+    color: #8a6426;
+    border-color: #dc9b2d;
+    background: #fff8e8;
+  }
+}
+
+/* Expand / collapse motion */
+.map-dock-body {
+  animation: dock-body-in 0.22s ease-out;
+}
+
+.map-dock.is-closing .map-dock-body {
+  animation: dock-body-out 0.2s ease-in forwards;
+}
+
+@keyframes dock-body-in {
+  from { opacity: 0; transform: translateY(-8px); }
+}
+
+@keyframes dock-body-out {
+  to { opacity: 0; transform: translateY(-8px); }
+}
+
+@media (min-width: 961px) {
+  .map-dock.is-open {
+    animation: dock-width-in 0.24s ease-out;
+  }
+
+  .map-dock.is-open.is-closing {
+    animation: dock-width-out 0.2s ease-in forwards;
+  }
+
+  .map-dock-body {
+    animation: dock-fade-in 0.24s ease-out;
+  }
+
+  .map-dock.is-closing .map-dock-body {
+    animation: dock-fade-out 0.15s ease-in forwards;
+  }
+}
+
+@keyframes dock-width-in {
+  from { width: 0; }
+}
+
+@keyframes dock-width-out {
+  to { width: 0; }
+}
+
+@keyframes dock-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes dock-fade-out {
+  to { opacity: 0; }
+}
+
+.round-steps-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: steps-open 0.22s ease-out;
+}
+
+.round-steps-collapse > .round-steps-list {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.round-steps-collapse.is-closing {
+  animation: steps-close 0.2s ease-in forwards;
+}
+
+@keyframes steps-open {
+  from { grid-template-rows: 0fr; opacity: 0; }
+}
+
+@keyframes steps-close {
+  to { grid-template-rows: 0fr; opacity: 0; }
+}
+
+.round-steps-toggle span:last-child {
+  transition: color 0.2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-dock-body,
+  .map-dock.is-open,
+  .round-steps-collapse {
+    animation: none !important;
+  }
 }

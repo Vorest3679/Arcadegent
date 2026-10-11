@@ -544,3 +544,12 @@ export async function installChatApiMocks(page: Page, options: ChatApiMockOption
     detailCalls: () => detailCalls
   };
 }
+
+// The map dock starts folded; open it from its summary bar.
+export async function openMapDock(page: Page) {
+  const bar = page.getByTestId("map-dock").locator(".map-dock-bar");
+  await bar.waitFor();
+  if ((await bar.getAttribute("aria-expanded")) === "false") {
+    await bar.click();
+  }
+}

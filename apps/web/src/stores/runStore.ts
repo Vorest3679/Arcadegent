@@ -18,6 +18,11 @@ type RunStore = {
   committedRunId: string | null;
   // Tool and intermediate-reply steps of the run being followed.
   liveRound: ChatRound | null;
+  // Map area UI: open state, "new map" highlight, and the arrival the user closed.
+  mapDockOpen: boolean;
+  mapDockHighlight: boolean;
+  mapDockClosedKey: string | null;
+  setMapDock: (patch: { open?: boolean; highlight?: boolean; closedKey?: string | null }) => void;
   setStreamConnected: (connected: boolean) => void;
   setActiveSubagent: (subagent: string | null) => void;
   setStreamItems: (items: Updater<StreamProgressItem[]>) => void;
@@ -38,6 +43,14 @@ export const useRunStore = create<RunStore>((set) => ({
   activeRunId: null,
   committedRunId: null,
   liveRound: null,
+  mapDockOpen: false,
+  mapDockHighlight: false,
+  mapDockClosedKey: null,
+  setMapDock: ({ open, highlight, closedKey }) => set((state) => ({
+    mapDockOpen: open ?? state.mapDockOpen,
+    mapDockHighlight: highlight ?? state.mapDockHighlight,
+    mapDockClosedKey: closedKey === undefined ? state.mapDockClosedKey : closedKey
+  })),
   setStreamConnected: (streamConnected) => set({ streamConnected }),
   setActiveSubagent: (activeSubagent) => set({ activeSubagent }),
   setStreamItems: (streamItems) => set((state) => ({

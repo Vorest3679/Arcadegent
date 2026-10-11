@@ -131,6 +131,21 @@ export function finishRound(round: ChatRound, status: Exclude<RoundStatus, "runn
   };
 }
 
-export function textSteps(round: ChatRound | null | undefined): string[] {
-  return round ? round.steps.flatMap((step) => step.kind === "text" ? [step.content] : []) : [];
+// Rounds shown in the chat list: history rounds, with the unanswered last one
+// taking its steps from the live run while that run is displayed. While the
+// replay is still arriving, history steps fill in.
+export function buildRounds(
+  turns: ChatHistoryTurn[],
+  liveRound: ChatRound | null,
+  runLive: boolean
+): ChatRound[] {
+  const rounds = roundsFromDetail(turns);
+  const last = rounds[rounds.length - 1];
+  if (runLive && last && !last.reply) {
+    last.status = liveRound?.status ?? "running";
+    if (liveRound && liveRound.steps.length > 0) {
+      last.steps = liveRound.steps;
+    }
+  }
+  return rounds;
 }
