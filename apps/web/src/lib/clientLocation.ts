@@ -1,4 +1,4 @@
-import { reverseGeocodeLocation } from "../api/client";
+import { reverseGeocodeLocation } from "../api/arcadeApi";
 import type { ClientLocationContext, ReverseGeocodeResponse } from "../types";
 
 const LOCATION_CACHE_KEY = "arcadegent.client_location.v1";

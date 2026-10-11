@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   approximateWgs84ToGcj02,
   getArcadeGcjPoint,
   normalizePointToGcj02,
   normalizeRouteToGcj02
-} from "../../lib/amapCoords";
-import { buildAmapMarkerUri, buildAmapNavigationUri } from "../../lib/amapUri";
+} from "../../lib/amap/coords";
+import { buildAmapMarkerUri, buildAmapNavigationUri } from "../../lib/amap/uri";
 import type { AgentMapScene, ArcadeSummary, ChatMapArtifacts, GeoPoint, RouteSummary } from "../../types";
 import { AmapMapCanvas, type AmapRuntime } from "./AmapMapCanvas";
 import { AmapRouteOverlay } from "./AmapRouteOverlay";
@@ -96,7 +96,7 @@ function hasMapContent(artifacts: ChatMapArtifacts): boolean {
   return Boolean(artifacts.route || artifacts.shops.length || artifacts.view_payload || artifacts.route_pending);
 }
 
-export function AgentMapCard({ artifacts }: AgentMapCardProps) {
+export const AgentMapCard = memo(function AgentMapCard({ artifacts }: AgentMapCardProps) {
   const [mapRuntime, setMapRuntime] = useState<AmapRuntime | null>(null);
   const [mapStatus, setMapStatus] = useState<MapStatus>({ state: "idle", message: "" });
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(() => {
@@ -332,4 +332,4 @@ export function AgentMapCard({ artifacts }: AgentMapCardProps) {
       </div>
     </section>
   );
-}
+});

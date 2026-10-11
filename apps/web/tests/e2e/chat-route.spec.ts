@@ -1,15 +1,17 @@
 import { expect, test } from "@playwright/test";
-import { installAmapMock, installChatApiMocks, installStreamMock } from "./test-support";
+import { installAmapMock, installChatApiMocks, installStreamMock, openMapDock, routeRunScript } from "./test-support";
 
 test("ChatPanel shows progressive route card from SSE route_ready", async ({ page }) => {
   await installAmapMock(page);
-  await installStreamMock(page);
+  // The pending card only exists until the route arrives; delay the route so a slow machine still sees it.
+  await installStreamMock(page, [routeRunScript({ routeAt: 1500, doneAt: 2500 })]);
   await installChatApiMocks(page);
 
   await page.goto("/");
   await page.getByPlaceholder("尽管问机厅相关问题").fill("给我一条到 Arcade One 的路线");
   await page.getByRole("button", { name: "发送" }).click();
 
+  await openMapDock(page);
   await expect(page.getByTestId("agent-route-card")).toBeVisible();
   await expect(page.getByTestId("agent-route-pending")).toBeVisible();
   await expect(page.getByText("路线结果生成后会自动更新此卡片。")).toBeVisible();
@@ -24,6 +26,7 @@ test("ChatPanel shows progressive route card from SSE route_ready", async ({ pag
   await expect(page.getByTestId("agent-route-card")).toHaveCount(1);
 
   await page.reload();
+  await openMapDock(page);
   await expect(page.getByRole("heading", { name: "从当前位置前往 Arcade One" })).toBeVisible();
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
 

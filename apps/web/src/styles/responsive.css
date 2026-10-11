@@ -77,6 +77,106 @@
   }
 }
 
+@media (max-width: 960px) {
+  .chat-view {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto auto auto;
+  }
+
+  .chat-scroll {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .map-dock {
+    grid-row: 2;
+    grid-column: 1;
+    position: relative;
+  }
+
+  .map-dock:not(.is-open) {
+    height: 0;
+    background: transparent;
+  }
+
+  .map-dock.is-open {
+    border-top: 1px solid var(--line);
+  }
+
+  .chat-error {
+    grid-row: 3;
+    grid-column: 1;
+  }
+
+  .chat-composer {
+    grid-row: 4;
+    grid-column: 1;
+  }
+
+  /* Handle: centred above the composer; once open, on the map's top edge. */
+  .map-dock-bar {
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100px;
+    height: 44px;
+    gap: 8px;
+  }
+
+  .map-dock.is-open .map-dock-bar {
+    top: -22px;
+    bottom: auto;
+  }
+
+  .map-dock-chevron {
+    transform: rotate(90deg);
+  }
+
+  .map-dock-bar[aria-expanded="true"] .map-dock-chevron {
+    transform: rotate(-90deg);
+  }
+
+  .map-dock-body {
+    height: min(40dvh, 360px);
+    padding: 8px;
+    touch-action: pan-x pan-y;
+    animation: dock-mobile-in 0.22s ease-out;
+  }
+
+  .map-dock.is-closing .map-dock-body {
+    animation: dock-mobile-out 0.2s ease-in forwards;
+  }
+
+  .chat-composer {
+    padding-bottom: max(12px, var(--safe-bottom));
+  }
+}
+
+@keyframes dock-mobile-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+@keyframes dock-mobile-out {
+  to { opacity: 0; transform: translateY(8px); }
+}
+
+@media (max-width: 620px) {
+  .step-tool {
+    grid-template-columns: 1fr auto;
+  }
+
+  .step-tool-agent {
+    grid-column: 1;
+    font-size: 0.74rem;
+  }
+
+  .step-tool .step-status-icon {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+}
+
 @media (min-width: 961px) {
   .menu-btn,
   .sidebar-backdrop {

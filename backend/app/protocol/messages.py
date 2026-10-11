@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -243,14 +243,42 @@ class ChatTurnMapArtifactsDto(BaseModel):
     view_payload: dict[str, Any] | None = None
 
 
+class ChatToolStepDto(BaseModel):
+    """One tool call of a round. Carries no arguments or results."""
+
+    kind: Literal["tool"] = "tool"
+    call_id: str | None = None
+    name: str
+    agent: str | None = None
+    status: Literal["completed", "failed"]
+    created_at: str
+
+
+class ChatTextStepDto(BaseModel):
+    """Text the main agent wrote before calling tools (an intermediate reply)."""
+
+    kind: Literal["text"] = "text"
+    agent: str | None = None
+    content: str
+    created_at: str
+
+
+ChatTurnStepDto = Annotated[ChatToolStepDto | ChatTextStepDto, Field(discriminator="kind")]
+
+
 class ChatHistoryTurnDto(BaseModel):
-    """Persisted chat history turn for one session."""
+    """Persisted chat history turn for one session.
+
+    ``steps`` is only filled on user turns: the process of the round that this
+    message started, in the order it happened.
+    """
 
     role: ChatRoleType
     content: str
     name: str | None = None
     call_id: str | None = None
     map_artifacts: ChatTurnMapArtifactsDto | None = None
+    steps: list[ChatTurnStepDto] = Field(default_factory=list)
     created_at: str
 
 

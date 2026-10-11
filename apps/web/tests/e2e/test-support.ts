@@ -275,13 +275,20 @@ export function runStateFrame(at: number, id: number, status: string): StreamFra
   return { at, envelope: { id, kind: "control", event: "run.state", status, data: {} } };
 }
 
-const DEFAULT_SCRIPT: StreamFrame[][] = [[
-  runStateFrame(10, 1, "running"),
-  eventFrame(20, 2, "worker.started", { worker: "navigation_worker" }),
-  eventFrame(180, 3, "navigation.route_ready", CHAT_ROUTE),
-  eventFrame(500, 4, "assistant.completed", { reply: DEFAULT_REPLY, active_subagent: "main_agent" }),
-  runStateFrame(500, 5, "completed")
-]];
+// Route run, in ms after the connection opens. The "route pending" card exists only
+// between worker.started and route_ready, so a test asserting it must delay `routeAt`
+// enough for a slow machine to still see it.
+export function routeRunScript({ routeAt = 180, doneAt = 500 } = {}): StreamFrame[] {
+  return [
+    runStateFrame(10, 1, "running"),
+    eventFrame(20, 2, "worker.started", { worker: "navigation_worker" }),
+    eventFrame(routeAt, 3, "navigation.route_ready", CHAT_ROUTE),
+    eventFrame(doneAt, 4, "assistant.completed", { reply: DEFAULT_REPLY, active_subagent: "main_agent" }),
+    runStateFrame(doneAt, 5, "completed")
+  ];
+}
+
+const DEFAULT_SCRIPT: StreamFrame[][] = [routeRunScript()];
 
 // Each new EventSource plays the next script; the last one repeats.
 export async function installStreamMock(page: Page, scripts: StreamFrame[][] = DEFAULT_SCRIPT) {
@@ -415,6 +422,10 @@ export async function installApiMocks(page: Page, options: { totalPages?: number
 
 export type ChatApiMockOptions = {
   reply?: string;
+  // Steps the server attaches to the user turn of the round (see ChatTurnStep).
+  steps?: object[];
+  // Steps already persisted while the run is still running (a mid-run reload).
+  runningSteps?: object[];
   // "follow-stream": running until the mocked stream sent its terminal state.
   detailStatus?: "running" | "completed" | "follow-stream";
   // A number delays every detail response; an array delays by request index.
@@ -476,9 +487,9 @@ export async function installChatApiMocks(page: Page, options: ChatApiMockOption
         created_at: "2026-04-15T00:00:00Z",
         updated_at: "2026-04-15T00:00:10Z",
         turns: running
-          ? [userTurn]
+          ? [{ ...userTurn, steps: options.runningSteps ?? [] }]
           : [
-            userTurn,
+            { ...userTurn, steps: options.steps ?? [] },
             {
               role: "assistant",
               content: reply,
@@ -532,4 +543,13 @@ export async function installChatApiMocks(page: Page, options: ChatApiMockOption
   return {
     detailCalls: () => detailCalls
   };
+}
+
+// The map dock starts folded; open it from its summary bar.
+export async function openMapDock(page: Page) {
+  const bar = page.getByTestId("map-dock").locator(".map-dock-bar");
+  await bar.waitFor();
+  if ((await bar.getAttribute("aria-expanded")) === "false") {
+    await bar.click();
+  }
 }

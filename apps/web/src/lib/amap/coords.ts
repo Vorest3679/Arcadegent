@@ -4,7 +4,7 @@ amapCoords.ts 提供了一系列与高德地图坐标相关的工具函数，
 这些函数主要用于将不同坐标系统之间进行转换，解析高德地图返回的坐标数据，
 以及根据地址信息获取对应的地理坐标，方便在地图上进行定位和导航等操作。
 */
-import type { ArcadeGeo, ClientLocationContext, GeoPoint, RouteSummary } from "../types";
+import type { ArcadeGeo, ClientLocationContext, GeoPoint, RouteSummary } from "../../types";
 
 const EARTH_A = 6378245.0;
 const EARTH_EE = 0.006693421622965943;

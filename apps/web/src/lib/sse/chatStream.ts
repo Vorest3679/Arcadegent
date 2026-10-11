@@ -1,4 +1,4 @@
-import type { ChatHistoryTurn, ChatMapArtifacts, ChatStreamEnvelope, RouteSummary } from "../types";
+import type { ChatHistoryTurn, ChatMapArtifacts, ChatStreamEnvelope, RouteSummary } from "../../types";
 
 const SUBAGENT_LABEL: Record<string, string> = {
   intent_router: "意图路由",
@@ -15,7 +15,10 @@ const TOOL_LABEL: Record<string, string> = {
   db_query_tool: "数据检索",
   geo_resolve_tool: "位置解析",
   route_plan_tool: "路线规划",
-  summary_tool: "结果总结"
+  summary_tool: "结果总结",
+  result_selection_tool: "结果筛选",
+  list_skills: "查看技能列表",
+  read_skill: "读取技能"
 };
 
 export type StreamProgressItem = {
@@ -86,9 +89,6 @@ export function toProgressText(envelope: ChatStreamEnvelope): string {
   }
   if (envelope.event === "tool.started") {
     return `${formatToolLabel(toolName)} 执行中`;
-  }
-  if (envelope.event === "tool.progress") {
-    return `${formatToolLabel(toolName)} 处理中`;
   }
   if (envelope.event === "tool.completed") {
     return `${formatToolLabel(toolName)} 已完成`;
@@ -183,3 +183,20 @@ export function mapArtifactsForEvent(
   }
   return undefined;
 }
+
+// A name with a Chinese alias shows the alias; any other tool (e.g. an MCP
+// tool) shows its own name.
+export function formatToolName(name: string): string {
+  return TOOL_LABEL[name] ?? name;
+}
+
+export function formatAgentName(agent: string): string {
+  return SUBAGENT_LABEL[agent] ?? agent;
+}
+
+export const STEP_STATUS_LABEL = {
+  running: "执行中",
+  completed: "已完成",
+  failed: "失败",
+  cancelled: "已取消"
+} as const;

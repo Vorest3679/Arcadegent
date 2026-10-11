@@ -23,6 +23,7 @@
 | [Agent の地図結果を描画する](dev-details/智能体地图结果渲染.md) | バックエンド artifact 契約とフロントエンド地図描画 |
 | [ブラウザー位置情報と逆ジオコーディング](dev-details/浏览器定位与逆地理编码.md) | 位置取得、逆ジオコーディング、Agent コンテキスト注入 |
 | [セッション run のライフサイクルと SSE](dev-details/会话运行生命周期与SSE.md) | run の受付・キャンセル・終了と SSE の再送・終了条件 |
+| [セッション読み込みのパフォーマンス](dev-details/会话加载性能优化.md) | セッション一覧・詳細・削除の読み込み表示とデータベース select の射影 |
 | [ReAct ランタイムの中核ロジック](dev-details/ReAct运行时核心逻辑.md) | 主 agent ループ、モデル出力のストリーミング配信、output_id の規則 |
 | [Agent コンテキスト payload の設計](dev-details/智能体上下文载荷设计.md) | Agent コンテキスト payload の構造と制約 |
 | [動的ツール登録の実装記録](dev-details/动态工具注册实现.md) | 組み込みツールと MCP ツールの登録経路 |

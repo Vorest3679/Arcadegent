@@ -48,6 +48,26 @@ class ChatSessionRecord(BaseModel):
     previous_response_id: str | None = None
     working_memory: dict[str, Any] = Field(default_factory=dict)
     turns: list[AgentTurnRecord] = Field(default_factory=list)
+    # Derived from `turns` on every save (services/chat_session_summary.py) so the
+    # history list can be served without reading `turns`. Null on rows written
+    # before the summary columns existed.
+    title: str | None = None
+    preview: str | None = None
+    visible_turn_count: int | None = None
+    created_at: str
+    updated_at: str
+
+
+class ChatSessionSummaryRecord(BaseModel):
+    """Summary columns of one `chat_sessions` row, as the history list needs them."""
+
+    session_id: str
+    client_id: str | None = None
+    intent: str = "search"
+    status: SessionStatusType = "idle"
+    title: str
+    preview: str | None = None
+    turn_count: int = 0
     created_at: str
     updated_at: str
 

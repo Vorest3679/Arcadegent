@@ -21,10 +21,14 @@ from app.protocol.messages import (
     ChatSessionDispatchDto,
     ChatSessionDetailDto,
     ChatSessionSummaryDto,
+    ChatTextStepDto,
+    ChatToolStepDto,
     ChatTurnMapArtifactsDto,
+    ChatTurnStepDto,
     ClientLocationContext,
     IntentType,
 )
+from app.services.chat_session_summary import visible_turns as _visible_turns
 from app.session.models import (
     RunConflictError,
     RunNotFoundError,
@@ -71,43 +75,39 @@ def _normalize_intent(raw: str) -> IntentType:
     return "search"
 
 
-def _single_line(text: str, *, limit: int) -> str:
-    compact = " ".join(text.split())
-    if len(compact) <= limit:
-        return compact
-    return f"{compact[: max(1, limit - 3)].rstrip()}..."
+def _to_step(turn: AgentTurn) -> ChatTurnStepDto | None:
+    """Project stored turn into a UI step, or None when it is not part of the round's story.
 
-
-def _build_title(turns: list[AgentTurn]) -> str:
-    for turn in turns:
-        if turn.role != "user":
-            continue
-        title = _single_line(turn.content, limit=32)
-        if title:
-            return title
-    return "New chat"
-
-
-def _build_preview(turns: list[AgentTurn]) -> str | None:
-    for turn in reversed(_visible_turns(turns)):
-        preview = _single_line(turn.content, limit=72)
-        if preview:
-            return preview
+    Only names, status and the main agent's own text leave the server; model
+    evidence (transcript, usage), tool arguments and tool results stay private.
+    """
+    if turn.role == "tool":
+        if not turn.name:
+            return None
+        status = "completed" if turn.payload.get("status") == "completed" else "failed"
+        return ChatToolStepDto(
+            call_id=turn.call_id, name=turn.name, agent=turn.agent, status=status, created_at=turn.created_at
+        )
+    model = turn.payload.get("model")
+    if turn.role == "assistant" and turn.scope == "conversation" and isinstance(model, dict):
+        text = turn.content.strip()
+        # A call without tool calls is the final reply, which is shown as the assistant turn itself.
+        if text and model.get("tool_calls"):
+            return ChatTextStepDto(agent=turn.agent, content=text, created_at=turn.created_at)
     return None
 
 
-def _visible_turns(turns: list[AgentTurn]) -> list[AgentTurn]:
-    """Keep model/tool traces for context while excluding them from the chat UI."""
-    return [
-        turn
-        for turn in turns
-        if turn.role == "user"
-        or (
-            turn.role == "assistant"
-            and turn.scope == "conversation"
-            and not isinstance(turn.payload.get("model"), dict)
-        )
-    ]
+def _round_steps(turns: list[AgentTurn]) -> list[list[ChatTurnStepDto]]:
+    """Steps of every round, one list per user turn in order (a round ends at the next user turn)."""
+    rounds: list[list[ChatTurnStepDto]] = []
+    for turn in turns:
+        if turn.role == "user":
+            rounds.append([])
+            continue
+        step = _to_step(turn)
+        if step is not None and rounds:
+            rounds[-1].append(step)
+    return rounds
 
 
 def _turn_map_artifacts(turn: AgentTurn, *, container: AppContainer) -> ChatTurnMapArtifactsDto | None:
@@ -138,27 +138,17 @@ def _turn_map_artifacts(turn: AgentTurn, *, container: AppContainer) -> ChatTurn
     )
 
 
-def _to_turn(turn: AgentTurn, *, container: AppContainer) -> ChatHistoryTurnDto:
+def _to_turn(
+    turn: AgentTurn, *, container: AppContainer, steps: list[ChatTurnStepDto] | None = None
+) -> ChatHistoryTurnDto:
     return ChatHistoryTurnDto(
         role=turn.role,
         content=turn.content,
         name=turn.name,
         call_id=turn.call_id,
         map_artifacts=_turn_map_artifacts(turn, container=container),
+        steps=steps or [],
         created_at=turn.created_at,
-    )
-
-
-def _to_summary(state: AgentSessionState, *, container: AppContainer) -> ChatSessionSummaryDto:
-    return ChatSessionSummaryDto(
-        session_id=state.session_id,
-        title=_build_title(state.turns),
-        preview=_build_preview(state.turns),
-        intent=_normalize_intent(state.intent),
-        status=_live_status(state, container=container),
-        turn_count=len(_visible_turns(state.turns)),
-        created_at=state.created_at,
-        updated_at=state.updated_at,
     )
 
 
@@ -184,6 +174,17 @@ def _state_client_location(state: AgentSessionState) -> ClientLocationContext | 
         return ClientLocationContext.model_validate(memory_location)
     except Exception:
         return None
+
+
+def _history_turns(
+    state: AgentSessionState, visible_turns: list[AgentTurn], *, container: AppContainer
+) -> list[ChatHistoryTurnDto]:
+    # Every user turn is visible, so visible user turns line up with the rounds.
+    rounds = iter(_round_steps(state.turns))
+    return [
+        _to_turn(turn, container=container, steps=next(rounds, []) if turn.role == "user" else None)
+        for turn in visible_turns
+    ]
 
 
 def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSessionDetailDto:
@@ -219,7 +220,7 @@ def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSess
         turn_count=len(visible_turns),
         created_at=state.created_at,
         updated_at=state.updated_at,
-        turns=[_to_turn(turn, container=container) for turn in visible_turns],
+        turns=_history_turns(state, visible_turns, container=container),
     )
 
 
@@ -296,12 +297,25 @@ def list_chat_sessions(
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
     container: AppContainer = Depends(get_container),
 ) -> list[ChatSessionSummaryDto]:
-    sessions = container.session_store.list_sessions(limit=limit, client_id=client_id)
-    return [
-        _to_summary(state, container=container)
-        for state in sessions
-        if state.turns or _live_status(state, container=container) == "running"
-    ]
+    records = container.session_store.list_session_summaries(limit=limit, client_id=client_id)
+    summaries: list[ChatSessionSummaryDto] = []
+    for record in records:
+        running = container.run_manager.is_active(record.session_id)
+        if record.turn_count == 0 and not running:
+            continue
+        summaries.append(
+            ChatSessionSummaryDto(
+                session_id=record.session_id,
+                title=record.title,
+                preview=record.preview,
+                intent=_normalize_intent(record.intent),
+                status="running" if running else record.status,
+                turn_count=record.turn_count,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
+            )
+        )
+    return summaries
 
 
 @router.get("/chat/sessions/{session_id}", response_model=ChatSessionDetailDto)
@@ -310,7 +324,7 @@ def get_chat_session(
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
     container: AppContainer = Depends(get_container),
 ) -> ChatSessionDetailDto:
-    session = container.session_store.get_session(session_id, client_id=client_id)
+    session = container.session_store.get_session_for_display(session_id, client_id=client_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
     return _to_detail(session, container=container)
@@ -322,10 +336,10 @@ def delete_chat_session(
     client_id: str | None = Query(default=None, min_length=1, max_length=128),
     container: AppContainer = Depends(get_container),
 ) -> Response:
-    session = container.session_store.get_session(session_id, client_id=client_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
     if container.run_manager.is_active(session_id):
+        # Only here is a full read needed: a foreign session must stay a 404, not a 409.
+        if container.session_store.get_session(session_id, client_id=client_id) is None:
+            raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
         raise HTTPException(status_code=409, detail=f"session '{session_id}' is currently running")
     deleted = container.session_store.delete_session(session_id, client_id=client_id)
     if not deleted:

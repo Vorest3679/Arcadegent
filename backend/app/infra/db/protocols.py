@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal, Protocol
 
 from app.agent.runtime.session_state import AgentSessionState
+from app.protocol.session_dto import ChatSessionSummaryRecord
 
 
 class ArcadeRepository(Protocol):
@@ -75,6 +76,16 @@ class SessionStateRepository(Protocol):
         """
         ...
 
+    def get_session_for_display(
+        self, session_id: str, *, client_id: str | None = None
+    ) -> AgentSessionState | None:
+        """Like ``get_session`` but reduced to what the session detail API shows.
+
+        Tool results, worker text and ``worker_runs`` are left out; the result
+        must not be saved back or fed to the runtime.
+        """
+        ...
+
     def list_sessions(
         self,
         *,
@@ -82,6 +93,15 @@ class SessionStateRepository(Protocol):
         client_id: str | None = None,
     ) -> list[AgentSessionState]:
         """Return recent sessions sorted by updated_at desc, optionally filtered by client."""
+        ...
+
+    def list_session_summaries(
+        self,
+        *,
+        limit: int = 50,
+        client_id: str | None = None,
+    ) -> list[ChatSessionSummaryRecord]:
+        """Return summaries for the history list, newest first, without loading turns."""
         ...
 
     def delete_session(self, session_id: str, *, client_id: str | None = None) -> bool:

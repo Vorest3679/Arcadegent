@@ -1,4 +1,4 @@
-import type { GeoPoint } from "../types";
+import type { GeoPoint } from "../../types";
 
 type MarkerUriOptions = {
   point: GeoPoint;

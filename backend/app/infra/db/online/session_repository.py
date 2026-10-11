@@ -15,8 +15,22 @@ from app.agent.runtime.session_state import (
 )
 from app.infra.db.online.config import SupabaseRepositoryConfig
 from app.infra.db.protocols import SessionStateRepository
-from app.protocol.session_dto import ChatSessionCreateDto, ChatSessionRecord
+from app.protocol.session_dto import ChatSessionCreateDto, ChatSessionRecord, ChatSessionSummaryRecord
 from app.services.chat_session_mapper import ChatSessionMapper
+from app.services.chat_session_summary import summarize_state
+
+
+_SUMMARY_COLUMNS = (
+    "session_id,client_id,intent,status,title,preview,visible_turn_count,created_at,updated_at"
+)
+_LIST_COLUMNS = (
+    "session_id,client_id,intent,active_subagent,status,last_error,turn_index,"
+    "previous_response_id,turns,created_at,updated_at"
+)
+
+
+def _row_in_list_scope(row: dict[str, Any], client_id: str | None) -> bool:
+    return client_id is None or row.get("client_id") == client_id
 
 
 class SupabaseSessionStateRepository:
@@ -70,6 +84,23 @@ class SupabaseSessionStateRepository:
             return None
         return deepcopy(state)
 
+    def get_session_for_display(
+        self, session_id: str, *, client_id: str | None = None
+    ) -> AgentSessionState | None:
+        """Read one session from the slim `chat_session_details` view."""
+        response = self._http_get(
+            "/chat_session_details",
+            params={
+                "select": "*",
+                "session_id": f"eq.{quote(session_id, safe='')}",
+                "limit": "1",
+            },
+        )
+        states = self._parse_state_list(response.json())
+        if not states or not _client_can_access(states[0], client_id):
+            return None
+        return states[0]
+
     def list_sessions(
         self,
         *,
@@ -78,7 +109,8 @@ class SupabaseSessionStateRepository:
     ) -> list[AgentSessionState]:
         safe_limit = max(1, min(limit, 200))
         params: dict[str, str] = {
-            "select": "*",
+            # The list only needs summary fields; working_memory is the bulk of a row.
+            "select": _LIST_COLUMNS,
             "order": "updated_at.desc",
             "limit": str(safe_limit),
         }
@@ -88,11 +120,86 @@ class SupabaseSessionStateRepository:
         states = self._parse_state_list(response.json())
         return [deepcopy(state) for state in states if _client_matches_list_scope(state, client_id)]
 
+    def list_session_summaries(
+        self,
+        *,
+        limit: int = 50,
+        client_id: str | None = None,
+    ) -> list[ChatSessionSummaryRecord]:
+        """History list from the summary columns; `turns` is not transferred."""
+        safe_limit = max(1, min(limit, 200))
+        params: dict[str, str] = {
+            "select": _SUMMARY_COLUMNS,
+            "order": "updated_at.desc",
+            "limit": str(safe_limit),
+        }
+        if client_id is not None:
+            params["client_id"] = f"eq.{client_id}"
+        rows = self._http_get("/chat_sessions", params=params).json()
+        if not isinstance(rows, list):
+            raise RuntimeError("supabase_session_invalid_response")
+        rows = [
+            row
+            for row in rows
+            if isinstance(row, dict) and _row_in_list_scope(row, client_id)
+        ]
+        # Rows saved before the summary columns existed: summarize them from turns.
+        legacy_ids = [row["session_id"] for row in rows if row.get("title") is None]
+        legacy: dict[str, ChatSessionSummaryRecord] = {}
+        if legacy_ids:
+            id_list = ",".join(f'"{sid}"' for sid in legacy_ids if '"' not in sid and "," not in sid)
+            response = self._http_get(
+                "/chat_sessions",
+                params={"select": "*", "session_id": f"in.({id_list})"},
+            )
+            for state in self._parse_state_list(response.json()):
+                summary = summarize_state(state)
+                legacy[state.session_id] = ChatSessionSummaryRecord(
+                    session_id=state.session_id,
+                    client_id=state.client_id,
+                    intent=state.intent,
+                    status=state.status,
+                    title=summary.title,
+                    preview=summary.preview,
+                    turn_count=summary.visible_turn_count,
+                    created_at=state.created_at,
+                    updated_at=state.updated_at,
+                )
+        summaries: list[ChatSessionSummaryRecord] = []
+        for row in rows:
+            if row["session_id"] in legacy:
+                summaries.append(legacy[row["session_id"]])
+            elif row.get("title") is not None:
+                summaries.append(
+                    ChatSessionSummaryRecord(
+                        session_id=row["session_id"],
+                        client_id=row.get("client_id"),
+                        intent=row.get("intent") or "search",
+                        status=row.get("status") or "idle",
+                        title=row["title"],
+                        preview=row.get("preview"),
+                        turn_count=int(row.get("visible_turn_count") or 0),
+                        created_at=row["created_at"],
+                        updated_at=row["updated_at"],
+                    )
+                )
+        return summaries
+
     def delete_session(self, session_id: str, *, client_id: str | None = None) -> bool:
-        state = self._fetch_by_id(session_id)
-        if state is None:
+        # Ownership check on the two columns it needs, not the whole row.
+        response = self._http_get(
+            "/chat_sessions",
+            params={
+                "select": "session_id,client_id",
+                "session_id": f"eq.{quote(session_id, safe='')}",
+                "limit": "1",
+            },
+        )
+        rows = response.json()
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
             return False
-        if not _client_can_access(state, client_id):
+        owner = rows[0].get("client_id")
+        if client_id is not None and owner not in {None, client_id}:
             return False
         self._http_delete(f"/chat_sessions?session_id=eq.{quote(session_id, safe='')}")
         return True

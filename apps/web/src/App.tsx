@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { AppSidebar } from "./components/AppSidebar";
 import { AppTopbar } from "./components/AppTopbar";
 import { ArcadeBrowser } from "./components/ArcadeBrowser";
-import { ChatPanel } from "./components/ChatPanel";
+import { ChatPanel } from "./components/chat/ChatPanel";
 import { useChatSessionController } from "./hooks/useChatSessionController";
 import { readInitialViewMode } from "./lib/viewMode";
 import { useAppStore } from "./stores/appStore";

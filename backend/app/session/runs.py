@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.infra.observability.logger import get_logger, log_exception_frames, log_ref
+from app.session.events import ControlEvent
 from app.session.injector import RunContext, RunExecutor, TerminalHook
 from app.session.models import (
     InvalidTransitionError,
@@ -297,7 +298,7 @@ class RunManager:
             record.session_id,
             record.run_id,
             kind="control",
-            event="run.state",
+            event=ControlEvent.RUN_STATE,
             data=data,
             status=record.status,
         ) # 声明一条 run.state 事件，表示run的状态发生了变化，可能是pending->running->completed/cancelled/failed
