@@ -1,10 +1,11 @@
 import { formatTimeLabel } from "../lib/sse/chatStream";
 import { useAppStore } from "../stores/appStore";
+import { useSessionStore } from "../stores/sessionStore";
 
 export function AppTopbar() {
   const viewMode = useAppStore((state) => state.viewMode);
-  const sessions = useAppStore((state) => state.sessions);
-  const activeSessionId = useAppStore((state) => state.activeSessionId);
+  const sessions = useSessionStore((state) => state.sessions);
+  const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
   const activeSessionUpdatedAt =
     sessions.find((session) => session.session_id === activeSessionId)?.updated_at ?? null;

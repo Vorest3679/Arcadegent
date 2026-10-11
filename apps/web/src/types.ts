@@ -219,14 +219,35 @@ export type ChatSessionDetail = {
   turns: ChatHistoryTurn[];
 };
 
-// Transport envelope of one run event; `event` is a business label for
-// kind "event" and a control name (run.state, stream.reset) for kind "control".
+// Closed event catalog of the run stream; mirrors backend `app.session.events`
+// (which also documents each event's data fields). Anything else is dropped.
+export const RUN_EVENT_NAMES = [
+  "session.started",
+  "subagent.changed",
+  "worker.started",
+  "worker.completed",
+  "worker.failed",
+  "tool.started",
+  "tool.completed",
+  "tool.failed",
+  "navigation.route_ready",
+  "assistant.token",
+  "assistant.completed",
+  "session.failed"
+] as const;
+export const CONTROL_EVENT_NAMES = ["run.state", "stream.reset"] as const;
+
+export type ChatRunEventName = (typeof RUN_EVENT_NAMES)[number];
+export type ChatControlEventName = (typeof CONTROL_EVENT_NAMES)[number];
+
+// Transport envelope of one run event: kind "event" carries a business
+// event, kind "control" a control event (run.state, stream.reset).
 export type ChatStreamEnvelope = {
   id: number;
   session_id: string;
   run_id: string;
   kind: "event" | "control";
-  event: string;
+  event: ChatRunEventName | ChatControlEventName;
   output_id?: string;
   status?: ChatRunStatus;
   at: string;

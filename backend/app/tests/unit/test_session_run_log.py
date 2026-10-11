@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+from app.session.events import ControlEvent, RunEvent
 from app.session.run_log import HEARTBEAT, RunLog, StreamEvent
 
 
@@ -116,3 +117,27 @@ def test_drop_session_ends_subscription_and_only_sealed_books_are_evicted() -> N
         assert await asyncio.wait_for(follower, timeout=1) == []
 
     asyncio.run(scenario())
+
+
+def test_events_outside_the_catalog_are_refused() -> None:
+    async def scenario() -> None:
+        log = RunLog()
+        log.open("s1", "r1")
+        channel = log.channel("s1", "r1")
+        channel.publish("tool.progress")  # not in the catalog
+        channel.publish("run.state")  # a control name is not a business event
+        channel.publish(RunEvent.TOOL_STARTED)
+        assert log.append("s1", "r1", kind="control", event="tool.started") is None
+        assert log.append("s1", "r1", kind="control", event=ControlEvent.RUN_STATE) is not None
+        log.seal("s1", "r1")
+
+        items = await _collect(log, "s1", "r1")
+        assert [(item.kind, item.event) for item in items] == [("event", "tool.started"), ("control", "run.state")]
+
+    asyncio.run(scenario())
+
+
+def test_every_catalog_name_is_dotted_and_unique() -> None:
+    names = [str(name) for name in (*RunEvent, *ControlEvent)]
+    assert len(names) == len(set(names))
+    assert all("." in name for name in names)

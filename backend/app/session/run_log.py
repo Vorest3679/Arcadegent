@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from app.infra.observability.logger import get_logger, log_ref
+from app.session.events import ControlEvent, is_known_event
 from app.session.injector import RunPublisher
 from app.session.models import utc_now_iso
 
@@ -134,7 +135,14 @@ class RunLog:
         output_id: str | None = None,
         status: str | None = None,
     ) -> StreamEvent | None:
-        """Number and store one event; returns None when the book is sealed or replaced."""
+        """Number and store one event; returns None when the book is sealed or replaced.
+
+        Names outside the event catalog are refused (and logged): the stream
+        contract is closed, a new event must be added to ``session.events`` first.
+        """
+        if not is_known_event(kind, event):
+            logger.error("run_log.unknown_event kind=%s event=%s", kind, event)
+            return None
         book = self._books.get(session_id)
         if book is None or book.run_id != run_id or book.sealed:
             logger.debug(
@@ -206,7 +214,7 @@ class RunLog:
                     session_id=session_id,
                     run_id=run_id,
                     kind="control",
-                    event="stream.reset",
+                    event=ControlEvent.STREAM_RESET,
                     data={"head_id": book.next_id - 1},
                 )
                 continue

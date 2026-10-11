@@ -1,6 +1,9 @@
 import { FormEvent, ReactNode, useEffect, useRef } from "react";
+import { textSteps } from "../lib/chatRounds";
 import { formatSubagentLabel, formatTimeLabel } from "../lib/sse/chatStream";
 import { useAppStore } from "../stores/appStore";
+import { useRunStore } from "../stores/runStore";
+import { useSessionStore } from "../stores/sessionStore";
 import { MarkdownMessage } from "./MarkdownMessage";
 import type { ChatHistoryTurn } from "../types";
 import { AgentMapCard } from "./map/AgentMapCard";
@@ -24,21 +27,21 @@ export function ChatPanel({
   streamReply,
   streamReplyActive
 }: ChatPanelProps) {
-  const turns = useAppStore((state) => state.turns);
-  const activeSessionId = useAppStore((state) => state.activeSessionId);
-  const loading = useAppStore((state) => state.turnsLoading);
-  const sending = useAppStore((state) => state.sending);
+  const turns = useSessionStore((state) => state.turns);
+  const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const loading = useSessionStore((state) => state.turnsLoading);
+  const sending = useSessionStore((state) => state.sending);
   const inputValue = useAppStore((state) => state.inputValue);
   const setInputValue = useAppStore((state) => state.setInputValue);
-  const error = useAppStore((state) => state.chatError);
-  const streamConnected = useAppStore((state) => state.streamConnected);
-  const activeSubagent = useAppStore((state) => state.activeSubagent);
-  const streamItems = useAppStore((state) => state.streamItems);
-  const awaitingAssistant = useAppStore((state) => state.awaitingAssistant);
-  const mapArtifacts = useAppStore((state) => state.activeMapArtifacts);
-  const activeRunId = useAppStore((state) => state.activeRunId);
-  const committedRunId = useAppStore((state) => state.committedRunId);
-  const sealedOutputs = useAppStore((state) => state.sealedOutputs);
+  const error = useSessionStore((state) => state.chatError);
+  const streamConnected = useRunStore((state) => state.streamConnected);
+  const activeSubagent = useRunStore((state) => state.activeSubagent);
+  const streamItems = useRunStore((state) => state.streamItems);
+  const awaitingAssistant = useRunStore((state) => state.awaitingAssistant);
+  const mapArtifacts = useRunStore((state) => state.activeMapArtifacts);
+  const activeRunId = useRunStore((state) => state.activeRunId);
+  const committedRunId = useRunStore((state) => state.committedRunId);
+  const liveRound = useRunStore((state) => state.liveRound);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   // runLive为了判断当前是否有正在进行的执行阶段，
@@ -79,7 +82,7 @@ export function ChatPanel({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turns, loading, sending, streamItems, streamReply, sealedOutputs, awaitingAssistant, showStreamStage, showMapCard]);
+  }, [turns, loading, sending, streamItems, streamReply, liveRound, awaitingAssistant, showStreamStage, showMapCard]);
 
   const renderMapCard = (key: string, animationIndex: number, artifacts = mapArtifacts) => {
     if (!artifacts) {
@@ -120,8 +123,8 @@ export function ChatPanel({
     if (turn.role !== "user") {
       return [];
     }
-    if (runLive && index === lastUserIndex && sealedOutputs.length > 0) {
-      return sealedOutputs.map((output) => output.text);
+    if (runLive && index === lastUserIndex && textSteps(liveRound).length > 0) {
+      return textSteps(liveRound);
     }
     return (turn.steps ?? []).flatMap((step) => step.kind === "text" ? [step.content] : []);
   };

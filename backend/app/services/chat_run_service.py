@@ -15,6 +15,7 @@ from app.agent.runtime.session_state import SessionOwnershipError, ensure_workin
 from app.infra.db.protocols import SessionStateRepository
 from app.infra.observability.logger import get_logger, log_ref
 from app.protocol.messages import ChatRequest, ChatResponse
+from app.session.events import RunEvent
 from app.session.injector import RunContext, RunPublisher
 from app.session.models import RunRecord, ServiceDrainingError, SessionBusyError
 from app.session.runs import RunManager
@@ -117,7 +118,7 @@ class ChatRunService:
         state.working_memory["last_error"] = {"message": reason, "source": "stream"}
         state.updated_at = _utc_now_iso()
         self._session_store.save_session(state)
-        events.publish("session.failed", {"error": reason, "active_subagent": state.active_subagent})
+        events.publish(RunEvent.SESSION_FAILED, {"error": reason, "active_subagent": state.active_subagent})
         return True
 
     async def _on_terminal(self, record: RunRecord, events: RunPublisher) -> None:

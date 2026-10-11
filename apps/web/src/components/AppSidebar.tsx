@@ -1,5 +1,6 @@
 import { formatTimeLabel } from "../lib/sse/chatStream";
 import { useAppStore } from "../stores/appStore";
+import { useSessionStore } from "../stores/sessionStore";
 import type { ChatSessionSummary } from "../types";
 
 type SidebarSessionItemProps = {
@@ -58,10 +59,10 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const sidebarOpen = useAppStore((state) => state.sidebarOpen);
   const viewMode = useAppStore((state) => state.viewMode);
-  const sessions = useAppStore((state) => state.sessions);
-  const activeSessionId = useAppStore((state) => state.activeSessionId);
-  const sessionsLoading = useAppStore((state) => state.sessionsLoading);
-  const deletingSessionId = useAppStore((state) => state.deletingSessionId);
+  const sessions = useSessionStore((state) => state.sessions);
+  const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const sessionsLoading = useSessionStore((state) => state.sessionsLoading);
+  const deletingSessionId = useSessionStore((state) => state.deletingSessionId);
 
   return (
     <aside className={`app-sidebar ${sidebarOpen ? "is-open" : ""}`}>

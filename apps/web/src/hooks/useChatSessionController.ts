@@ -6,16 +6,19 @@ import {
   dispatchChatSession,
   getChatSession,
   listChatSessions
-} from "../api/client";
+} from "../api/sessionApi";
 import { resolveClientLocationForSessionStart, warmupClientLocationCache } from "../lib/clientLocation";
 import {
   getChatClientId,
   readStoredActiveSessionId,
   writeStoredActiveSessionId
 } from "../lib/chatSessionStorage";
+import { applyEventToRound, finishRound, sealOutput, startLiveRound } from "../lib/chatRounds";
 import { mapArtifactsForEvent, toProgressText, toVisibleTurns } from "../lib/sse/chatStream";
 import { isTerminalRunStatus, openRunStream, type RunStream } from "../lib/sse/runStream";
 import { useAppStore } from "../stores/appStore";
+import { useRunStore } from "../stores/runStore";
+import { useSessionStore } from "../stores/sessionStore";
 import type {
   ChatMapArtifacts,
   ChatSessionDetail,
@@ -23,6 +26,11 @@ import type {
   ChatTurnStep
 } from "../types";
 import { useStreamReply } from "./useStreamReply";
+
+// Current snapshots; callbacks and async code must read fresh state, not a captured render.
+const appState = () => useAppStore.getState();
+const sessionState = () => useSessionStore.getState();
+const runState = () => useRunStore.getState();
 
 function makeSessionId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -53,9 +61,9 @@ function isRunActive(detail: ChatSessionDetail): boolean {
 }
 
 export function useChatSessionController() {
-  const sending = useAppStore((state) => state.sending);
-  const streamConnected = useAppStore((state) => state.streamConnected);
-  const awaitingAssistant = useAppStore((state) => state.awaitingAssistant);
+  const sending = useSessionStore((state) => state.sending);
+  const streamConnected = useRunStore((state) => state.streamConnected);
+  const awaitingAssistant = useRunStore((state) => state.awaitingAssistant);
 
   const {
     appendStreamReply,
@@ -81,7 +89,7 @@ export function useChatSessionController() {
   const stopStream = useCallback(() => {
     streamRef.current?.close();
     streamRef.current = null;
-    useAppStore.getState().setStreamConnected(false);
+    runState().setStreamConnected(false);
   }, []);
 
   useEffect(() => {
@@ -97,7 +105,7 @@ export function useChatSessionController() {
   }, [cancelStreamReplyFlush, stopStream]);
 
   function pushStreamEnvelope(envelope: ChatStreamEnvelope): void {
-    useAppStore.getState().setStreamItems([
+    runState().setStreamItems([
       {
         id: envelope.id,
         event: envelope.event,
@@ -108,7 +116,7 @@ export function useChatSessionController() {
   }
 
   function recordStreamReconnect(attempt: number, maxRetries: number): void {
-    useAppStore.getState().setStreamItems([
+    runState().setStreamItems([
       {
         // Negative ids are local transport status records. Server event ids are
         // positive and remain the cursor used for replay.
@@ -121,18 +129,18 @@ export function useChatSessionController() {
   }
 
   function handleRunEvent(sessionId: string, envelope: ChatStreamEnvelope): void {
-    const store = useAppStore.getState();
+    const store = sessionState();
 
     if (envelope.event === "session.started" || envelope.event === "subagent.changed") {
       const next = envelope.data.to_subagent ?? envelope.data.active_subagent;
       if (typeof next === "string" && next) {
-        store.setActiveSubagent(next);
+        runState().setActiveSubagent(next);
       }
     }
 
-    const artifacts = mapArtifactsForEvent(envelope, store.activeMapArtifacts);
+    const artifacts = mapArtifactsForEvent(envelope, runState().activeMapArtifacts);
     if (artifacts !== undefined) {
-      store.setActiveMapArtifacts(artifacts);
+      runState().setActiveMapArtifacts(artifacts);
     }
 
     if (envelope.event === "assistant.completed") {
@@ -148,7 +156,13 @@ export function useChatSessionController() {
       acceptFinalReply(sessionId, envelope, "failed");
     }
 
+    recordToolStep(envelope);
     pushStreamEnvelope(envelope);
+  }
+
+  // Folds tool events into the live round; a no-op when no round is followed.
+  function recordToolStep(envelope: ChatStreamEnvelope): void {
+    runState().setLiveRound((round) => round && applyEventToRound(round, envelope));
   }
 
   // The terminal reply is authoritative for the final output and is kept for
@@ -160,7 +174,7 @@ export function useChatSessionController() {
     }
     finalReplyRef.current = reply;
     syncStreamReply(reply);
-    useAppStore.getState().setSessions((previous) => previous.map((item) =>
+    sessionState().setSessions((previous) => previous.map((item) =>
       item.session_id === sessionId
         ? {
             ...item,
@@ -174,7 +188,7 @@ export function useChatSessionController() {
   }
 
   async function giveUpRun(sessionId: string, runId: string): Promise<void> {
-    useAppStore.getState().setChatError("实时连接中断，已尝试重连 3 次；正在停止本次请求。");
+    sessionState().setChatError("实时连接中断，已尝试重连 3 次；正在停止本次请求。");
     const isLatest = beginDetailRequest();
     try {
       // Only cancel when the run we lost is still the one running.
@@ -189,7 +203,7 @@ export function useChatSessionController() {
       if (!isLatest()) {
         return;
       }
-      useAppStore.getState().setChatError(
+      sessionState().setChatError(
         err instanceof Error ? err.message : "停止中断会话失败，请稍后重试。"
       );
       void loadSession(sessionId, {
@@ -208,17 +222,24 @@ export function useChatSessionController() {
 
   // 当 detail 无法加载时，保留本地的最终回复和中间输出作为历史记录。
   function commitRunLocally(runId: string): void {
-    const store = useAppStore.getState();
+    const store = sessionState();
     const reply = finalReplyRef.current?.trim();
     // 实时的中间回复将随着移交而消失；保留它们
     // 随着回合用户转动的步骤，就像服务器细节一样。
-    const intermediates = store.sealedOutputs.map((output): ChatTurnStep => ({
-      kind: "text",
-      content: output.text,
-      created_at: output.at
-    }));
+    const intermediates = (runState().liveRound?.steps ?? []).map((step): ChatTurnStep =>
+      step.kind === "text"
+        ? { kind: "text", agent: step.agent, content: step.content, created_at: step.at }
+        : {
+            kind: "tool",
+            call_id: step.callId,
+            name: step.name,
+            agent: step.agent,
+            status: step.status === "completed" ? "completed" : "failed",
+            created_at: step.at
+          }
+    );
     if (reply || intermediates.length > 0) {
-      const artifacts = store.activeMapArtifacts;
+      const artifacts = runState().activeMapArtifacts;
       store.setTurns((previous) => {
         const next = [...previous];// 找到最后一个来自用户的轮次并附加中间回复
         const lastUser = next.map((turn) => turn.role).lastIndexOf("user");
@@ -237,21 +258,23 @@ export function useChatSessionController() {
       });
     }
     finalReplyRef.current = null;
-    store.setActiveRunId(runId);
-    store.setCommittedRunId(runId);
-    store.setActiveMapArtifacts(null);
-    store.setAwaitingAssistant(false);
+    runState().setActiveRunId(runId);
+    runState().setCommittedRunId(runId);
+    runState().setActiveMapArtifacts(null);
+    runState().setAwaitingAssistant(false);
   }
 
   function startStream(sessionId: string, runId: string): void {
     stopStream();
-    const store = useAppStore.getState();
-    store.setActiveRunId(runId);
-    store.setStreamItems([]);
-    store.setSealedOutputs([]);
+    const store = sessionState();
+    runState().setActiveRunId(runId);
+    runState().setStreamItems([]);
+    runState().setLiveRound(null);
     finalReplyRef.current = null;
     store.setActiveSessionStatus("running");
     resetStreamReply();
+    const lastUser = [...store.turns].reverse().find((turn) => turn.role === "user");
+    runState().setLiveRound(lastUser ? startLiveRound(runId, lastUser) : null);
 
     const stream: RunStream = openRunStream({
       url: (afterId) => buildChatStreamUrl(sessionId, runId, afterId, clientIdRef.current),
@@ -260,20 +283,21 @@ export function useChatSessionController() {
       handlers: {
         onEvent: (envelope) => handleRunEvent(sessionId, envelope),
         onText: (_outputId, text, delta) => appendStreamReply(text, delta),
-        onOutputSealed: (outputId, text) => {
-          if (text.trim()) {
-            useAppStore.getState().setSealedOutputs((previous) => [
-              ...previous,
-              { outputId, text, at: new Date().toISOString() }
-            ]);
-          }
+        onOutputSealed: (_outputId, text) => {
+          runState().setLiveRound((previous) =>
+            previous ? sealOutput(previous, text, new Date().toISOString(), "main_agent") : previous
+          );
           resetStreamReply();
         },
         onState: (status) => {
           if (!isTerminalRunStatus(status)) {
-            useAppStore.getState().setActiveSessionStatus("running");
+            sessionState().setActiveSessionStatus("running");
             return;
           }
+          const finalStatus = status === "completed" || status === "cancelled" ? status : "failed";
+          runState().setLiveRound((previous) =>
+            previous ? finishRound(previous, finalStatus) : previous
+          );
           if (streamRef.current === stream) {
             streamRef.current = null;
           }
@@ -290,7 +314,7 @@ export function useChatSessionController() {
         onReset: () => {
           void loadSession(sessionId, { preserveStreamState: true, reconnectStream: false });
         },
-        onConnection: (connected) => useAppStore.getState().setStreamConnected(connected),
+        onConnection: (connected) => runState().setStreamConnected(connected),
         onRetry: recordStreamReconnect,
         onGiveUp: () => {
           if (streamRef.current === stream) {
@@ -310,7 +334,7 @@ export function useChatSessionController() {
   ): void {
     const preserveStreamState = options?.preserveStreamState ?? false;
     const reconnectStream = options?.reconnectStream ?? true;
-    const store = useAppStore.getState();
+    const store = sessionState();
 
     store.setActiveSessionId(sessionId);
     writeStoredActiveSessionId(sessionId);
@@ -335,7 +359,7 @@ export function useChatSessionController() {
     const runActive = isRunActive(detail);
 
     store.setTurns(visibleTurns);
-    store.setActiveSubagent(detail.active_subagent || null);
+    runState().setActiveSubagent(detail.active_subagent || null);
     store.setActiveSessionStatus(detail.status);
 
     if (detail.status === "failed") {
@@ -345,8 +369,8 @@ export function useChatSessionController() {
     }
 
     if (run && runActive) {
-      store.setActiveMapArtifacts(detailArtifacts);
-      store.setAwaitingAssistant(true);
+      runState().setActiveMapArtifacts(detailArtifacts);
+      runState().setAwaitingAssistant(true);
       if (reconnectStream) {
         // Without a cursor the run log replays the whole run, text included.
         startStream(sessionId, run.run_id);
@@ -356,14 +380,14 @@ export function useChatSessionController() {
 
     // Set together with `turns` so the live bubble hands over to the history
     // turn in the same render.
-    store.setActiveRunId(run?.run_id ?? null);
-    store.setCommittedRunId(run?.run_id ?? null);
-    store.setActiveMapArtifacts(null);
-    store.setAwaitingAssistant(false);
+    runState().setActiveRunId(run?.run_id ?? null);
+    runState().setCommittedRunId(run?.run_id ?? null);
+    runState().setActiveMapArtifacts(null);
+    runState().setAwaitingAssistant(false);
     if (!preserveStreamState) {
       stopStream();
-      store.setStreamItems([]);
-      store.setSealedOutputs([]);
+      runState().setStreamItems([]);
+      runState().setLiveRound(null);
       resetStreamReply();
     }
   }
@@ -373,7 +397,7 @@ export function useChatSessionController() {
     options?: { preserveStreamState?: boolean }
   ): Promise<void> {
     const preserveStreamState = options?.preserveStreamState ?? false;
-    const store = useAppStore.getState();
+    const store = sessionState();
     const showLoading = !preserveStreamState;
     if (showLoading) {
       store.setSessionsLoading(true);
@@ -381,7 +405,7 @@ export function useChatSessionController() {
 
     try {
       const rows = await listChatSessions(60, clientIdRef.current);
-      const latestStore = useAppStore.getState();
+      const latestStore = sessionState();
       const activeOptimisticSession = preserveStreamState && latestStore.activeSessionStatus === "running"
         ? latestStore.sessions.find((item) => item.session_id === latestStore.activeSessionId)
         : null;
@@ -395,16 +419,16 @@ export function useChatSessionController() {
         latestStore.setActiveSessionId(null);
         latestStore.setActiveSessionStatus(null);
         latestStore.setTurns([]);
-        latestStore.setActiveSubagent(null);
-        latestStore.setActiveMapArtifacts(null);
-        latestStore.setActiveRunId(null);
-        latestStore.setCommittedRunId(null);
+        runState().setActiveSubagent(null);
+        runState().setActiveMapArtifacts(null);
+        runState().setActiveRunId(null);
+        runState().setCommittedRunId(null);
         if (!preserveStreamState) {
           stopStream();
-          latestStore.setStreamItems([]);
-          latestStore.setSealedOutputs([]);
+          runState().setStreamItems([]);
+          runState().setLiveRound(null);
           resetStreamReply();
-          latestStore.setAwaitingAssistant(false);
+          runState().setAwaitingAssistant(false);
         }
         return;
       }
@@ -427,10 +451,10 @@ export function useChatSessionController() {
         await loadSession(targetId, { preserveStreamState, reconnectStream: true });
       }
     } catch (err) {
-      useAppStore.getState().setChatError(err instanceof Error ? err.message : "加载会话列表失败");
+      sessionState().setChatError(err instanceof Error ? err.message : "加载会话列表失败");
     } finally {
       if (showLoading) {
-        useAppStore.getState().setSessionsLoading(false);
+        sessionState().setSessionsLoading(false);
       }
     }
   }
@@ -442,7 +466,7 @@ export function useChatSessionController() {
     const preserveStreamState = options?.preserveStreamState ?? false;
     const reconnectStream = options?.reconnectStream ?? true;
     const isLatest = beginDetailRequest();
-    const store = useAppStore.getState();
+    const store = sessionState();
     // A background reload (hand-over, reset) keeps the content on screen; only
     // an explicit load shows the loading banner.
     if (!preserveStreamState) {
@@ -461,48 +485,50 @@ export function useChatSessionController() {
       if (!isLatest()) {
         return null;
       }
-      useAppStore.getState().setChatError(err instanceof Error ? err.message : "加载会话失败");
+      sessionState().setChatError(err instanceof Error ? err.message : "加载会话失败");
       options?.onFailure?.();
       return null;
     } finally {
       if (isLatest()) {
-        useAppStore.getState().setTurnsLoading(false);
+        sessionState().setTurnsLoading(false);
       }
     }
   }
 
   function openChatView(): void {
-    const store = useAppStore.getState();
-    store.setViewMode("chat");
-    store.setSidebarOpen(false);
+    const app = appState();
+    app.setViewMode("chat");
+    app.setSidebarOpen(false);
   }
 
   function openArcadesView(): void {
-    const store = useAppStore.getState();
-    store.setViewMode("arcades");
-    store.setSidebarOpen(false);
+    const app = appState();
+    app.setViewMode("arcades");
+    app.setSidebarOpen(false);
   }
 
   function startNewSession(): void {
     sessionGenerationRef.current += 1;
     stopStream();
-    const store = useAppStore.getState();
-    store.setViewMode("chat");
+    const app = appState();
+    app.setViewMode("chat");
+    app.setInputValue("");
+    app.setSidebarOpen(false);
+    const store = sessionState();
     store.resetActiveSessionState();
+    runState().resetRunState();
     store.setTurnsLoading(false);
     writeStoredActiveSessionId(null);
-    store.setInputValue("");
     store.setChatError("");
-    store.setSidebarOpen(false);
-    store.setStreamItems([]);
+    runState().setStreamItems([]);
     resetStreamReply();
   }
 
   async function submitChat(event: FormEvent): Promise<void> {
     event.preventDefault();
-    const currentState = useAppStore.getState();
-    const message = currentState.inputValue.trim();
-    if (!message || currentState.sending || currentState.awaitingAssistant) {
+    const currentState = sessionState();
+    const message = appState().inputValue.trim();
+    if (!message || currentState.sending || runState().awaitingAssistant) {
       return;
     }
 
@@ -515,14 +541,14 @@ export function useChatSessionController() {
 
     sessionGenerationRef.current += 1;
     resetStreamReply();
-    currentState.setStreamItems([]);
-    currentState.setSealedOutputs([]);
-    currentState.setActiveSubagent(null);
-    currentState.setActiveMapArtifacts(null);
+    runState().setStreamItems([]);
+    runState().setLiveRound(null);
+    runState().setActiveSubagent(null);
+    runState().setActiveMapArtifacts(null);
     // No run id until dispatch answers; awaitingAssistant keeps the bubble.
-    currentState.setActiveRunId(null);
+    runState().setActiveRunId(null);
     currentState.setTurns((previous) => [...previous, { role: "user", content: message, created_at: optimisticCreatedAt }]);
-    currentState.setAwaitingAssistant(true);
+    runState().setAwaitingAssistant(true);
     currentState.setTurnsLoading(false);
     currentState.setSending(true);
     currentState.setChatError("");
@@ -543,9 +569,9 @@ export function useChatSessionController() {
 
     try {
       const location = isNewSession ? await resolveClientLocationForSessionStart() : undefined;
-      const store = useAppStore.getState();
+      const store = sessionState();
 
-      store.setInputValue("");
+      appState().setInputValue("");
       store.setActiveSessionId(sessionId);
       writeStoredActiveSessionId(sessionId);
       store.setActiveSessionStatus("running");
@@ -557,16 +583,16 @@ export function useChatSessionController() {
         location: location ?? undefined,
         page_size: 5
       });
-      const latestStore = useAppStore.getState();
+      const latestStore = sessionState();
       latestStore.setActiveSessionId(dispatched.session_id);
       writeStoredActiveSessionId(dispatched.session_id);
       latestStore.setActiveSessionStatus(dispatched.status);
       startStream(dispatched.session_id, dispatched.run_id);
       await loadSessionList(dispatched.session_id, { preserveStreamState: true });
     } catch (err) {
-      const store = useAppStore.getState();
+      const store = sessionState();
       store.setChatError(err instanceof Error ? err.message : "发送失败");
-      store.setInputValue(message);
+      appState().setInputValue(message);
       store.setActiveSessionId(previousSessionId);
       writeStoredActiveSessionId(previousSessionId);
       store.setActiveSessionStatus(previousSessionStatus);
@@ -579,28 +605,28 @@ export function useChatSessionController() {
         }
         return next;
       });
-      store.setStreamItems([]);
-      store.setSealedOutputs([]);
-      store.setActiveSubagent(null);
-      store.setActiveMapArtifacts(null);
-      store.setActiveRunId(store.committedRunId);
+      runState().setStreamItems([]);
+      runState().setLiveRound(null);
+      runState().setActiveSubagent(null);
+      runState().setActiveMapArtifacts(null);
+      runState().setActiveRunId(runState().committedRunId);
       resetStreamReply();
-      store.setAwaitingAssistant(false);
+      runState().setAwaitingAssistant(false);
       stopStream();
     } finally {
-      useAppStore.getState().setSending(false);
+      sessionState().setSending(false);
     }
   }
 
   function quickAsk(prompt: string): void {
-    const store = useAppStore.getState();
-    store.setInputValue(prompt);
-    store.setViewMode("chat");
-    store.setSidebarOpen(false);
+    const app = appState();
+    app.setInputValue(prompt);
+    app.setViewMode("chat");
+    app.setSidebarOpen(false);
   }
 
   async function removeSession(sessionId: string): Promise<void> {
-    const currentState = useAppStore.getState();
+    const currentState = sessionState();
     if (currentState.deletingSessionId || currentState.sending) {
       return;
     }
@@ -615,35 +641,36 @@ export function useChatSessionController() {
 
     try {
       await deleteChatSession(sessionId, clientIdRef.current);
-      const store = useAppStore.getState();
+      const store = sessionState();
       const isActive = store.activeSessionId === sessionId;
 
       if (isActive) {
         store.resetActiveSessionState();
+        runState().resetRunState();
         writeStoredActiveSessionId(null);
-        store.setStreamItems([]);
+        runState().setStreamItems([]);
         resetStreamReply();
       }
 
       await loadSessionList(isActive ? undefined : store.activeSessionId || undefined);
     } catch (err) {
-      useAppStore.getState().setChatError(err instanceof Error ? err.message : "删除会话失败");
+      sessionState().setChatError(err instanceof Error ? err.message : "删除会话失败");
     } finally {
-      useAppStore.getState().setDeletingSessionId(null);
+      sessionState().setDeletingSessionId(null);
     }
   }
 
   function selectSession(sessionId: string): void {
     sessionGenerationRef.current += 1;
     stopStream();
-    const store = useAppStore.getState();
-    store.setViewMode("chat");
+    const app = appState();
+    app.setViewMode("chat");
     void loadSession(sessionId);
-    store.setSidebarOpen(false);
+    app.setSidebarOpen(false);
   }
 
   function refreshSessions(): void {
-    void loadSessionList(useAppStore.getState().activeSessionId || undefined);
+    void loadSessionList(sessionState().activeSessionId || undefined);
   }
 
   return {

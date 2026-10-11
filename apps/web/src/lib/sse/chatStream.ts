@@ -54,7 +54,7 @@ function formatToolLabel(toolName: string | undefined): string {
   if (!toolName) {
     return "工具";
   }
-  return TOOL_LABEL[toolName] ?? toolName;
+  return TOOL_LABEL[toolName] ?? "外部工具";
 }
 
 export function toProgressText(envelope: ChatStreamEnvelope): string {
@@ -86,9 +86,6 @@ export function toProgressText(envelope: ChatStreamEnvelope): string {
   }
   if (envelope.event === "tool.started") {
     return `${formatToolLabel(toolName)} 执行中`;
-  }
-  if (envelope.event === "tool.progress") {
-    return `${formatToolLabel(toolName)} 处理中`;
   }
   if (envelope.event === "tool.completed") {
     return `${formatToolLabel(toolName)} 已完成`;
@@ -183,3 +180,18 @@ export function mapArtifactsForEvent(
   }
   return undefined;
 }
+
+export function formatToolName(name: string): string {
+  return TOOL_LABEL[name] ?? "外部工具";
+}
+
+export function formatAgentName(agent: string): string {
+  return agent ? SUBAGENT_LABEL[agent] ?? "外部代理" : "";
+}
+
+export const STEP_STATUS_LABEL = {
+  running: "执行中",
+  completed: "已完成",
+  failed: "失败",
+  cancelled: "已取消"
+} as const;

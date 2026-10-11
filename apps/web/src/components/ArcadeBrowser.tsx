@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef } from "react";
-import { getArcadeDetail, listArcades, listCities, listCounties, listProvinces } from "../api/client";
+import { getArcadeDetail, listArcades, listCities, listCounties, listProvinces } from "../api/arcadeApi";
 import { convertClientLocationToGcj02, geocodeAddressToGcj02, getArcadeGcjPoint } from "../lib/amap/coords";
 import { buildAmapMarkerUri, buildAmapNavigationUri } from "../lib/amap/uri";
 import { warmupClientLocationCache } from "../lib/clientLocation";

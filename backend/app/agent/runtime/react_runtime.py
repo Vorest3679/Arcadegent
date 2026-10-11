@@ -37,6 +37,7 @@ from app.protocol.messages import (
     IntentType,
 )
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
+from app.session.events import RunEvent
 from app.session.injector import NullPublisher, RunPublisher
 
 logger = get_logger(__name__)
@@ -159,7 +160,7 @@ class ReactRuntime:
             state.updated_at = _utc_now_iso()
             self._session_store.save_session(state)
             self._publish(
-                "session.failed",
+                RunEvent.SESSION_FAILED,
                 {
                     "error": error_message,
                     "active_subagent": state.active_subagent,
@@ -229,7 +230,7 @@ class ReactRuntime:
             ),
         )
         self._publish(
-            "session.started",
+            RunEvent.SESSION_STARTED,
             {
                 "intent": state.intent,
                 "model": "react-runtime",
@@ -295,7 +296,7 @@ class ReactRuntime:
             state.last_error = None
         self._session_store.save_session(state)
         self._publish(
-            "session.failed" if model_error else "assistant.completed",
+            "session.failed" if model_error else RunEvent.ASSISTANT_COMPLETED,
             {
                 "reply": final_text,
                 "active_subagent": state.active_subagent,
@@ -583,7 +584,7 @@ class ReactRuntime:
             # The trace starts when the model proposes the tool, so argument
             # preparation failures are also captured as a complete tool span.
             self._publish(
-                "tool.started",
+                RunEvent.TOOL_STARTED,
                 {
                     "tool": call.name,
                     "call_id": call.call_id,
@@ -753,7 +754,7 @@ class ReactRuntime:
             worker_run_id=run_id,
         )
         self._publish(
-            "worker.started",
+            RunEvent.WORKER_STARTED,
             {
                 "worker": worker_name,
                 "run_id": run_id,
@@ -877,7 +878,7 @@ class ReactRuntime:
             state.last_error = envelope["error"]
             state.working_memory["last_error"] = {"message": envelope["error"]}
             self._publish(
-                "worker.failed",
+                RunEvent.WORKER_FAILED,
                 {
                     "worker": worker_name,
                     "run_id": run_id,
@@ -889,7 +890,7 @@ class ReactRuntime:
             state.last_error = None
             state.working_memory.pop("last_error", None)
             self._publish(
-                "worker.completed",
+                RunEvent.WORKER_COMPLETED,
                 {
                     "worker": worker_name,
                     "run_id": run_id,
@@ -934,8 +935,8 @@ class ReactRuntime:
             route = result.output.get("route")
             if isinstance(route, dict):
                 payload["distance_m"] = route.get("distance_m")
-                self._publish("navigation.route_ready", route)
-            self._publish("tool.completed", payload)
+                self._publish(RunEvent.NAVIGATION_ROUTE_READY, route)
+            self._publish(RunEvent.TOOL_COMPLETED, payload)
             logger.info(
                 "tool.completed session_ref=%s tool_ref=%s agent_ref=%s",
                 log_ref(session_id),
@@ -945,7 +946,7 @@ class ReactRuntime:
         else:
             error_message = result.error_message or "tool execution failed"
             self._publish(
-                "tool.failed",
+                RunEvent.TOOL_FAILED,
                 {
                     "tool": result.tool_name,
                     "call_id": result.call_id,
@@ -1467,14 +1468,14 @@ class ReactRuntime:
             payload["from_subagent"] = from_agent
         if worker_run_id:
             payload["worker_run_id"] = worker_run_id
-        self._publish("subagent.changed", payload)
+        self._publish(RunEvent.SUBAGENT_CHANGED, payload)
 
     def _publish_assistant_text(self, text: str, *, output_id: str, stream_mode: str) -> None:
         """Publish reply text as a delta of one output; reasoning is never published."""
         if not text:
             return
         self._publish(
-            "assistant.token",
+            RunEvent.ASSISTANT_TOKEN,
             {"delta": text, "active_subagent": "main_agent", "stream_mode": stream_mode},
             output_id=output_id,
         )

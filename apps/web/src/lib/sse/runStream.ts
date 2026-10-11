@@ -1,18 +1,11 @@
 import type { ChatRunStatus, ChatStreamEnvelope } from "../../types";
+import { isStreamEnvelope } from "../sessionSchema";
 
 // Subscribes to the event stream of one run. Owns the transport concerns:
 // envelope checks, cursor de-duplication, bounded reconnects and assembling
 // `assistant.token` deltas per output_id. Business events pass through as-is.
 
 const TERMINAL_STATUSES: ReadonlySet<ChatRunStatus> = new Set(["completed", "failed", "cancelled"]);
-const RUN_STATUSES: ReadonlySet<string> = new Set([
-  "pending",
-  "running",
-  "cancelling",
-  "completed",
-  "failed",
-  "cancelled"
-]);
 
 export type RunStreamHandlers = {
   onEvent(envelope: ChatStreamEnvelope): void;
@@ -41,26 +34,14 @@ function parseEnvelope(raw: string, sessionId: string, runId: string): ChatStrea
   } catch {
     return null;
   }
-  if (!parsed || typeof parsed !== "object") {
+  if (!isStreamEnvelope(parsed)) {
     return null;
   }
-  const envelope = parsed as Partial<ChatStreamEnvelope>;
-  if (typeof envelope.id !== "number" || !Number.isFinite(envelope.id)) {
-    return null;
-  }
+  const envelope = parsed;
   if (envelope.session_id !== sessionId || envelope.run_id !== runId) {
     return null;
   }
-  if (envelope.kind !== "event" && envelope.kind !== "control") {
-    return null;
-  }
-  if (typeof envelope.event !== "string" || typeof envelope.data !== "object" || envelope.data === null) {
-    return null;
-  }
-  if (envelope.status !== undefined && !RUN_STATUSES.has(envelope.status)) {
-    return null;
-  }
-  return envelope as ChatStreamEnvelope;
+  return envelope;
 }
 
 export function openRunStream(options: {
