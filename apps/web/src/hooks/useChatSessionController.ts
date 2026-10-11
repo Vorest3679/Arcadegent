@@ -13,8 +13,8 @@ import {
   readStoredActiveSessionId,
   writeStoredActiveSessionId
 } from "../lib/chatSessionStorage";
-import { mapArtifactsForEvent, toProgressText, toVisibleTurns } from "../lib/chatStream";
-import { isTerminalRunStatus, openRunStream, type RunStream } from "../lib/runStream";
+import { mapArtifactsForEvent, toProgressText, toVisibleTurns } from "../lib/sse/chatStream";
+import { isTerminalRunStatus, openRunStream, type RunStream } from "../lib/sse/runStream";
 import { useAppStore } from "../stores/appStore";
 import type {
   ChatMapArtifacts,

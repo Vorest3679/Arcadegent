@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { installAmapMock, installChatApiMocks, installStreamMock } from "./test-support";
+import { installAmapMock, installChatApiMocks, installStreamMock, routeRunScript } from "./test-support";
 
 test("ChatPanel shows progressive route card from SSE route_ready", async ({ page }) => {
   await installAmapMock(page);
-  await installStreamMock(page);
+  // The pending card only exists until the route arrives; delay the route so a slow machine still sees it.
+  await installStreamMock(page, [routeRunScript({ routeAt: 1500, doneAt: 2500 })]);
   await installChatApiMocks(page);
 
   await page.goto("/");
