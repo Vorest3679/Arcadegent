@@ -5,7 +5,7 @@ import { useRunStore } from "../../stores/runStore";
 import type { ChatMapArtifacts } from "../../types";
 import { AgentMapCard } from "../map/AgentMapCard";
 
-// Map area (right of the chat on desktop, above it on small screens); shows
+// Map area (right of the chat on desktop, below it on small screens); shows
 // only the latest map. It starts folded everywhere: a new map only highlights
 // the entry button, and the user opens it.
 export function MapDock({ artifacts, arrivalKey }: { artifacts: ChatMapArtifacts | null; arrivalKey: string | null }) {
@@ -42,8 +42,6 @@ export function MapDock({ artifacts, arrivalKey }: { artifacts: ChatMapArtifacts
         title={mapSummary(artifacts)}
         onClick={() => setDock({ open: !open, highlight: false, closedKey: open ? arrivalKey : null })}
       >
-        <span className="map-dock-summary">{mapSummary(artifacts)}</span>
-        <span className="map-dock-toggle-text" aria-hidden="true">{open ? "收起" : "展开"}</span>
         <svg className="map-dock-map-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="m9 4-6 3v14l6-3 6 3 6-3V4l-6 3-6-3Z" />
           <path d="M9 4v14m6-11v14" />

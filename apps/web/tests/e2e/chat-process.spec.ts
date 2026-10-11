@@ -127,10 +127,10 @@ test("the map dock starts folded, highlights a new map and opens on demand", asy
   await bar.click();
   await expect(bar).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByTestId("agent-route-card")).toHaveCount(0);
-  await expect(bar).toContainText("路线");
+  await expect(bar).toHaveAccessibleName(/展开地图：路线/);
 });
 
-test("the folded map handle sits at the desktop right edge and keeps the mobile summary", async ({ page, isMobile }) => {
+test("the map handle floats at the desktop right edge or above the mobile composer", async ({ page, isMobile }) => {
   await installAmapMock(page);
   await installStreamMock(page);
   await installChatApiMocks(page, { sessionVisible: true });
@@ -152,7 +152,6 @@ test("the folded map handle sits at the desktop right edge and keeps the mobile 
     if (width > 960) {
       await expect(dock.locator(".map-dock-map-icon")).toBeVisible();
       await expect(dock.locator(".map-dock-chevron")).toBeVisible();
-      await expect(dock.locator(".map-dock-summary")).toBeHidden();
       const view = (await page.locator(".chat-view").boundingBox())!;
       const handle = (await bar.boundingBox())!;
       expect(Math.abs(handle.x + handle.width + 8 - (view.x + view.width))).toBeLessThanOrEqual(2);
@@ -167,12 +166,19 @@ test("the folded map handle sits at the desktop right edge and keeps the mobile 
       expect(await page.locator(".chat-scroll").evaluate((node) => getComputedStyle(node).paddingRight)).toBe("22px");
       expect(await page.locator(".chat-scroll").evaluate((node) => getComputedStyle(node).paddingTop)).toBe("24px");
     } else {
-      await expect(dock.locator(".map-dock-map-icon")).toBeHidden();
-      await expect(dock.locator(".map-dock-chevron")).toBeHidden();
-      await expect(dock.locator(".map-dock-summary")).toBeVisible();
+      await expect(dock.locator(".map-dock-map-icon")).toBeVisible();
+      await expect(dock.locator(".map-dock-chevron")).toHaveCSS("transform", "matrix(0, 1, -1, 0, 0, 0)");
       const handle = (await bar.boundingBox())!;
       const scroll = (await page.locator(".chat-scroll").boundingBox())!;
-      expect(handle.y + handle.height).toBeLessThanOrEqual(scroll.y);
+      const composer = (await page.locator(".chat-composer").boundingBox())!;
+      const view = (await page.locator(".chat-view").boundingBox())!;
+      expect(handle.width).toBe(100);
+      expect(handle.height).toBe(44);
+      expect(Math.abs(handle.x + handle.width / 2 - (view.x + view.width / 2))).toBeLessThanOrEqual(1);
+      expect(Math.abs(handle.y + handle.height + 8 - composer.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(scroll.y - (view.y + 1))).toBeLessThanOrEqual(1);
+      expect((await dock.boundingBox())!.height).toBe(0);
+      await expect(bar).toHaveCSS("border-top-width", "1px");
     }
 
     await bar.click();
@@ -181,8 +187,6 @@ test("the folded map handle sits at the desktop right edge and keeps the mobile 
     await dock.evaluate((node) => Promise.all(node.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {}))));
     if (width > 960) {
       await expect(dock.locator(".map-dock-map-icon")).toBeVisible();
-      await expect(dock.locator(".map-dock-summary")).toBeHidden();
-      await expect(dock.locator(".map-dock-toggle-text")).toBeHidden();
       await expect(dock.locator(".map-dock-chevron")).toHaveCSS("transform", "matrix(-1, 0, 0, -1, 0, 0)");
       const scroll = (await page.locator(".chat-scroll").boundingBox())!;
       const map = (await dock.boundingBox())!;
@@ -205,13 +209,30 @@ test("the folded map handle sits at the desktop right edge and keeps the mobile 
       const card = (await page.getByTestId("agent-route-card").boundingBox())!;
       expect(Math.abs(card.x - (map.x + 13))).toBeLessThanOrEqual(1);
     } else {
-      await expect(dock.locator(".map-dock-summary")).toBeVisible();
+      await expect(dock.locator(".map-dock-chevron")).toHaveCSS("transform", "matrix(0, -1, 1, 0, 0, 0)");
+      const map = (await dock.boundingBox())!;
+      const scroll = (await page.locator(".chat-scroll").boundingBox())!;
+      const composer = (await page.locator(".chat-composer").boundingBox())!;
+      const handle = (await bar.boundingBox())!;
+      expect(map.height).toBeGreaterThan(200);
+      expect(scroll.y + scroll.height).toBeLessThanOrEqual(map.y);
+      expect(map.y + map.height).toBeLessThanOrEqual(composer.y);
+      expect(Math.abs(handle.y + handle.height / 2 - map.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(handle.x + handle.width / 2 - (map.x + map.width / 2))).toBeLessThanOrEqual(1);
+      await dock.locator(".map-dock-body").evaluate((node) => { node.scrollTop = node.scrollHeight; });
+      await expect(dock.getByRole("link", { name: "网页打开" })).toBeInViewport();
+      await expect(dock.getByRole("link", { name: "打开高德 App" })).toBeInViewport();
+      await expect(bar).toBeInViewport();
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await expect(page.getByPlaceholder(INPUT)).toBeInViewport();
     await bar.click();
     await expect(dock).not.toHaveClass(/is-open/);
     await expect(page.getByTestId("agent-route-card")).toHaveCount(0);
+    if (width <= 960) {
+      await expect(dock.locator(".map-dock-chevron")).toHaveCSS("transform", "matrix(0, 1, -1, 0, 0, 0)");
+      await expect(bar).toBeInViewport();
+    }
   }
 
   // The same control works from the keyboard and announces its next action.

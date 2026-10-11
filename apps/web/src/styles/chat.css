@@ -431,58 +431,6 @@
   opacity: 0.6;
 }
 
-/* Map dock: one map above the message list */
-.map-dock {
-  border-bottom: 1px solid var(--line);
-  background: var(--panel-strong);
-  position: sticky;
-  top: 0;
-  z-index: 2;
-}
-
-.map-dock-bar {
-  width: 100%;
-  min-height: 44px;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: 0.92rem;
-  cursor: pointer;
-}
-
-.map-dock-toggle-text {
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.map-dock-map-icon,
-.map-dock-chevron {
-  display: none;
-}
-
-.map-dock.is-highlight {
-  box-shadow: inset 3px 0 0 #dc9b2d;
-  background: #fff8e8;
-}
-
-.map-dock.is-highlight .map-dock-summary::after {
-  content: " · 新";
-  color: #8a6426;
-}
-
-.map-dock-body {
-  max-height: min(46vh, 420px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 0 12px 12px;
-}
-
 /* Round process area */
 .round-steps {
   width: min(560px, 92%);
@@ -570,9 +518,48 @@
   .step-spinner { animation: none; }
 }
 
-/* Desktop: the map sits at the right, beside the conversation */
+/* Map dock: the latest map, folded behind a floating handle.
+   Desktop: a column right of the chat. Small screens: see responsive.css. */
+.map-dock {
+  background: var(--panel-strong);
+}
+
+.map-dock-bar {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-strong);
+  box-shadow: 0 4px 12px rgba(20, 54, 47, 0.12);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.map-dock-chevron {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+/* A new map: the handle turns amber until it is opened. */
+.map-dock.is-highlight .map-dock-bar {
+  color: #8a6426;
+  border-color: #dc9b2d;
+  background: #fff8e8;
+}
+
+.map-dock-body {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
 @media (min-width: 961px) {
   .chat-view {
+    position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: minmax(0, 1fr) auto auto;
@@ -587,35 +574,10 @@
   .map-dock {
     grid-column: 2;
     grid-row: 1 / span 3;
-    position: static;
-    align-self: stretch;
     display: flex;
     flex-direction: column;
     min-height: 0;
-    border-bottom: 0;
     border-left: 1px solid var(--line);
-  }
-
-  .map-dock.is-open {
-    position: relative;
-    width: clamp(320px, 30vw, 440px);
-  }
-
-  .map-dock-body {
-    flex: 1 1 auto;
-    max-height: none;
-    padding: 12px;
-  }
-
-  .map-dock .agent-map-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Desktop: expand at the chat's right edge, collapse at the map's left edge */
-@media (min-width: 961px) {
-  .chat-view {
-    position: relative;
   }
 
   .map-dock:not(.is-open) {
@@ -624,79 +586,9 @@
     background: transparent;
   }
 
-  .map-dock .map-dock-bar {
-    position: absolute;
-    top: 50%;
-    right: 8px;
-    transform: translateY(-50%);
-    z-index: 10;
-    width: 44px;
-    height: 100px;
-    min-height: 0;
-    padding: 0;
-    justify-content: center;
-    gap: 2px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: var(--panel-strong);
-    box-shadow: 0 4px 12px rgba(20, 54, 47, 0.12);
-  }
-
-  .map-dock.is-open .map-dock-bar {
-    left: -22px;
-    right: auto;
-  }
-
-  .map-dock .map-dock-summary,
-  .map-dock .map-dock-toggle-text {
-    display: none;
-  }
-
-  .map-dock .map-dock-map-icon,
-  .map-dock .map-dock-chevron {
-    display: block;
-    flex: none;
-  }
-
-  .map-dock .map-dock-chevron {
-    width: 14px;
-    height: 14px;
-  }
-
-  .map-dock .map-dock-bar[aria-expanded="true"] .map-dock-chevron {
-    transform: rotate(180deg);
-  }
-
-  .map-dock.is-highlight {
-    box-shadow: none;
-  }
-
-  .map-dock.is-highlight .map-dock-bar {
-    color: #8a6426;
-    border-color: #dc9b2d;
-    background: #fff8e8;
-  }
-}
-
-/* Expand / collapse motion */
-.map-dock-body {
-  animation: dock-body-in 0.22s ease-out;
-}
-
-.map-dock.is-closing .map-dock-body {
-  animation: dock-body-out 0.2s ease-in forwards;
-}
-
-@keyframes dock-body-in {
-  from { opacity: 0; transform: translateY(-8px); }
-}
-
-@keyframes dock-body-out {
-  to { opacity: 0; transform: translateY(-8px); }
-}
-
-@media (min-width: 961px) {
   .map-dock.is-open {
+    position: relative;
+    width: clamp(320px, 30vw, 440px);
     animation: dock-width-in 0.24s ease-out;
   }
 
@@ -704,12 +596,37 @@
     animation: dock-width-out 0.2s ease-in forwards;
   }
 
+  /* Handle: vertically centred at the chat's right edge; once open, on the map's left edge. */
+  .map-dock-bar {
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 100px;
+    gap: 2px;
+  }
+
+  .map-dock.is-open .map-dock-bar {
+    left: -22px;
+    right: auto;
+  }
+
+  .map-dock-bar[aria-expanded="true"] .map-dock-chevron {
+    transform: rotate(180deg);
+  }
+
   .map-dock-body {
+    flex: 1 1 auto;
+    padding: 12px;
     animation: dock-fade-in 0.24s ease-out;
   }
 
   .map-dock.is-closing .map-dock-body {
     animation: dock-fade-out 0.15s ease-in forwards;
+  }
+
+  .map-dock .agent-map-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -729,6 +646,7 @@
   to { opacity: 0; }
 }
 
+/* Process area expand / collapse */
 .round-steps-collapse {
   display: grid;
   grid-template-rows: 1fr;
