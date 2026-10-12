@@ -1,5 +1,4 @@
-import type { ChatHistoryTurn, ChatRun, ChatStreamEnvelope } from "../types";
-import { isTerminalRunStatus } from "./sse/runStream";
+import type { ChatHistoryTurn, ChatStreamEnvelope } from "../types";
 
 // One round = a user message and everything that answered it. History
 // (from the session detail) and the live run map to the same structure.
@@ -20,7 +19,7 @@ export type ChatRound = {
   status: RoundStatus;
 };
 
-export function roundsFromDetail(turns: ChatHistoryTurn[], run?: ChatRun | null): ChatRound[] {
+export function roundsFromDetail(turns: ChatHistoryTurn[]): ChatRound[] {
   const rounds: ChatRound[] = [];
   for (const turn of turns) {
     if (turn.role === "user") {
@@ -48,15 +47,6 @@ export function roundsFromDetail(turns: ChatHistoryTurn[], run?: ChatRun | null)
         round.reply = turn;
         round.status = "completed";
       }
-    }
-  }
-  const last = rounds[rounds.length - 1];
-  if (last && !last.reply && run) {
-    last.status = isTerminalRunStatus(run.status)
-      ? run.status === "cancelled" ? "cancelled" : "failed"
-      : "running";
-    if (last.status === "running") {
-      last.key = run.run_id;
     }
   }
   return rounds;

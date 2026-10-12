@@ -75,9 +75,7 @@
   .browser-hero p {
     font-size: 0.92rem;
   }
-}
 
-@media (max-width: 960px) {
   .chat-view {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -112,6 +110,7 @@
   .chat-composer {
     grid-row: 4;
     grid-column: 1;
+    padding-bottom: max(12px, var(--safe-bottom));
   }
 
   /* Handle: centred above the composer; once open, on the map's top edge. */
@@ -147,10 +146,6 @@
   .map-dock.is-closing .map-dock-body {
     animation: dock-mobile-out 0.2s ease-in forwards;
   }
-
-  .chat-composer {
-    padding-bottom: max(12px, var(--safe-bottom));
-  }
 }
 
 @keyframes dock-mobile-in {
@@ -159,22 +154,6 @@
 
 @keyframes dock-mobile-out {
   to { opacity: 0; transform: translateY(8px); }
-}
-
-@media (max-width: 620px) {
-  .step-tool {
-    grid-template-columns: 1fr auto;
-  }
-
-  .step-tool-agent {
-    grid-column: 1;
-    font-size: 0.74rem;
-  }
-
-  .step-tool .step-status-icon {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-  }
 }
 
 @media (min-width: 961px) {
@@ -220,8 +199,18 @@
     max-width: 92%;
   }
 
-  .chat-map-card-item {
-    width: 100%;
+  .step-tool {
+    grid-template-columns: 1fr auto;
+  }
+
+  .step-tool-agent {
+    grid-column: 1;
+    font-size: 0.74rem;
+  }
+
+  .step-tool .step-status-icon {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
 
   .chat-composer {
@@ -339,11 +328,6 @@
     max-width: 96%;
   }
 
-  .chat-stage-list li {
-    display: grid;
-    gap: 4px;
-  }
-
   .browser-hero h2 {
     font-size: 1.08rem;
   }
@@ -408,18 +392,6 @@
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes pulse-live {
-  0%,
-  100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(31, 143, 122, 0.18);
-  }
-  50% {
-    transform: scale(1.12);
-    box-shadow: 0 0 0 5px rgba(31, 143, 122, 0.06);
   }
 }
 

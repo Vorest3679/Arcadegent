@@ -1,32 +1,21 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import {
+  CHAT_INPUT,
   E2E_RUN_ID,
   eventFrame,
+  expandFinishedSteps,
+  failSessionDetail,
   installAmapMock,
   installChatApiMocks,
   installStreamMock,
   readStreamUrls,
   runStateFrame,
+  sendChat,
   type StreamFrame
 } from "./test-support";
 
-const INPUT = "尽管问机厅相关问题";
-
 function token(at: number, id: number, delta: string, outputId = "out_a"): StreamFrame {
   return eventFrame(at, id, "assistant.token", { delta }, { output_id: outputId });
-}
-
-// The process area is folded once a round has ended.
-async function expandSteps(page: Page) {
-  const toggle = page.locator(".round-steps-toggle").first();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await toggle.click();
-}
-
-async function send(page: Page, message = "给我一条到 Arcade One 的路线") {
-  await page.goto("/");
-  await page.getByPlaceholder(INPUT).fill(message);
-  await page.getByRole("button", { name: "发送" }).click();
 }
 
 test("reply text appears progressively before assistant.completed", async ({ page }) => {
@@ -41,7 +30,7 @@ test("reply text appears progressively before assistant.completed", async ({ pag
   ]]);
   await installChatApiMocks(page, { reply });
 
-  await send(page);
+  await sendChat(page);
   const bubble = page.locator(".chat-message.streaming");
   await expect(bubble).toContainText("第一段，");
   await expect(bubble).not.toContainText("第二段。");
@@ -71,7 +60,7 @@ test("reconnect replays from the cursor without duplicating text", async ({ page
   ]);
   await installChatApiMocks(page, { reply });
 
-  await send(page);
+  await sendChat(page);
   const streamed = page.locator(".chat-message.streaming .chat-markdown");
   await expect(streamed).toContainText("！");
   // Snapshot before assistant.completed overwrites the assembled text.
@@ -100,7 +89,7 @@ test("frames of another run are ignored", async ({ page }) => {
   ]]);
   await installChatApiMocks(page, { reply, detailDelayMs: 800 });
 
-  await send(page);
+  await sendChat(page);
   await expect(page.locator(".chat-message.streaming")).toContainText(reply);
   // One-shot check while the run is still live, before the detail reload.
   expect(await page.locator(".chat-message-list").innerText()).not.toContain("旧回复");
@@ -122,11 +111,11 @@ test("a second output_id seals the first as an intermediate reply", async ({ pag
   ]]);
   await installChatApiMocks(page, { reply, detailDelayMs: 1500 });
 
-  await send(page);
+  await sendChat(page);
   const intermediate = page.locator(".step-text");
   const bubble = page.locator(".chat-message.streaming");
   // The process area folds once the round ends; open it again.
-  await expandSteps(page);
+  await expandFinishedSteps(page);
   await expect(intermediate).toHaveCount(1);
   await expect(intermediate).toContainText("我先查一下。");
   await expect(page.locator(".step-tool")).toHaveCount(1);
@@ -146,7 +135,7 @@ test("stream.reset reloads the session detail while the run continues", async ({
   ]]);
   const api = await installChatApiMocks(page, { reply, detailStatus: "follow-stream" });
 
-  await send(page);
+  await sendChat(page);
   await expect(page.locator(".chat-message.streaming")).toContainText(reply);
   expect(api.detailCalls()).toBe(1);
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
@@ -178,7 +167,7 @@ test("giving up on reconnects cancels the current run by run_id", async ({ page 
   });
 
   const cancelRequest = page.waitForRequest("**/api/chat/sessions/s_e2e/runs/*/cancel?**", { timeout: 10_000 });
-  await send(page);
+  await sendChat(page);
   const request = await cancelRequest;
   const url = new URL(request.url());
   expect(url.pathname).toBe(`/api/chat/sessions/s_e2e/runs/${E2E_RUN_ID}/cancel`);
@@ -227,14 +216,14 @@ test("the composer stays locked until the finished run is handed over", async ({
   ]]);
   await installChatApiMocks(page, { reply, detailDelayMs: 1500 });
 
-  await send(page);
+  await sendChat(page);
   await expect(page.locator(".chat-message.streaming")).toContainText(reply);
   await page.waitForTimeout(300);
   // The run is over but its reply is not a history turn yet.
-  expect(await page.getByPlaceholder(INPUT).isDisabled()).toBe(true);
+  expect(await page.getByPlaceholder(CHAT_INPUT).isDisabled()).toBe(true);
 
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
-  await expect(page.getByPlaceholder(INPUT)).toBeEnabled();
+  await expect(page.getByPlaceholder(CHAT_INPUT)).toBeEnabled();
   await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
 });
 
@@ -248,14 +237,12 @@ test("a failed hand-over keeps the final reply and releases the composer", async
     runStateFrame(60, 4, "completed")
   ]]);
   await installChatApiMocks(page, { reply });
-  await page.route("**/api/chat/sessions/s_e2e?**", async (route) => {
-    await route.fulfill({ status: 500, body: "boom" });
-  });
+  await failSessionDetail(page);
 
-  await send(page);
+  await sendChat(page);
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
   await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
-  await expect(page.getByPlaceholder(INPUT)).toBeEnabled();
+  await expect(page.getByPlaceholder(CHAT_INPUT)).toBeEnabled();
 });
 
 test("a model-failure fallback reply survives a failed hand-over", async ({ page }) => {
@@ -268,14 +255,12 @@ test("a model-failure fallback reply survives a failed hand-over", async ({ page
     runStateFrame(60, 4, "completed")
   ]]);
   await installChatApiMocks(page, { reply });
-  await page.route("**/api/chat/sessions/s_e2e?**", async (route) => {
-    await route.fulfill({ status: 500, body: "boom" });
-  });
+  await failSessionDetail(page);
 
-  await send(page);
+  await sendChat(page);
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
   await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
-  await expect(page.getByPlaceholder(INPUT)).toBeEnabled();
+  await expect(page.getByPlaceholder(CHAT_INPUT)).toBeEnabled();
 });
 
 test("a stale stream.reset snapshot cannot overwrite the finished run", async ({ page }) => {
@@ -291,12 +276,12 @@ test("a stale stream.reset snapshot cannot overwrite the finished run", async ({
   // The reset request (running snapshot) answers after the terminal one.
   await installChatApiMocks(page, { reply, detailStatus: "follow-stream", detailDelayMs: [1500, 0] });
 
-  await send(page);
+  await sendChat(page);
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
   await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
   await page.waitForTimeout(1800);
   expect(await page.locator(".chat-message.streaming").count()).toBe(0);
-  expect(await page.getByPlaceholder(INPUT).isDisabled()).toBe(false);
+  expect(await page.getByPlaceholder(CHAT_INPUT).isDisabled()).toBe(false);
   expect(await page.getByText(reply, { exact: true }).count()).toBe(1);
 });
 
@@ -323,7 +308,7 @@ test("intermediate replies stay in the history after the run is handed over", as
   await installStreamMock(page, [twoOutputScript(reply)]);
   await installChatApiMocks(page, { reply, steps: INTERMEDIATE_STEPS });
 
-  await send(page);
+  await sendChat(page);
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
   await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
   // The intermediate reply is now a history item, exactly once, before the final reply.
@@ -331,7 +316,7 @@ test("intermediate replies stay in the history after the run is handed over", as
   // Folded into a one-line summary until opened.
   await expect(list.locator(".round-steps-toggle")).toContainText("调用了 1 个工具 · 1 段中间回复");
   await expect(list.locator(".step-text")).toHaveCount(0);
-  await expandSteps(page);
+  await expandFinishedSteps(page);
   await expect(list.locator(".step-text")).toHaveCount(1);
   await expect(list.locator(".step-text")).toContainText("我先查一下。");
   const order = await list.locator("> li").evaluateAll((nodes) =>
@@ -348,7 +333,7 @@ test("intermediate replies are restored after a page reload", async ({ page }) =
 
   await page.goto("/");
   await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
-  await expandSteps(page);
+  await expandFinishedSteps(page);
   await expect(page.locator(".step-text")).toHaveCount(1);
   await expect(page.locator(".step-text")).toContainText("我先查一下。");
 });
@@ -370,7 +355,7 @@ test("a mid-run reload shows each intermediate reply once", async ({ page }) => 
   await expect(page.locator(".chat-message.streaming")).toContainText(reply);
   expect(await page.locator(".step-text").count()).toBe(1);
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
-  await expandSteps(page);
+  await expandFinishedSteps(page);
   await expect(page.locator(".step-text")).toHaveCount(1);
 });
 
@@ -380,7 +365,7 @@ test("handing over does not reload the page content", async ({ page }) => {
   await installStreamMock(page, [twoOutputScript(reply)]);
   await installChatApiMocks(page, { reply, steps: INTERMEDIATE_STEPS, detailDelayMs: 600 });
 
-  await send(page);
+  await sendChat(page);
   const userBubble = page.locator(".chat-message.user").first();
   await expect(page.locator(".step-text")).toHaveCount(1);
   await userBubble.evaluate((node) => node.setAttribute("data-marker", "same-node"));
@@ -424,15 +409,13 @@ test("a failed hand-over keeps the intermediate replies too", async ({ page }) =
   await installAmapMock(page);
   await installStreamMock(page, [twoOutputScript(reply)]);
   await installChatApiMocks(page, { reply });
-  await page.route("**/api/chat/sessions/s_e2e?**", async (route) => {
-    await route.fulfill({ status: 500, body: "boom" });
-  });
+  await failSessionDetail(page);
 
-  await send(page);
+  await sendChat(page);
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
   await expect(page.getByText(reply, { exact: true })).toHaveCount(1);
-  await expandSteps(page);
+  await expandFinishedSteps(page);
   await expect(page.locator(".step-text")).toHaveCount(1);
   await expect(page.locator(".step-text")).toContainText("我先查一下。");
-  await expect(page.getByPlaceholder(INPUT)).toBeEnabled();
+  await expect(page.getByPlaceholder(CHAT_INPUT)).toBeEnabled();
 });

@@ -145,14 +145,6 @@ export type ChatMapArtifacts = {
   route_pending?: boolean;
 };
 
-export type ChatResponse = {
-  session_id: string;
-  intent: IntentType;
-  reply: string;
-  shops: ArcadeSummary[];
-  route?: RouteSummary | null;
-};
-
 export type ChatRunStatus = "pending" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
 
 export type ChatRun = {

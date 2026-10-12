@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 const ARCADES = [
   {
@@ -552,4 +552,35 @@ export async function openMapDock(page: Page) {
   if ((await bar.getAttribute("aria-expanded")) === "false") {
     await bar.click();
   }
+}
+
+export const CHAT_INPUT = "尽管问机厅相关问题";
+
+export async function sendChat(page: Page, message = "给我一条到 Arcade One 的路线") {
+  await page.goto("/");
+  await page.getByPlaceholder(CHAT_INPUT).fill(message);
+  await page.getByRole("button", { name: "发送" }).click();
+}
+
+// Waits for the round to end (the process area folds itself), then opens it.
+export async function expandFinishedSteps(page: Page) {
+  const toggle = page.locator(".round-steps-toggle").first();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+}
+
+// Every session detail request fails, so the run cannot be handed over.
+export async function failSessionDetail(page: Page) {
+  await page.route("**/api/chat/sessions/s_e2e?**", async (route) => {
+    await route.fulfill({ status: 500, body: "boom" });
+  });
+}
+
+// Clicks the delete button of the listed session; small screens open the drawer first.
+export async function clickDeleteSession(page: Page) {
+  const menu = page.locator(".menu-btn");
+  if (await menu.isVisible()) {
+    await menu.click();
+  }
+  await page.getByRole("button", { name: /删除会话/ }).click();
 }

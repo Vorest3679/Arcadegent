@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   applyEventToRound,
+  buildRounds,
   finishRound,
   roundsFromDetail,
   sealOutput,
@@ -46,13 +47,14 @@ test("roundsFromDetail attaches steps and replies to their user turn", () => {
   expect(rounds[1].status).toBe("failed");
 });
 
-test("roundsFromDetail marks the unanswered last round by run status", () => {
+test("buildRounds lets the live run drive the unanswered last round", () => {
   const turns = [user("t1")];
-  expect(roundsFromDetail(turns, { run_id: "r1", status: "running" })[0]).toMatchObject({
-    status: "running",
-    key: "r1"
-  });
-  expect(roundsFromDetail(turns, { run_id: "r1", status: "cancelled" })[0].status).toBe("cancelled");
+  expect(buildRounds(turns, null, false)[0].status).toBe("failed");
+  expect(buildRounds(turns, null, true)[0].status).toBe("running");
+  const live = finishRound(applyEventToRound(startLiveRound("r1", user("t1")), toolEvent(1, "tool.started", "c1")), "cancelled");
+  const [round] = buildRounds(turns, live, true);
+  expect(round.status).toBe("cancelled");
+  expect(round.steps).toEqual(live.steps);
 });
 
 test("live tool events are idempotent under replay and cancel closes running tools", () => {

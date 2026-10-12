@@ -12,6 +12,7 @@ from app.agent.runtime.session_state import AgentSessionState, _client_can_acces
 from app.agent.tools.mcp_gateway import MCPToolGateway
 from app.core.config import Settings
 from app.core.container import build_container
+from app.services.chat_session_summary import summary_record_from_state
 from app.session.models import utc_now_iso
 from evaluate.config import ROOT
 
@@ -32,14 +33,18 @@ class MemorySessions:
 
     def get_session(self, session_id, *, client_id=None):
         state = self.states.get(session_id)
-        return deepcopy(state) if state and _client_can_access(state, client_id) else None
+        return deepcopy(state) if state and _client_can_access(state.client_id, client_id) else None
 
     def save_session(self, state):
         self.states[state.session_id] = deepcopy(state)
 
-    def list_sessions(self, *, limit=50, client_id=None):
-        return sorted([deepcopy(s) for s in self.states.values() if _client_matches_list_scope(s, client_id)],
-                      key=lambda s: s.updated_at, reverse=True)[:limit]
+    def get_session_for_display(self, session_id, *, client_id=None):
+        return self.get_session(session_id, client_id=client_id)
+
+    def list_session_summaries(self, *, limit=50, client_id=None):
+        states = sorted([s for s in self.states.values() if _client_matches_list_scope(s.client_id, client_id)],
+                        key=lambda s: s.updated_at, reverse=True)[:limit]
+        return [summary_record_from_state(s) for s in states]
 
     def delete_session(self, session_id, *, client_id=None):
         if self.get_session(session_id, client_id=client_id) is None:

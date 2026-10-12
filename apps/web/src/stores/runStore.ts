@@ -67,6 +67,7 @@ export const useRunStore = create<RunStore>((set) => ({
   })),
   resetRunState: () => set({
     activeSubagent: null,
+    streamItems: [],
     activeMapArtifacts: null,
     activeRunId: null,
     committedRunId: null,

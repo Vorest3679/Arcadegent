@@ -42,7 +42,7 @@ export function useChatSessionController() {
     clientIdRef.current = getChatClientId();
   }
 
-  const { startStream, stopStream, commitRunLocally, resetStreamReply, streamReply, streamReplyPending } =
+  const { startStream, commitRunLocally, resetRunView, streamReply, streamReplyPending } =
     useRunStream(clientIdRef.current, {
       // The run's reply becomes a history turn once the detail is loaded; the
       // composer stays locked until then (applySessionDetail releases it). A
@@ -116,6 +116,9 @@ export function useChatSessionController() {
     const run = detail.current_run ?? null;
     const runActive = isRunActive(detail);
 
+    if (!preserveStreamState && !runActive) {
+      resetRunView();
+    }
     store.setTurns(visibleTurns);
     runState().setActiveSubagent(detail.active_subagent || null);
     store.setActiveSessionStatus(detail.status);
@@ -142,12 +145,6 @@ export function useChatSessionController() {
     runState().setCommittedRunId(run?.run_id ?? null);
     runState().setActiveMapArtifacts(null);
     runState().setAwaitingAssistant(false);
-    if (!preserveStreamState) {
-      stopStream();
-      runState().setStreamItems([]);
-      runState().setLiveRound(null);
-      resetStreamReply();
-    }
   }
 
   async function loadSessionList(
@@ -177,16 +174,11 @@ export function useChatSessionController() {
         latestStore.setActiveSessionId(null);
         latestStore.setActiveSessionStatus(null);
         latestStore.setTurns([]);
-        runState().setActiveSubagent(null);
-        runState().setActiveMapArtifacts(null);
-        runState().setActiveRunId(null);
-        runState().setCommittedRunId(null);
-        if (!preserveStreamState) {
-          stopStream();
-          runState().setStreamItems([]);
-          runState().setLiveRound(null);
-          resetStreamReply();
-          runState().setAwaitingAssistant(false);
+        // A background reload leaves the stream to whoever started it.
+        if (preserveStreamState) {
+          runState().resetRunState();
+        } else {
+          resetRunView();
         }
         return;
       }
@@ -269,19 +261,16 @@ export function useChatSessionController() {
 
   function startNewSession(): void {
     sessionGenerationRef.current += 1;
-    stopStream();
+    resetRunView();
     const app = appState();
     app.setViewMode("chat");
     app.setInputValue("");
     app.setSidebarOpen(false);
     const store = sessionState();
     store.resetActiveSessionState();
-    runState().resetRunState();
     store.setTurnsLoading(false);
     writeStoredActiveSessionId(null);
     store.setChatError("");
-    runState().setStreamItems([]);
-    resetStreamReply();
   }
 
   async function submitChat(event: FormEvent): Promise<void> {
@@ -296,17 +285,13 @@ export function useChatSessionController() {
     const previousSessionId = currentState.activeSessionId;
     const previousSessionStatus = currentState.activeSessionStatus;
     const previousSessions = currentState.sessions;
+    const previousRunId = runState().committedRunId;
     const sessionId = currentState.activeSessionId || makeSessionId();
     const optimisticCreatedAt = new Date().toISOString();
 
     sessionGenerationRef.current += 1;
-    resetStreamReply();
-    runState().setStreamItems([]);
-    runState().setLiveRound(null);
-    runState().setActiveSubagent(null);
-    runState().setActiveMapArtifacts(null);
     // No run id until dispatch answers; awaitingAssistant keeps the bubble.
-    runState().setActiveRunId(null);
+    resetRunView();
     currentState.setTurns((previous) => [...previous, { role: "user", content: message, created_at: optimisticCreatedAt }]);
     runState().setAwaitingAssistant(true);
     currentState.setTurnsLoading(false);
@@ -365,14 +350,9 @@ export function useChatSessionController() {
         }
         return next;
       });
-      runState().setStreamItems([]);
-      runState().setLiveRound(null);
-      runState().setActiveSubagent(null);
-      runState().setActiveMapArtifacts(null);
-      runState().setActiveRunId(runState().committedRunId);
-      resetStreamReply();
-      runState().setAwaitingAssistant(false);
-      stopStream();
+      resetRunView();
+      runState().setActiveRunId(previousRunId);
+      runState().setCommittedRunId(previousRunId);
     } finally {
       sessionState().setSending(false);
     }
@@ -422,7 +402,6 @@ export function useChatSessionController() {
 
   function selectSession(sessionId: string): void {
     sessionGenerationRef.current += 1;
-    stopStream();
     const app = appState();
     app.setViewMode("chat");
     app.setSidebarOpen(false);
@@ -437,9 +416,7 @@ export function useChatSessionController() {
     // Respond to the click immediately instead of keeping the old chat on screen.
     store.setActiveSessionId(sessionId);
     store.setTurns([]);
-    runState().resetRunState();
-    runState().setStreamItems([]);
-    resetStreamReply();
+    resetRunView();
     void loadSession(sessionId);
   }
 

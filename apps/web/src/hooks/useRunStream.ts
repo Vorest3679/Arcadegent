@@ -186,7 +186,6 @@ export function useRunStream(clientId: string, callbacks: RunStreamCallbacks) {
     const store = sessionState();
     runState().setActiveRunId(runId);
     runState().setStreamItems([]);
-    runState().setLiveRound(null);
     finalReplyRef.current = null;
     store.setActiveSessionStatus("running");
     resetStreamReply();
@@ -238,13 +237,19 @@ export function useRunStream(clientId: string, callbacks: RunStreamCallbacks) {
     });
     streamRef.current = stream;
   }
-
+  // Stops following the run and clears everything it showed: progress, live
+  // steps, map, run ids and the streamed reply.
+  function resetRunView(): void {
+    stopStream();
+    finalReplyRef.current = null;
+    runState().resetRunState();
+    resetStreamReply();
+  }
 
   return {
     startStream,
-    stopStream,
     commitRunLocally,
-    resetStreamReply,
+    resetRunView,
     streamReply: streamReplyDisplay,
     // Text still being revealed.
     streamReplyPending: streamReplyDisplay.length < streamReplyTarget.length

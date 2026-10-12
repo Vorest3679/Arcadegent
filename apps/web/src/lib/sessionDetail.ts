@@ -1,4 +1,5 @@
 import type { ChatHistoryTurn, ChatMapArtifacts, ChatSessionDetail } from "../types";
+import { hasMapContent } from "./mapDock";
 import { toVisibleTurns } from "./sse/chatStream";
 import { isTerminalRunStatus } from "./sse/runStream";
 
@@ -7,10 +8,6 @@ export function makeSessionId(): string {
     return `s_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   }
   return `s_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function hasSessionMapArtifacts(artifacts: ChatMapArtifacts): boolean {
-  return Boolean(artifacts.route || artifacts.destination || artifacts.shops.length || artifacts.view_payload);
 }
 
 export function mapArtifactsFromSession(detail: ChatSessionDetail): ChatMapArtifacts | null {
@@ -22,7 +19,7 @@ export function mapArtifactsFromSession(detail: ChatSessionDetail): ChatMapArtif
     view_payload: detail.view_payload ?? null,
     route_pending: false
   };
-  return hasSessionMapArtifacts(artifacts) ? artifacts : null;
+  return hasMapContent(artifacts) ? artifacts : null;
 }
 
 export function isRunActive(detail: ChatSessionDetail): boolean {

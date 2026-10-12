@@ -86,15 +86,6 @@ class SessionStateRepository(Protocol):
         """
         ...
 
-    def list_sessions(
-        self,
-        *,
-        limit: int = 50,
-        client_id: str | None = None,
-    ) -> list[AgentSessionState]:
-        """Return recent sessions sorted by updated_at desc, optionally filtered by client."""
-        ...
-
     def list_session_summaries(
         self,
         *,

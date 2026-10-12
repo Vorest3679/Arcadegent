@@ -1,37 +1,18 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import {
+  CHAT_INPUT,
+  clickDeleteSession,
+  DEFAULT_REPLY,
   eventFrame,
+  expandFinishedSteps,
   installAmapMock,
   installChatApiMocks,
   installStreamMock,
   openMapDock,
   routeRunScript,
-  runStateFrame
+  runStateFrame,
+  sendChat
 } from "./test-support";
-
-const INPUT = "尽管问机厅相关问题";
-
-async function send(page: Page) {
-  await page.goto("/");
-  await page.getByPlaceholder(INPUT).fill("给我一条到 Arcade One 的路线");
-  await page.getByRole("button", { name: "发送" }).click();
-}
-
-// A finished round folds its process area into one line.
-async function expandSteps(page: Page) {
-  const toggle = page.locator(".round-steps-toggle").first();
-  await expect(toggle).toBeVisible();
-  if ((await toggle.getAttribute("aria-expanded")) === "false") {
-    await toggle.click();
-  }
-}
-
-// Waits for the round to end (the process area folds itself), then opens it.
-async function openAfterRoundEnds(page: Page) {
-  const toggle = page.locator(".round-steps-toggle").first();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await toggle.click();
-}
 
 const HISTORY_STEPS = [
   { kind: "text", agent: "main_agent", content: "我先查一下。", created_at: "2026-04-15T00:00:05Z" },
@@ -78,12 +59,12 @@ test("a running tool turns completed in the live process area", async ({ page })
   ]]);
   await installChatApiMocks(page, { reply: "好了。", detailDelayMs: 2500 });
 
-  await send(page);
+  await sendChat(page);
   const row = page.locator(".step-tool");
   await expect(row).toHaveCount(1);
   await expect(row).toContainText("数据检索");
   await expect(row.getByRole("img", { name: "执行中" })).toBeVisible();
-  await openAfterRoundEnds(page);
+  await expandFinishedSteps(page);
   await expect(row.getByRole("img", { name: "已完成" })).toBeVisible();
 });
 
@@ -96,9 +77,9 @@ test("cancelling the run marks the running tool as cancelled", async ({ page }) 
   ]]);
   await installChatApiMocks(page, { detailDelayMs: 2500 });
 
-  await send(page);
+  await sendChat(page);
   await expect(page.locator(".step-tool").getByRole("img", { name: "执行中" })).toBeVisible();
-  await openAfterRoundEnds(page);
+  await expandFinishedSteps(page);
   await expect(page.locator(".step-tool").getByRole("img", { name: "已取消" })).toBeVisible();
 });
 
@@ -107,7 +88,7 @@ test("the map dock starts folded, highlights a new map and opens on demand", asy
   await installStreamMock(page, [routeRunScript({ routeAt: 300, doneAt: 800 })]);
   await installChatApiMocks(page, { detailDelayMs: 600 });
 
-  await send(page);
+  await sendChat(page);
   const dock = page.getByTestId("map-dock");
   const bar = dock.locator(".map-dock-bar");
   await expect(bar).toBeVisible();
@@ -225,7 +206,7 @@ test("the map handle floats at the desktop right edge or above the mobile compos
       await expect(bar).toBeInViewport();
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    await expect(page.getByPlaceholder(INPUT)).toBeInViewport();
+    await expect(page.getByPlaceholder(CHAT_INPUT)).toBeInViewport();
     await bar.click();
     await expect(dock).not.toHaveClass(/is-open/);
     await expect(page.getByTestId("agent-route-card")).toHaveCount(0);
@@ -247,7 +228,7 @@ test("a closed map dock stays closed for the rest of the run", async ({ page }) 
   await installStreamMock(page, [routeRunScript({ routeAt: 1500, doneAt: 2200 })]);
   await installChatApiMocks(page, { detailDelayMs: 600 });
 
-  await send(page);
+  await sendChat(page);
   const bar = page.getByTestId("map-dock").locator(".map-dock-bar");
   await expect(bar).toBeVisible();
   // Open it, then close it before the route arrives.
@@ -269,7 +250,7 @@ test("the composer stays reachable and the list scrolls with the map open", asyn
   await expect(page.getByTestId("agent-route-card")).toBeVisible();
 
   const viewport = page.viewportSize()!;
-  const input = await page.getByPlaceholder(INPUT).boundingBox();
+  const input = await page.getByPlaceholder(CHAT_INPUT).boundingBox();
   expect(input).not.toBeNull();
   expect(input!.y + input!.height).toBeLessThanOrEqual(viewport.height);
   if (isMobile) {
@@ -319,7 +300,7 @@ test("deleting the open session shows the start panel before the server answers"
   await installStreamMock(page);
   await installChatApiMocks(page, { sessionVisible: true });
   await page.goto("/");
-  await expect(page.getByText("路线已经准备好了，建议步行前往 Arcade One。")).toBeVisible();
+  await expect(page.getByText(DEFAULT_REPLY)).toBeVisible();
 
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -332,14 +313,10 @@ test("deleting the open session shows the start panel before the server answers"
     }
   });
   page.on("dialog", (dialog) => void dialog.accept());
-  const menu = page.locator(".menu-btn");
-  if (await menu.isVisible()) {
-    await menu.click();
-  }
-  await page.getByRole("button", { name: /删除会话/ }).click();
+  await clickDeleteSession(page);
   try {
     await expect(page.getByText("今天想查哪家机厅？")).toBeVisible();
-    await expect(page.getByText("路线已经准备好了，建议步行前往 Arcade One。")).toHaveCount(0);
+    await expect(page.getByText(DEFAULT_REPLY)).toHaveCount(0);
   } finally {
     release();
   }
@@ -355,7 +332,7 @@ test("opening a session highlights it at once and shows a spinner while loading"
   await expect(page.getByText("今天想查哪家机厅？")).toHaveCount(0);
   await expect(page.locator(".sidebar-session-wrap.is-active")).toHaveCount(1);
   await expect(page.getByRole("status", { name: "加载会话中" })).toHaveCount(0);
-  await expect(page.getByText("路线已经准备好了，建议步行前往 Arcade One。")).toBeVisible();
+  await expect(page.getByText(DEFAULT_REPLY)).toBeVisible();
 });
 
 test("a failed delete alerts and does not reopen the session", async ({ page }) => {
@@ -363,7 +340,7 @@ test("a failed delete alerts and does not reopen the session", async ({ page }) 
   await installStreamMock(page);
   await installChatApiMocks(page, { sessionVisible: true });
   await page.goto("/");
-  await expect(page.getByText("路线已经准备好了，建议步行前往 Arcade One。")).toBeVisible();
+  await expect(page.getByText(DEFAULT_REPLY)).toBeVisible();
   await page.route("**/api/chat/sessions/s_e2e?**", async (route) => {
     if (route.request().method() === "DELETE") {
       await route.fulfill({ status: 500, body: "boom" });
@@ -376,13 +353,9 @@ test("a failed delete alerts and does not reopen the session", async ({ page }) 
     dialogs.push(`${dialog.type()}:${dialog.message()}`);
     void dialog.accept();
   });
-  const menu = page.locator(".menu-btn");
-  if (await menu.isVisible()) {
-    await menu.click();
-  }
-  await page.getByRole("button", { name: /删除会话/ }).click();
+  await clickDeleteSession(page);
   await expect.poll(() => dialogs.length).toBe(2);
   expect(dialogs[1]).toMatch(/^alert:删除会话失败/);
   await expect(page.getByText("今天想查哪家机厅？")).toBeVisible();
-  await expect(page.getByText("路线已经准备好了，建议步行前往 Arcade One。")).toHaveCount(0);
+  await expect(page.getByText(DEFAULT_REPLY)).toHaveCount(0);
 });

@@ -6,6 +6,7 @@ import {
   normalizeRouteToGcj02
 } from "../../lib/amap/coords";
 import { buildAmapMarkerUri, buildAmapNavigationUri } from "../../lib/amap/uri";
+import { hasMapContent } from "../../lib/mapDock";
 import type { AgentMapScene, ArcadeSummary, ChatMapArtifacts, GeoPoint, RouteSummary } from "../../types";
 import { AmapMapCanvas, type AmapRuntime } from "./AmapMapCanvas";
 import { AmapRouteOverlay } from "./AmapRouteOverlay";
@@ -90,10 +91,6 @@ function getFallbackRegionName(shop?: ArcadeSummary | null): string {
 
 function routeDestinationPoint(route: RouteSummary | null, destination?: ArcadeSummary | null): GeoPoint | null {
   return getArcadeGcjPoint(destination) ?? normalizePointToGcj02(route?.destination);
-}
-
-function hasMapContent(artifacts: ChatMapArtifacts): boolean {
-  return Boolean(artifacts.route || artifacts.shops.length || artifacts.view_payload || artifacts.route_pending);
 }
 
 export const AgentMapCard = memo(function AgentMapCard({ artifacts }: AgentMapCardProps) {
