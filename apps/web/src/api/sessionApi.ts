@@ -1,16 +1,11 @@
 import type {
   ChatRequest,
-  ChatResponse,
   ChatSessionDetail,
   ChatSessionDispatch,
   ChatSessionSummary
 } from "../types";
 import { assertChatSessionDetail } from "../lib/sessionSchema";
 import { buildUrl, deleteJson, fetchJson, postJson } from "./http";
-
-export async function sendChat(payload: ChatRequest): Promise<ChatResponse> {
-  return postJson<ChatResponse>("/api/chat", payload);
-}
 
 export async function dispatchChatSession(payload: ChatRequest): Promise<ChatSessionDispatch> {
   return postJson<ChatSessionDispatch>("/api/chat/sessions", payload);

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.agent.runtime.session_state import AgentSessionState, AgentTurn
+from app.protocol.session_dto import ChatSessionSummaryRecord
 
 TITLE_LIMIT = 32
 PREVIEW_LIMIT = 72
@@ -63,13 +64,25 @@ def build_preview(turns: list[AgentTurn]) -> str | None:
     return None
 
 
-def summarize_turns(turns: list[AgentTurn]) -> SessionSummary:
+def summarize_state(state: AgentSessionState) -> SessionSummary:
     return SessionSummary(
-        title=build_title(turns),
-        preview=build_preview(turns),
-        visible_turn_count=len(visible_turns(turns)),
+        title=build_title(state.turns),
+        preview=build_preview(state.turns),
+        visible_turn_count=len(visible_turns(state.turns)),
     )
 
 
-def summarize_state(state: AgentSessionState) -> SessionSummary:
-    return summarize_turns(state.turns)
+def summary_record_from_state(state: AgentSessionState) -> ChatSessionSummaryRecord:
+    """History-list record computed from a full state instead of the stored summary columns."""
+    summary = summarize_state(state)
+    return ChatSessionSummaryRecord(
+        session_id=state.session_id,
+        client_id=state.client_id,
+        intent=state.intent,
+        status=state.status,
+        title=summary.title,
+        preview=summary.preview,
+        turn_count=summary.visible_turn_count,
+        created_at=state.created_at,
+        updated_at=state.updated_at,
+    )

@@ -236,13 +236,15 @@ def _coerce_active_agent(raw: object, *, default: str) -> str:
     return mapping.get(raw, raw)
 
 
-def _client_can_access(state: AgentSessionState, client_id: str | None) -> bool:
+def _client_can_access(owner_id: str | None, client_id: str | None) -> bool:
+    """Single-session access: unowned sessions are readable by any client."""
     if client_id is None:
         return True
-    return state.client_id in {None, client_id}
+    return owner_id in {None, client_id}
 
 
-def _client_matches_list_scope(state: AgentSessionState, client_id: str | None) -> bool:
+def _client_matches_list_scope(owner_id: str | None, client_id: str | None) -> bool:
+    """History lists only show the client's own sessions."""
     if client_id is None:
         return True
-    return state.client_id == client_id
+    return owner_id == client_id

@@ -20,7 +20,7 @@ from app.agent.runtime.session_state import (
 )
 from app.infra.db.protocols import SessionStateRepository
 from app.protocol.session_dto import ChatSessionSummaryRecord
-from app.services.chat_session_summary import summarize_state
+from app.services.chat_session_summary import summary_record_from_state
 
 
 def _stub_provider_adapter(client: TestClient, reply: str = "stubbed model reply") -> None:
@@ -62,25 +62,9 @@ class InMemorySessionStateRepository:
         state = self._states.get(session_id)
         if state is None:
             return None
-        if not _client_can_access(state, client_id):
+        if not _client_can_access(state.client_id, client_id):
             return None
         return deepcopy(state)
-
-    def list_sessions(
-        self,
-        *,
-        limit: int = 50,
-        client_id: str | None = None,
-    ) -> list[AgentSessionState]:
-        from copy import deepcopy
-
-        snapshots = [
-            deepcopy(state)
-            for state in self._states.values()
-            if _client_matches_list_scope(state, client_id)
-        ]
-        snapshots.sort(key=lambda s: s.updated_at, reverse=True)
-        return snapshots[:limit]
 
     def get_session_for_display(self, session_id: str, *, client_id: str | None = None) -> AgentSessionState | None:
         return self.get_session(session_id, client_id=client_id)
@@ -91,29 +75,15 @@ class InMemorySessionStateRepository:
         limit: int = 50,
         client_id: str | None = None,
     ) -> list[ChatSessionSummaryRecord]:
-        summaries = []
-        for state in self.list_sessions(limit=limit, client_id=client_id):
-            summary = summarize_state(state)
-            summaries.append(
-                ChatSessionSummaryRecord(
-                    session_id=state.session_id,
-                    client_id=state.client_id,
-                    intent=state.intent,
-                    status=state.status,
-                    title=summary.title,
-                    preview=summary.preview,
-                    turn_count=summary.visible_turn_count,
-                    created_at=state.created_at,
-                    updated_at=state.updated_at,
-                )
-            )
-        return summaries
+        states = [state for state in self._states.values() if _client_matches_list_scope(state.client_id, client_id)]
+        states.sort(key=lambda s: s.updated_at, reverse=True)
+        return [summary_record_from_state(state) for state in states[:limit]]
 
     def delete_session(self, session_id: str, *, client_id: str | None = None) -> bool:
         state = self._states.get(session_id)
         if state is None:
             return False
-        if not _client_can_access(state, client_id):
+        if not _client_can_access(state.client_id, client_id):
             return False
         del self._states[session_id]
         return True

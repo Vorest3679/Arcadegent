@@ -46,19 +46,16 @@ export function toVisibleTurns(turns: ChatHistoryTurn[]): ChatHistoryTurn[] {
   return turns.filter((turn) => turn.role === "user" || turn.role === "assistant");
 }
 
-export function formatSubagentLabel(subagent: string | null): string {
-  if (!subagent) {
-    return "等待阶段信号";
-  }
-  return SUBAGENT_LABEL[subagent] ?? subagent;
+// A name with a Chinese alias shows the alias; any other agent or tool (e.g.
+// an MCP tool) shows its own name.
+export function formatAgentName(agent: string | null | undefined, fallback = "等待阶段信号"): string {
+  return agent ? SUBAGENT_LABEL[agent] ?? agent : fallback;
 }
 
-function formatToolLabel(toolName: string | undefined): string {
-  if (!toolName) {
-    return "工具";
-  }
-  return TOOL_LABEL[toolName] ?? toolName;
+export function formatToolName(name: string | null | undefined, fallback = "工具"): string {
+  return name ? TOOL_LABEL[name] ?? name : fallback;
 }
+
 
 export function toProgressText(envelope: ChatStreamEnvelope): string {
   const toolNameRaw = envelope.data.tool;
@@ -70,31 +67,31 @@ export function toProgressText(envelope: ChatStreamEnvelope): string {
   if (envelope.event === "subagent.changed") {
     const nextRaw = envelope.data.to_subagent ?? envelope.data.active_subagent;
     const next = typeof nextRaw === "string" ? nextRaw : null;
-    return `切换到 ${formatSubagentLabel(next)}`;
+    return `切换到 ${formatAgentName(next)}`;
   }
   if (envelope.event === "worker.started") {
     const worker = typeof envelope.data.worker === "string" ? envelope.data.worker : null;
-    return `${formatSubagentLabel(worker)} 已启动`;
+    return `${formatAgentName(worker)} 已启动`;
   }
   if (envelope.event === "worker.completed") {
     const worker = typeof envelope.data.worker === "string" ? envelope.data.worker : null;
-    return `${formatSubagentLabel(worker)} 已完成`;
+    return `${formatAgentName(worker)} 已完成`;
   }
   if (envelope.event === "worker.failed") {
     const worker = typeof envelope.data.worker === "string" ? envelope.data.worker : null;
-    return `${formatSubagentLabel(worker)} 失败`;
+    return `${formatAgentName(worker)} 失败`;
   }
   if (envelope.event === "assistant.token") {
     return "正在生成回复";
   }
   if (envelope.event === "tool.started") {
-    return `${formatToolLabel(toolName)} 执行中`;
+    return `${formatToolName(toolName)} 执行中`;
   }
   if (envelope.event === "tool.completed") {
-    return `${formatToolLabel(toolName)} 已完成`;
+    return `${formatToolName(toolName)} 已完成`;
   }
   if (envelope.event === "tool.failed") {
-    return `${formatToolLabel(toolName)} 失败`;
+    return `${formatToolName(toolName)} 失败`;
   }
   if (envelope.event === "navigation.route_ready") {
     return "路线已生成";
@@ -182,16 +179,6 @@ export function mapArtifactsForEvent(
     };
   }
   return undefined;
-}
-
-// A name with a Chinese alias shows the alias; any other tool (e.g. an MCP
-// tool) shows its own name.
-export function formatToolName(name: string): string {
-  return TOOL_LABEL[name] ?? name;
-}
-
-export function formatAgentName(agent: string): string {
-  return SUBAGENT_LABEL[agent] ?? agent;
 }
 
 export const STEP_STATUS_LABEL = {

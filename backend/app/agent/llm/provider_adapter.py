@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from time import perf_counter
@@ -19,6 +19,7 @@ from app.agent.llm.streaming import (
     ResponsesStreamCollector,
     StreamDone,
     StreamEvent,
+    TextDelta,
     parse_sse_line,
 )
 from app.infra.observability.logger import get_logger, log_ref
@@ -67,6 +68,28 @@ class ModelResponse:
     transcript: dict[str, Any] = field(default_factory=dict)
 
 
+async def collect_stream(
+    events: AsyncIterator[StreamEvent],
+    on_text: Callable[[str], None] | None = None,
+) -> ModelResponse:
+    """Drain a provider stream and return its StreamDone response.
+
+    ``on_text`` receives each TextDelta. The stream is closed on exit, so
+    cancelling the caller closes the upstream connection.
+    """
+    final: ModelResponse | None = None
+    async with aclosing(events) as stream:
+        async for event in stream:
+            if isinstance(event, TextDelta) and on_text is not None:
+                on_text(event.text)
+            elif isinstance(event, StreamDone):
+                final = event.response
+    if final is None:
+        return ModelResponse(error={"type": "provider_error", "message": "stream ended without a final response"},
+                             status="failed")
+    return final
+
+
 class ProviderAdapter:
     """Execute one model turn against OpenAI-compatible provider."""
 
@@ -90,37 +113,21 @@ class ProviderAdapter:
         runtime_hints: dict[str, Any] | None = None,
     ) -> ModelResponse:
         if self._config.stream:
-            final: ModelResponse | None = None
-            async with aclosing(self._stream_events(instructions=instructions, messages=messages,
-                                                    tools=tools, runtime_hints=runtime_hints)) as events:
-                async for event in events:
-                    if isinstance(event, StreamDone):
-                        final = event.response
-            return final or self._error_response("stream ended without a final response")
+            return await collect_stream(self._stream_events(
+                instructions=instructions, messages=messages, tools=tools, runtime_hints=runtime_hints))
         started = perf_counter()
         protocol = "chat_completions"
         try:
-            protocol = "chat_completions" if self._prefer_chat_completions() else "responses"
-            if not self.enabled:
-                raise ValueError("llm provider disabled or missing API key")
-            tool_choice = self._resolve_tool_choice(tools=tools, runtime_hints=runtime_hints)
-            self._log_request_summary(
-                active_subagent=str((runtime_hints or {}).get("active_subagent") or "").strip(),
-                tool_choice=tool_choice,
-                instructions=instructions,
-                messages=messages,
-                tools=tools,
-                protocol=protocol,
-            )
+            protocol = self._protocol()
+            tool_choice = self._prepare_request(protocol=protocol, instructions=instructions, messages=messages,
+                                                tools=tools, runtime_hints=runtime_hints)
             method = self._try_chat_completions if protocol == "chat_completions" else self._try_responses_api
             response, error = await method(instructions=instructions, messages=messages,
                                            tools=tools, tool_choice=tool_choice)
             response = response or self._error_response(error or "empty provider response")
         except (ValueError, TypeError) as exc:
             response = self._error_response(str(exc))
-        response = replace(response, duration_ms=(perf_counter() - started) * 1000, protocol=protocol)
-        self._log_response_summary(provider=protocol, response=response)
-        return response
+        return self._finish_response(response, started, protocol)
 
     def _headers(self, accept: str = "application/json") -> dict[str, str]:
         key = self._config.api_key
@@ -162,15 +169,9 @@ class ProviderAdapter:
         stream_error: dict[str, Any] | None = None
         ttft_ms: float | None = None
         try:
-            protocol = "chat_completions" if self._prefer_chat_completions() else "responses"
-            if not self.enabled:
-                raise ValueError("llm provider disabled or missing API key")
-            tool_choice = self._resolve_tool_choice(tools=tools, runtime_hints=runtime_hints)
-            self._log_request_summary(
-                active_subagent=str((runtime_hints or {}).get("active_subagent") or "").strip(),
-                tool_choice=tool_choice, instructions=instructions, messages=messages,
-                tools=tools, protocol=protocol,
-            )
+            protocol = self._protocol()
+            tool_choice = self._prepare_request(protocol=protocol, instructions=instructions, messages=messages,
+                                                tools=tools, runtime_hints=runtime_hints)
             if protocol == "chat_completions":
                 collector: ChatStreamCollector | ResponsesStreamCollector = ChatStreamCollector()
                 endpoint, payload = self._build_chat_request(
@@ -234,6 +235,29 @@ class ProviderAdapter:
             response = replace(response, status="incomplete", error=stream_error)
         response = replace(response, stream_mode="provider", provider_ttft_ms=ttft_ms)
         yield StreamDone(self._finish_response(response, started, protocol))
+
+    def _protocol(self) -> str:
+        return "chat_completions" if self._prefer_chat_completions() else "responses"
+
+    def _prepare_request(
+        self,
+        *,
+        protocol: str,
+        instructions: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        runtime_hints: dict[str, Any] | None,
+    ) -> str:
+        """Check the provider is usable, resolve tool_choice and log the request; raises ValueError."""
+        if not self.enabled:
+            raise ValueError("llm provider disabled or missing API key")
+        tool_choice = self._resolve_tool_choice(tools=tools, runtime_hints=runtime_hints)
+        self._log_request_summary(
+            active_subagent=str((runtime_hints or {}).get("active_subagent") or "").strip(),
+            tool_choice=tool_choice, instructions=instructions, messages=messages,
+            tools=tools, protocol=protocol,
+        )
+        return tool_choice
 
     def _finish_response(self, response: ModelResponse, started: float, protocol: str) -> ModelResponse:
         response = replace(response, duration_ms=(perf_counter() - started) * 1000, protocol=protocol)

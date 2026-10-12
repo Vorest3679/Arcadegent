@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { installAmapMock, installChatApiMocks, installStreamMock, openMapDock, routeRunScript } from "./test-support";
+import {
+  CHAT_INPUT,
+  DEFAULT_REPLY,
+  installAmapMock,
+  installChatApiMocks,
+  installStreamMock,
+  openMapDock,
+  routeRunScript,
+  sendChat
+} from "./test-support";
 
 test("ChatPanel shows progressive route card from SSE route_ready", async ({ page }) => {
   await installAmapMock(page);
@@ -7,9 +16,7 @@ test("ChatPanel shows progressive route card from SSE route_ready", async ({ pag
   await installStreamMock(page, [routeRunScript({ routeAt: 1500, doneAt: 2500 })]);
   await installChatApiMocks(page);
 
-  await page.goto("/");
-  await page.getByPlaceholder("尽管问机厅相关问题").fill("给我一条到 Arcade One 的路线");
-  await page.getByRole("button", { name: "发送" }).click();
+  await sendChat(page);
 
   await openMapDock(page);
   await expect(page.getByTestId("agent-route-card")).toBeVisible();
@@ -19,7 +26,7 @@ test("ChatPanel shows progressive route card from SSE route_ready", async ({ pag
   await expect(page.getByText("1.3 km", { exact: true })).toBeVisible();
   await expect(page.getByTestId("map-action-route-web")).toHaveAttribute("href", /callnative=0/);
   await expect(page.getByTestId("map-action-route-app")).toHaveAttribute("href", /callnative=1/);
-  await expect(page.getByText("路线已经准备好了，建议步行前往 Arcade One。")).toBeVisible();
+  await expect(page.getByText(DEFAULT_REPLY)).toBeVisible();
   // Wait for the completed detail response, not just the earlier SSE card.
   await expect(page.getByRole("heading", { name: "从当前位置前往 Arcade One" })).toBeVisible();
   await expect(page.locator(".chat-message.streaming")).toHaveCount(0);
@@ -37,12 +44,12 @@ test("ChatPanel shows progressive route card from SSE route_ready", async ({ pag
     await route.abort();
   });
   try {
-    await page.getByPlaceholder("尽管问机厅相关问题").fill("还有别的路线吗？");
+    await page.getByPlaceholder(CHAT_INPUT).fill("还有别的路线吗？");
     await page.getByRole("button", { name: "发送" }).click();
     await expect(page.getByText("正在生成回复...", { exact: true })).toBeVisible();
     await expect(page.getByTestId("agent-route-card")).toHaveCount(1);
     await expect(page.getByRole("heading", { name: "从当前位置前往 Arcade One" })).toBeVisible();
-    await expect(page.getByText("路线已经准备好了，建议步行前往 Arcade One。", { exact: true })).toHaveCount(1);
+    await expect(page.getByText(DEFAULT_REPLY, { exact: true })).toHaveCount(1);
   } finally {
     releaseDispatch();
   }

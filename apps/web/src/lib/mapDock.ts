@@ -1,7 +1,11 @@
 import type { ChatHistoryTurn, ChatMapArtifacts } from "../types";
 
+// Whether the artifacts give the map card something to draw. A destination
+// alone is not drawn: it always comes with a route or shops.
 export function hasMapContent(artifacts: ChatMapArtifacts | null | undefined): artifacts is ChatMapArtifacts {
-  return Boolean(artifacts && (artifacts.route || artifacts.shops.length > 0 || artifacts.view_payload));
+  return Boolean(
+    artifacts && (artifacts.route || artifacts.shops.length > 0 || artifacts.view_payload || artifacts.route_pending)
+  );
 }
 
 // The one map the dock shows: the live run's map, else the last reply's.

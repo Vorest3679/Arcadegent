@@ -55,9 +55,9 @@ def _http_error(exc: SessionError | SessionOwnershipError) -> HTTPException:
     return HTTPException(status_code=500, detail="session error")
 
 
-def _live_status(state: AgentSessionState, *, container: AppContainer):
+def _live_status(session_id: str, stored_status: str, *, container: AppContainer):
     """Active runs decide the shown status; otherwise the stored label is used."""
-    return "running" if container.run_manager.is_active(state.session_id) else state.status
+    return "running" if container.run_manager.is_active(session_id) else stored_status
 
 
 def _current_run(session_id: str, *, container: AppContainer) -> ChatRunDto | None:
@@ -206,7 +206,7 @@ def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSess
         session_id=state.session_id,
         intent=_normalize_intent(state.intent),
         active_subagent=state.active_subagent,
-        status=_live_status(state, container=container),
+        status=_live_status(state.session_id, state.status, container=container),
         current_run=_current_run(state.session_id, container=container),
         last_error=state.last_error,
         reply=state.working_memory.get("reply") if isinstance(state.working_memory.get("reply"), str) else None,
@@ -300,19 +300,12 @@ def list_chat_sessions(
     records = container.session_store.list_session_summaries(limit=limit, client_id=client_id)
     summaries: list[ChatSessionSummaryDto] = []
     for record in records:
-        running = container.run_manager.is_active(record.session_id)
-        if record.turn_count == 0 and not running:
+        status = _live_status(record.session_id, record.status, container=container)
+        if record.turn_count == 0 and status != "running":
             continue
         summaries.append(
-            ChatSessionSummaryDto(
-                session_id=record.session_id,
-                title=record.title,
-                preview=record.preview,
-                intent=_normalize_intent(record.intent),
-                status="running" if running else record.status,
-                turn_count=record.turn_count,
-                created_at=record.created_at,
-                updated_at=record.updated_at,
+            ChatSessionSummaryDto.model_validate(
+                {**record.model_dump(), "intent": _normalize_intent(record.intent), "status": status}
             )
         )
     return summaries

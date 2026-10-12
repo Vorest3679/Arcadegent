@@ -1,6 +1,6 @@
 import { memo, useDeferredValue } from "react";
 import type { ChatRound } from "../../lib/chatRounds";
-import { formatSubagentLabel, formatTimeLabel } from "../../lib/sse/chatStream";
+import { formatAgentName, formatTimeLabel } from "../../lib/sse/chatStream";
 import { useRunStore } from "../../stores/runStore";
 import { MarkdownMessage } from "../MarkdownMessage";
 import { RoundSteps } from "./RoundSteps";
@@ -24,7 +24,7 @@ function StageStatus() {
   return (
     <li className="chat-message assistant stream-event">
       <div className="chat-bubble chat-event-bubble">
-        <p>执行阶段：{formatSubagentLabel(activeSubagent)}</p>
+        <p>执行阶段：{formatAgentName(activeSubagent)}</p>
         <small>{text}</small>
         <small>{latest ? formatTimeLabel(latest.at) : "实时同步中..."}</small>
       </div>

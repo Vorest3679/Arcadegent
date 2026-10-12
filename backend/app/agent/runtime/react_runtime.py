@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from contextlib import aclosing
 from contextvars import ContextVar
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -13,8 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.agent.context.context_builder import ContextBuilder
-from app.agent.llm.provider_adapter import ModelResponse, ProviderAdapter
-from app.agent.llm.streaming import StreamDone, TextDelta
+from app.agent.llm.provider_adapter import ModelResponse, ProviderAdapter, collect_stream
 from app.agent.runtime.loop_guard import LoopGuard
 from app.agent.skills.execution import SkillExecution, bind_skill_execution
 from app.agent.skills.registry import SkillRegistry
@@ -296,7 +294,7 @@ class ReactRuntime:
             state.last_error = None
         self._session_store.save_session(state)
         self._publish(
-            "session.failed" if model_error else RunEvent.ASSISTANT_COMPLETED,
+            RunEvent.SESSION_FAILED if model_error else RunEvent.ASSISTANT_COMPLETED,
             {
                 "reply": final_text,
                 "active_subagent": state.active_subagent,
@@ -448,7 +446,7 @@ class ReactRuntime:
         """Run one main-agent model call, publishing its text as one output.
 
         Returns the response and whether its text was published under ``output_id``.
-        Cancelling the run closes the provider stream through ``aclosing``.
+        Cancelling the run closes the provider stream through ``collect_stream``.
         """
         adapter = self._provider_adapter
         if not adapter.streaming:
@@ -459,17 +457,13 @@ class ReactRuntime:
             self._publish_assistant_text(text, output_id=output_id, stream_mode="synthetic")
             return response, True
         published = False
-        final: ModelResponse | None = None
-        async with aclosing(adapter.stream(**request)) as events:
-            async for event in events:
-                if isinstance(event, TextDelta):
-                    self._publish_assistant_text(event.text, output_id=output_id, stream_mode="provider")
-                    published = True
-                elif isinstance(event, StreamDone):
-                    final = event.response
-        if final is None:
-            final = ModelResponse(error={"type": "provider_error", "message": "stream ended without a final response"},
-                                  status="failed")
+
+        def publish(text: str) -> None:
+            nonlocal published
+            self._publish_assistant_text(text, output_id=output_id, stream_mode="provider")
+            published = True
+
+        final = await collect_stream(adapter.stream(**request), on_text=publish)
         return final, published
 
     def _record_model_call(

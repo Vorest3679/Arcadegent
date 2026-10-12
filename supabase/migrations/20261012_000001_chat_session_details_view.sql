@@ -8,7 +8,10 @@
 --   * working_memory: without `worker_runs`.
 -- The runtime keeps reading and writing the table itself.
 
-create or replace view chat_session_details as
+-- Dropped first: `create or replace view` cannot remove columns.
+drop view if exists chat_session_details;
+
+create view chat_session_details as
 select
   s.session_id,
   s.client_id,
@@ -54,9 +57,6 @@ select
     ),
     '[]'::jsonb
   ) as turns,
-  s.title,
-  s.preview,
-  s.visible_turn_count,
   s.created_at,
   s.updated_at
 from chat_sessions s;
