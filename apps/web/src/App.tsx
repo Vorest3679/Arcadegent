@@ -45,6 +45,7 @@ export function App() {
 
         {viewMode === "chat" ? (
           <ChatPanel
+            city={chat.currentCity}
             onSubmit={chat.submitChat}
             onQuickAsk={chat.quickAsk}
             streamReply={chat.streamReply}

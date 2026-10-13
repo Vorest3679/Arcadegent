@@ -6,25 +6,25 @@ import { useSessionStore } from "../../stores/sessionStore";
 import { MapDock } from "./MapDock";
 import { RoundList } from "./RoundList";
 
-const QUICK_PROMPTS = [
-  "帮我找找适合下班后去的机厅",
-  "南京最多机台的机厅是哪家？",
-  "给我一条从当前位置到最近机厅的路线建议"
-];
-
 // Distance from the bottom within which streaming output keeps following.
 const FOLLOW_THRESHOLD_PX = 120;
 // Visual viewport shrink that means the soft keyboard is up.
 const KEYBOARD_THRESHOLD_PX = 150;
 
 type ChatPanelProps = {
+  city: string;
   onSubmit: (event: FormEvent) => Promise<void>;
   onQuickAsk: (prompt: string) => void;
   streamReply: string;
   streamReplyActive: boolean;
 };
 
-export function ChatPanel({ onSubmit, onQuickAsk, streamReply, streamReplyActive }: ChatPanelProps) {
+export function ChatPanel({ city, onSubmit, onQuickAsk, streamReply, streamReplyActive }: ChatPanelProps) {
+  const quickPrompts = [
+    "帮我找找适合下班后去的机厅",
+    `${city}最多机台的机厅是哪家？`,
+    "给我一条从当前位置到最近机厅的路线建议"
+  ];
   const turns = useSessionStore((state) => state.turns);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const loading = useSessionStore((state) => state.turnsLoading);
@@ -95,7 +95,7 @@ export function ChatPanel({ onSubmit, onQuickAsk, streamReply, streamReplyActive
             <p className="chat-empty-title">今天想查哪家机厅？</p>
             <p className="chat-empty-subtitle">你可以直接提问，也可以先点一个预设问题。</p>
             <div className="chat-quick-grid">
-              {QUICK_PROMPTS.map((prompt) => (
+              {quickPrompts.map((prompt) => (
                 <button
                   key={prompt}
                   type="button"

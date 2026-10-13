@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   cancelChatSession,
   deleteChatSession,
@@ -6,7 +6,11 @@ import {
   getChatSession,
   listChatSessions
 } from "../api/sessionApi";
-import { resolveClientLocationForSessionStart, warmupClientLocationCache } from "../lib/clientLocation";
+import {
+  loadCachedClientLocation,
+  resolveClientLocationForSessionStart,
+  warmupClientLocationCache
+} from "../lib/clientLocation";
 import {
   getChatClientId,
   readStoredActiveSessionId,
@@ -27,6 +31,7 @@ const runState = () => useRunStore.getState();
 // Orchestrates the chat view: session list and detail, send, delete, switch and
 // refresh-recovery. Following a run lives in useRunStream.
 export function useChatSessionController() {
+  const [clientLocation, setClientLocation] = useState(loadCachedClientLocation);
   const sending = useSessionStore((state) => state.sending);
   const streamConnected = useRunStore((state) => state.streamConnected);
   const awaitingAssistant = useRunStore((state) => state.awaitingAssistant);
@@ -63,7 +68,7 @@ export function useChatSessionController() {
 
   useEffect(() => {
     void loadSessionList(readStoredActiveSessionId() || undefined);
-    void warmupClientLocationCache();
+    void warmupClientLocationCache().then(setClientLocation);
   }, []);
 
 
@@ -314,6 +319,9 @@ export function useChatSessionController() {
 
     try {
       const location = isNewSession ? await resolveClientLocationForSessionStart() : undefined;
+      if (isNewSession) {
+        setClientLocation(location ?? null);
+      }
       const store = sessionState();
 
       appState().setInputValue("");
@@ -425,6 +433,7 @@ export function useChatSessionController() {
   }
 
   return {
+    currentCity: clientLocation?.city?.trim() || "南京",
     openChatView,
     openArcadesView,
     startNewSession,
