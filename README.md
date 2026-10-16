@@ -397,6 +397,8 @@ docker compose down
 
 SSE 事件流依赖长连接，Nginx 配置里 `/api/stream/` 已关闭 buffering，并把 `proxy_read_timeout` 调高；如果再接一层负载均衡，也要保留同样的长连接设置。
 
+聊天入口要求非空 `client_id`，同一 client ID 或同一来源 IP 在 30 秒内只能发起一次聊天，超限返回 `429` 和 `Retry-After`。通过代理部署时，须将后端实际看到的可信代理 IP/CIDR 配置到 `FORWARDED_ALLOW_IPS`（Compose 已透传）；否则所有用户会共用代理 IP 的额度。不要配置为 `*`。当前限流为进程内计数，多 worker/多实例需改用共享存储。代理和验证细节见[会话运行生命周期与 SSE](docs/dev-details/会话运行生命周期与SSE.md#聊天请求限流)。
+
 ## API 概览
 
 - `GET /health`：健康检查、数据加载状态、tool provider 和 MCP discovery 状态

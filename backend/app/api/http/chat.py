@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
+from ipaddress import ip_address
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
+from pydantic import StringConstraints
 
 from app.agent.runtime.session_state import (
     AgentSessionState,
@@ -29,6 +33,7 @@ from app.protocol.messages import (
     IntentType,
 )
 from app.services.chat_session_summary import visible_turns as _visible_turns
+from app.services.chat_rate_limit import ChatRateLimitExceeded
 from app.session.models import (
     RunConflictError,
     RunNotFoundError,
@@ -41,6 +46,32 @@ router = APIRouter(prefix="/api", tags=["chat"])
 logger = get_logger(__name__)
 
 CANCEL_REASON = "实时连接中断，当前请求已停止；再次输入会继续使用已保存的上下文。"
+
+
+class ChatSubmissionRequest(ChatRequest):
+    """HTTP submissions require an identity; internal runtime calls may omit it."""
+
+    client_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+
+
+def _limit_chat(request: ChatSubmissionRequest, http_request: Request, container: AppContainer) -> None:
+    # Uvicorn resolves forwarding headers only for explicitly trusted proxies.
+    # Never read X-Forwarded-For/X-Real-IP directly from user-controlled headers.
+    if http_request.client is None:
+        raise HTTPException(status_code=400, detail="无法确定请求来源 IP")
+    source_ip = http_request.client.host
+    try:
+        address = ip_address(source_ip)
+        source_ip = str(getattr(address, "ipv4_mapped", None) or address)
+    except ValueError:
+        # ASGI test transports and Unix sockets may use a non-IP peer name.
+        pass
+    try:
+        container.chat_rate_limiter.acquire(client_id=request.client_id, source_ip=source_ip)
+    except ChatRateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429, detail=str(exc), headers={"Retry-After": str(exc.retry_after)}
+        ) from exc
 
 
 def _http_error(exc: SessionError | SessionOwnershipError) -> HTTPException:
@@ -226,9 +257,11 @@ def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSess
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
-    request: ChatRequest,
+    request: ChatSubmissionRequest,
+    http_request: Request,
     container: AppContainer = Depends(get_container),
 ) -> ChatResponse:
+    _limit_chat(request, http_request, container)
     logger.info(
         "api.chat.request session_ref=%s intent=%s page_size=%s message_chars=%s",
         log_ref(request.session_id),
@@ -256,9 +289,11 @@ async def chat(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def dispatch_chat_session(
-    request: ChatRequest,
+    request: ChatSubmissionRequest,
+    http_request: Request,
     container: AppContainer = Depends(get_container),
 ) -> ChatSessionDispatchDto:
+    _limit_chat(request, http_request, container)
     logger.info(
         "api.chat.dispatch session_ref=%s intent=%s page_size=%s message_chars=%s",
         log_ref(request.session_id),

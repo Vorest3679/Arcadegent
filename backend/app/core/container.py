@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.agent.context.context_builder import ContextBuilder
@@ -25,6 +25,7 @@ from app.services.arcade_geo_resolver import ArcadeGeoResolver, ArcadeGeoResolve
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
 from app.services.amap_reverse_geocoder import AMapReverseGeocoder, AMapReverseGeocoderConfig
 from app.services.chat_run_service import ChatRunService
+from app.services.chat_rate_limit import ChatRateLimiter
 from app.session.run_log import RunLog
 from app.session.runs import RunManager
 
@@ -45,6 +46,7 @@ class AppContainer:
     skill_registry: SkillRegistry
     react_runtime: ReactRuntime
     chat_runs: ChatRunService
+    chat_rate_limiter: ChatRateLimiter = field(default_factory=ChatRateLimiter)
 
 
 def build_container(
