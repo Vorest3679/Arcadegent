@@ -20,7 +20,7 @@ from backend.app.tests.integration._api_test_support import (
 )
 
 
-def test_skill_discovery_loading_business_tools_and_execution_isolation(tmp_path, monkeypatch):
+def test_skill_discovery_loading_business_tools_and_execution_isolation(tmp_path, monkeypatch, chat_clock):
     """Exercise real tool dispatch/context/session boundaries with a deterministic model."""
     import app.core.container as container_module
     from app.agent.llm.provider_adapter import ModelToolCall
@@ -29,7 +29,7 @@ def test_skill_discovery_loading_business_tools_and_execution_isolation(tmp_path
     root = tmp_path / "skills"
     root.mkdir()
     monkeypatch.setattr(container_module, "load_skill_config", lambda _: SkillConfig(roots=[root]))
-    client = _build_client(tmp_path)
+    client = _build_client(tmp_path, chat_clock=chat_clock)
     runtime = client.app.state.container.react_runtime
     main_calls = 0
     worker_calls = 0
@@ -100,7 +100,7 @@ def test_skill_discovery_loading_business_tools_and_execution_isolation(tmp_path
         return ModelResponse(text="新一轮尚未加载技能。")
 
     runtime._provider_adapter.complete = fake_complete
-    response = client.post("/api/chat", json={"message": "find Gamma"})
+    response = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["reply"] == "已找到 Gamma Arcade。"
@@ -116,7 +116,8 @@ def test_skill_discovery_loading_business_tools_and_execution_isolation(tmp_path
             assert turn.payload["status"] == "completed"
             assert turn.payload["result"]["status"] == "loaded"
     assert "PARENT_BODY_MARKER" not in json.dumps(state_to_dict(state))
-    response = client.post("/api/chat", json={"message": "继续", "session_id": payload["session_id"]})
+    chat_clock.advance()  # Pass the submission cooldown without sleeping.
+    response = client.post("/api/chat", json={"client_id": "test-client", "message": "继续", "session_id": payload["session_id"]})
     assert response.status_code == 200
     assert response.json()["reply"] == "新一轮尚未加载技能。"
 
@@ -169,7 +170,7 @@ def test_navigation_worker_hydrates_route_strings_and_returns_route(tmp_path: Pa
         return ModelResponse(text="route ready")
 
     adapter.complete = fake_complete  # type: ignore[method-assign]
-    response = client.post("/api/chat", json={"message": "从起点走到 Gamma Arcade"})
+    response = client.post("/api/chat", json={"client_id": "test-client", "message": "从起点走到 Gamma Arcade"})
 
     assert response.status_code == 200
     payload = response.json()
@@ -221,7 +222,7 @@ def test_chat_records_native_tool_round_trip(tmp_path: Path) -> None:
 
     adapter.complete = fake_complete  # type: ignore[method-assign]
 
-    resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
+    resp = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma", "page_size": 3})
 
     assert resp.status_code == 200
     payload = resp.json()
@@ -255,7 +256,7 @@ def test_chat_records_native_tool_round_trip(tmp_path: Path) -> None:
 def test_chat_marks_session_failed_when_model_errors(tmp_path: Path) -> None:
     client = _build_client(tmp_path)  # LLM_API_KEY is empty, so the provider errors out
 
-    resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
+    resp = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma", "page_size": 3})
 
     assert resp.status_code == 200
     payload = resp.json()
@@ -274,11 +275,11 @@ def test_chat_marks_session_failed_when_model_errors(tmp_path: Path) -> None:
     assert events[-1]["kind"] == "control"
     assert events[-1]["status"] == "completed"
 
-def test_second_turn_streams_only_its_own_run(tmp_path: Path) -> None:
-    client = _build_client(tmp_path)
+def test_second_turn_streams_only_its_own_run(tmp_path: Path, chat_clock) -> None:
+    client = _build_client(tmp_path, chat_clock=chat_clock)
     _stub_provider_adapter(client)
 
-    first_resp = client.post("/api/chat", json={"message": "松江区有哪些机厅可以去？", "page_size": 3})
+    first_resp = client.post("/api/chat", json={"client_id": "test-client", "message": "松江区有哪些机厅可以去？", "page_size": 3})
     assert first_resp.status_code == 200
     session_id = first_resp.json()["session_id"]
     first_run = first_resp.json()["run_id"]
@@ -288,9 +289,10 @@ def test_second_turn_streams_only_its_own_run(tmp_path: Path) -> None:
     assert {event["run_id"] for event in first_events} == {first_run}
     assert any(event["event"] == "assistant.completed" for event in first_events)
 
+    chat_clock.advance()  # Pass the submission cooldown without sleeping.
     second_resp = client.post(
         "/api/chat",
-        json={"session_id": session_id, "message": "上海松江区", "page_size": 3},
+        json={"client_id": "test-client", "session_id": session_id, "message": "上海松江区", "page_size": 3},
     )
     assert second_resp.status_code == 200
     second_run = second_resp.json()["run_id"]
@@ -308,7 +310,7 @@ def test_incomplete_text_fails_without_success_event(tmp_path: Path) -> None:
     async def fake_complete(**kwargs):
         return ModelResponse(text="partial", status="incomplete", error={"type": "incomplete_response", "message": "length"})
     client.app.state.container.react_runtime._provider_adapter.complete = fake_complete
-    response = client.post("/api/chat", json={"message": "find Gamma"}).json()
+    response = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma"}).json()
     state = client.app.state.container.session_store.get_session(response["session_id"])
     assert state.status == "failed"
     names = [event["event"] for event in _stream_events(client, state.session_id, run_id=response["run_id"])]
@@ -326,7 +328,7 @@ def test_invalid_json_cannot_be_hydrated_into_success(tmp_path: Path) -> None:
             return ModelResponse(tool_calls=[ModelToolCall("bad", "summary_tool", {}, raw_arguments="{", parse_error="invalid JSON")])
         return ModelResponse(text="Unable to summarize")
     client.app.state.container.react_runtime._provider_adapter.complete = fake_complete
-    response = client.post("/api/chat", json={"message": "find Gamma"}).json()
+    response = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma"}).json()
     events = _stream_events(client, response["session_id"], run_id=response["run_id"])
     assert [event["event"] for event in events if event["event"].startswith("tool.")] == ["tool.started", "tool.failed"]
     state = client.app.state.container.session_store.get_session(response["session_id"])
@@ -381,7 +383,7 @@ def test_incomplete_worker_call_is_not_executed(tmp_path: Path) -> None:
             return ModelResponse(tool_calls=[ModelToolCall("dispatch", "invoke_worker", {"worker": "search_worker", "task": "find Gamma"})])
         return ModelResponse(text="partial", tool_calls=[ModelToolCall("partial", "db_query_tool", {"page": 1, "page_size": 3})], error={"type": "incomplete_response", "message": "length"})
     client.app.state.container.react_runtime._provider_adapter.complete = fake_complete
-    response = client.post("/api/chat", json={"message": "find Gamma"}).json()
+    response = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma"}).json()
     events = _stream_events(client, response["session_id"], run_id=response["run_id"])
     assert any(event["event"] == "worker.failed" for event in events)
     assert not any(event["event"] == "tool.started" and event["data"].get("call_id") == "partial" for event in events)

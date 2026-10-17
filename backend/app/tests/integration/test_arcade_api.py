@@ -31,7 +31,7 @@ def test_health_arcades_and_chat(tmp_path: Path) -> None:
     assert body["total"] == 1
     assert body["items"][0]["source_id"] == 10
 
-    chat_resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
+    chat_resp = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma", "page_size": 3})
     assert chat_resp.status_code == 200
     assert chat_resp.json()["intent"] in {"search", "search_nearby"}
 

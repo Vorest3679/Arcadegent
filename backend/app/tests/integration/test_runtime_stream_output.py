@@ -74,7 +74,7 @@ def test_sse_client_receives_first_delta_before_provider_finishes(tmp_path: Path
     _adapter(client).stream = gated_stream  # type: ignore[method-assign]
 
     with _live_server(client.app) as base, httpx.Client(base_url=base, timeout=5) as http:
-        dispatched = http.post("/api/chat/sessions", json={"message": "find Gamma"}).json()
+        dispatched = http.post("/api/chat/sessions", json={"client_id": "test-client", "message": "find Gamma"}).json()
         session_id, run_id = dispatched["session_id"], dispatched["run_id"]
         events = []
         with http.stream("GET", f"/api/stream/{session_id}", params={"run_id": run_id}) as response:
@@ -129,7 +129,7 @@ def test_each_main_model_call_is_its_own_output_and_worker_text_stays_private(tm
     adapter.stream = fake_stream  # type: ignore[method-assign]
     adapter.complete = fake_complete  # type: ignore[method-assign]
 
-    response = client.post("/api/chat", json={"message": "find Gamma"}).json()
+    response = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma"}).json()
     events = _stream_events(client, response["session_id"], run_id=response["run_id"])
 
     names = [event["event"] for event in events]
@@ -157,7 +157,7 @@ def test_summary_reply_is_published_as_new_output(tmp_path: Path) -> None:
         yield _done("整理中", [summary])
 
     _adapter(client).stream = fake_stream  # type: ignore[method-assign]
-    response = client.post("/api/chat", json={"message": "find Gamma"}).json()
+    response = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma"}).json()
     events = _stream_events(client, response["session_id"], run_id=response["run_id"])
     tokens = [event for event in events if event["event"] == "assistant.token"]
     completed = next(event for event in events if event["event"] == "assistant.completed")
@@ -193,7 +193,7 @@ def test_tool_arguments_split_across_provider_chunks_execute_once(tmp_path: Path
     real_client = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(handle), **kw))
 
-    payload = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3}).json()
+    payload = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma", "page_size": 3}).json()
     assert payload["reply"] == "found Gamma"
     assert payload["shops"] and payload["shops"][0]["source_id"] == 10
     events = _stream_events(client, payload["session_id"], run_id=payload["run_id"])
@@ -221,7 +221,7 @@ def test_cancel_while_streaming_closes_provider_stream(tmp_path: Path) -> None:
             closed.set()
 
     _adapter(client).stream = blocked_stream  # type: ignore[method-assign]
-    dispatched = client.post("/api/chat/sessions", json={"session_id": "s_stream_cancel", "message": "find Gamma"}).json()
+    dispatched = client.post("/api/chat/sessions", json={"client_id": "test-client", "session_id": "s_stream_cancel", "message": "find Gamma"}).json()
     assert reached.wait(3)
 
     cancelled = client.post(f"/api/chat/sessions/s_stream_cancel/runs/{dispatched['run_id']}/cancel")

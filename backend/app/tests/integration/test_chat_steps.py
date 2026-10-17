@@ -45,7 +45,7 @@ def _two_step_provider(client, *, worker_text: str = "worker 内部总结，不�
 
 def _run_round(client, session_id: str, message: str) -> dict:
     dispatched = client.post(
-        "/api/chat/sessions", json={"session_id": session_id, "message": message, "page_size": 3},
+        "/api/chat/sessions", json={"client_id": "test-client", "session_id": session_id, "message": message, "page_size": 3},
     )
     assert dispatched.status_code == 202
     return _wait_for_session_status(client, session_id, "completed")
@@ -93,11 +93,12 @@ def test_steps_do_not_leak_model_evidence_or_tool_payloads(tmp_path: Path) -> No
         assert forbidden not in raw
 
 
-def test_steps_are_attached_to_the_round_that_produced_them(tmp_path: Path) -> None:
-    client = _build_client(tmp_path)
+def test_steps_are_attached_to_the_round_that_produced_them(tmp_path: Path, chat_clock) -> None:
+    client = _build_client(tmp_path, chat_clock=chat_clock)
     _two_step_provider(client)
     _run_round(client, "s_steps3", "find Gamma")
     _two_step_provider(client)  # reset call counters for the second round
+    chat_clock.advance()  # Pass the submission cooldown without sleeping.
     detail = _run_round(client, "s_steps3", "再查一次")
 
     users = [turn for turn in detail["turns"] if turn["role"] == "user"]

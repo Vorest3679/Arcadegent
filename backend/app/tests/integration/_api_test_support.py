@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -21,6 +22,7 @@ from app.agent.runtime.session_state import (
 from app.infra.db.protocols import SessionStateRepository
 from app.protocol.session_dto import ChatSessionSummaryRecord
 from app.services.chat_session_summary import summary_record_from_state
+from app.services.chat_rate_limit import ChatRateLimiter
 
 
 def _stub_provider_adapter(client: TestClient, reply: str = "stubbed model reply") -> None:
@@ -171,6 +173,7 @@ def _build_client(
     session_store: SessionStateRepository | None = None,
     mcp_servers_dir: Path | None = None,
     cache_path: Path | None = None,
+    chat_clock: Callable[[], float] | None = None,
 ) -> TestClient:
     data_path = tmp_path / "shops.jsonl"
     empty_mcp_dir = tmp_path / "mcp_empty"
@@ -202,6 +205,8 @@ def _build_client(
     try:
         client = TestClient(create_app())
         client.app.state.container.session_store = store  # type: ignore[attr-defined]
+        if chat_clock is not None:
+            client.app.state.container.chat_rate_limiter = ChatRateLimiter(clock=chat_clock)
         client.__enter__()
     finally:
         container_module._build_session_repository = original_build_session_repository

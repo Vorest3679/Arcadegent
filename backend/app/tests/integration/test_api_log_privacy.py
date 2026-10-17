@@ -139,7 +139,7 @@ def test_chat_and_access_logs_exclude_payload_query_and_reply(tmp_path) -> None:
     root.addHandler(handler)
     try:
         listing = client.get("/api/arcades", params={"keyword": secret, "token": secret})
-        response = client.post("/api/chat", json={"message": secret, "keyword": secret})
+        response = client.post("/api/chat", json={"client_id": "test-client", "message": secret, "keyword": secret})
         missing = client.get(f"/unmatched/{secret}?token={secret}")
     finally:
         root.removeHandler(handler)
@@ -179,7 +179,7 @@ def test_runtime_failure_logs_exception_type_without_message(tmp_path) -> None:
     runtime_logger.addHandler(plain_handler)
     try:
         with pytest.raises(RuntimeError):
-            client.post("/api/chat", json={"message": secret})
+            client.post("/api/chat", json={"client_id": "test-client", "message": secret})
     finally:
         root.removeHandler(handler)
         runtime_logger.removeHandler(plain_handler)

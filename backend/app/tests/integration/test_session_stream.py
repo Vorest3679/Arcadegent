@@ -32,7 +32,7 @@ def test_dispatch_returns_run_and_stream_ends_on_terminal_control(tmp_path: Path
     client = _build_client(tmp_path)
     _stub_provider_adapter(client, reply="第一句。第二句。")
 
-    dispatched = client.post("/api/chat/sessions", json={"message": "find Gamma", "page_size": 3}).json()
+    dispatched = client.post("/api/chat/sessions", json={"client_id": "test-client", "message": "find Gamma", "page_size": 3}).json()
     session_id, run_id = dispatched["session_id"], dispatched["run_id"]
     assert run_id.startswith("r_")
     detail = _wait_for_session_status(client, session_id, "completed")
@@ -54,7 +54,7 @@ def test_dispatch_returns_run_and_stream_ends_on_terminal_control(tmp_path: Path
 def test_stream_replays_after_last_event_id_without_duplicates(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
     _stub_provider_adapter(client)
-    response = client.post("/api/chat", json={"message": "find Gamma"}).json()
+    response = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma"}).json()
     run_id = response["run_id"]
     all_events = _stream_events(client, response["session_id"], run_id=run_id)
 
@@ -82,7 +82,7 @@ def test_evicted_cursor_receives_stream_reset(tmp_path: Path, monkeypatch: pytes
         yield StreamDone(ModelResponse(text="这是一段很长的回复。" * 30, status="completed"))
 
     adapter.stream = many_deltas  # type: ignore[method-assign]
-    response = client.post("/api/chat", json={"message": "find Gamma"}).json()
+    response = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma"}).json()
 
     events = _stream_events(client, response["session_id"], run_id=response["run_id"], after_id=1)
     assert events[0]["event"] == "stream.reset"
@@ -95,7 +95,7 @@ def test_evicted_cursor_receives_stream_reset(tmp_path: Path, monkeypatch: pytes
 def test_cancel_targets_run_and_stream_reports_cancellation(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
     _slow_provider(client)
-    dispatched = client.post("/api/chat/sessions", json={"session_id": "s_cancel1", "message": "find Gamma"}).json()
+    dispatched = client.post("/api/chat/sessions", json={"client_id": "test-client", "session_id": "s_cancel1", "message": "find Gamma"}).json()
     run_id = dispatched["run_id"]
 
     cancelled = client.post(f"/api/chat/sessions/s_cancel1/runs/{run_id}/cancel")
@@ -119,13 +119,14 @@ def test_cancel_targets_run_and_stream_reports_cancellation(tmp_path: Path) -> N
     assert again.json()["current_run"]["status"] == "cancelled"
 
 
-def test_cancel_of_stale_run_does_not_touch_the_new_run(tmp_path: Path) -> None:
-    client = _build_client(tmp_path)
+def test_cancel_of_stale_run_does_not_touch_the_new_run(tmp_path: Path, chat_clock) -> None:
+    client = _build_client(tmp_path, chat_clock=chat_clock)
     _stub_provider_adapter(client)
-    first = client.post("/api/chat", json={"session_id": "s_stale1", "message": "find Gamma"}).json()
+    first = client.post("/api/chat", json={"client_id": "test-client", "session_id": "s_stale1", "message": "find Gamma"}).json()
 
     _slow_provider(client)
-    second = client.post("/api/chat/sessions", json={"session_id": "s_stale1", "message": "again"}).json()
+    chat_clock.advance()  # Pass the submission cooldown without sleeping.
+    second = client.post("/api/chat/sessions", json={"client_id": "test-client", "session_id": "s_stale1", "message": "again"}).json()
 
     stale = client.post(f"/api/chat/sessions/s_stale1/runs/{first['run_id']}/cancel")
     assert stale.status_code == 409
@@ -148,7 +149,7 @@ def test_cancel_of_stale_run_does_not_touch_the_new_run(tmp_path: Path) -> None:
 def test_cancel_and_stream_require_run_id(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
     _slow_provider(client)
-    dispatched = client.post("/api/chat/sessions", json={"session_id": "s_norun1", "message": "find Gamma"}).json()
+    dispatched = client.post("/api/chat/sessions", json={"client_id": "test-client", "session_id": "s_norun1", "message": "find Gamma"}).json()
 
     # The old route without a run id no longer exists.
     assert client.post("/api/chat/sessions/s_norun1/cancel").status_code == 404
@@ -164,10 +165,10 @@ def test_stream_for_unknown_run_is_not_found(tmp_path: Path) -> None:
     assert client.get("/api/stream/s_never_ran", params={"run_id": "r_missing"}).status_code == 404
 
 
-def test_request_refused_while_draining_leaves_session_unchanged(tmp_path: Path) -> None:
-    client = _build_client(tmp_path)
+def test_request_refused_while_draining_leaves_session_unchanged(tmp_path: Path, chat_clock) -> None:
+    client = _build_client(tmp_path, chat_clock=chat_clock)
     _stub_provider_adapter(client)
-    first = client.post("/api/chat", json={"session_id": "s_drain1", "message": "find Gamma"}).json()
+    first = client.post("/api/chat", json={"client_id": "test-client", "session_id": "s_drain1", "message": "find Gamma"}).json()
     before = client.get("/api/chat/sessions/s_drain1").json()
     assert before["status"] == "completed"
 
@@ -175,7 +176,8 @@ def test_request_refused_while_draining_leaves_session_unchanged(tmp_path: Path)
     assert client.portal.call(manager.drain, 0.1) == 0  # type: ignore[union-attr]
 
     for path in ("/api/chat/sessions", "/api/chat"):
-        refused = client.post(path, json={"session_id": "s_drain1", "message": "again"})
+        chat_clock.advance()  # Pass the submission cooldown without sleeping.
+        refused = client.post(path, json={"client_id": "test-client", "session_id": "s_drain1", "message": "again"})
         assert refused.status_code == 503
     after = client.get("/api/chat/sessions/s_drain1").json()
     assert (after["status"], after["last_error"], after["updated_at"]) == (

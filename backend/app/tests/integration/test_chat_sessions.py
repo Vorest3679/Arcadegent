@@ -144,18 +144,19 @@ def test_chat_session_detail_supports_legacy_route_payload(tmp_path: Path) -> No
     assert "client_location" in body
     assert "view_payload" in body
 
-def test_chat_reuses_session_context(tmp_path: Path) -> None:
-    client = _build_client(tmp_path)
+def test_chat_reuses_session_context(tmp_path: Path, chat_clock) -> None:
+    client = _build_client(tmp_path, chat_clock=chat_clock)
     _stub_provider_adapter(client)
 
-    first_resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
+    first_resp = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma", "page_size": 3})
     assert first_resp.status_code == 200
     first_payload = first_resp.json()
     session_id = first_payload["session_id"]
 
+    chat_clock.advance()  # Pass the submission cooldown without sleeping.
     second_resp = client.post(
         "/api/chat",
-        json={"session_id": session_id, "message": "continue with previous result"},
+        json={"client_id": "test-client", "session_id": session_id, "message": "continue with previous result"},
     )
     assert second_resp.status_code == 200
     second_payload = second_resp.json()
@@ -194,7 +195,7 @@ def test_chat_sessions_survive_app_restart(tmp_path: Path) -> None:
     client = _build_client(tmp_path, session_store=shared_store)
     _stub_provider_adapter(client)
 
-    first_resp = client.post("/api/chat", json={"message": "find Gamma", "page_size": 3})
+    first_resp = client.post("/api/chat", json={"client_id": "test-client", "message": "find Gamma", "page_size": 3})
     assert first_resp.status_code == 200
     session_id = first_resp.json()["session_id"]
 
@@ -216,8 +217,8 @@ def test_chat_sessions_survive_app_restart(tmp_path: Path) -> None:
     assert detail["turns"][0]["role"] == "user"
     assert detail["turns"][-1]["role"] == "assistant"
 
-def test_chat_sessions_are_scoped_by_client_id(tmp_path: Path) -> None:
-    client = _build_client(tmp_path)
+def test_chat_sessions_are_scoped_by_client_id(tmp_path: Path, chat_clock) -> None:
+    client = _build_client(tmp_path, chat_clock=chat_clock)
 
     first_resp = client.post(
         "/api/chat",
@@ -226,6 +227,7 @@ def test_chat_sessions_are_scoped_by_client_id(tmp_path: Path) -> None:
     assert first_resp.status_code == 200
     first_session_id = first_resp.json()["session_id"]
 
+    chat_clock.advance()  # Pass the submission cooldown without sleeping.
     second_resp = client.post(
         "/api/chat",
         json={"client_id": "client-b", "message": "find Gamma", "page_size": 3},
@@ -247,6 +249,7 @@ def test_chat_sessions_are_scoped_by_client_id(tmp_path: Path) -> None:
     )
     assert wrong_detail_resp.status_code == 404
 
+    chat_clock.advance()  # Pass the submission cooldown without sleeping.
     wrong_continue_resp = client.post(
         "/api/chat",
         json={
@@ -273,7 +276,7 @@ def test_chat_dispatch_runs_in_background(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
     _stub_provider_adapter(client)
 
-    dispatch_resp = client.post("/api/chat/sessions", json={"message": "find Gamma", "page_size": 3})
+    dispatch_resp = client.post("/api/chat/sessions", json={"client_id": "test-client", "message": "find Gamma", "page_size": 3})
     assert dispatch_resp.status_code == 202
     dispatch_payload = dispatch_resp.json()
     session_id = dispatch_payload["session_id"]
@@ -292,8 +295,8 @@ def test_chat_dispatch_runs_in_background(tmp_path: Path) -> None:
     session_row = next(row for row in sessions if row["session_id"] == session_id)
     assert session_row["status"] == "completed"
 
-def test_chat_dispatch_rejects_duplicate_running_session(tmp_path: Path) -> None:
-    client = _build_client(tmp_path)
+def test_chat_dispatch_rejects_duplicate_running_session(tmp_path: Path, chat_clock) -> None:
+    client = _build_client(tmp_path, chat_clock=chat_clock)
     _stub_provider_adapter(client)
     runtime = client.app.state.container.react_runtime
     original_run_chat = runtime.run_chat
@@ -307,20 +310,21 @@ def test_chat_dispatch_rejects_duplicate_running_session(tmp_path: Path) -> None
     session_id = "s_duplicate123"
     first_resp = client.post(
         "/api/chat/sessions",
-        json={"session_id": session_id, "message": "find Gamma", "page_size": 3},
+        json={"client_id": "test-client", "session_id": session_id, "message": "find Gamma", "page_size": 3},
     )
     assert first_resp.status_code == 202
 
+    chat_clock.advance()  # Pass the submission cooldown without sleeping.
     second_resp = client.post(
         "/api/chat/sessions",
-        json={"session_id": session_id, "message": "find Gamma again", "page_size": 3},
+        json={"client_id": "test-client", "session_id": session_id, "message": "find Gamma again", "page_size": 3},
     )
     assert second_resp.status_code == 409
 
     _wait_for_session_status(client, session_id, "completed")
 
-def test_cancel_running_chat_preserves_context_for_the_next_input(tmp_path: Path) -> None:
-    client = _build_client(tmp_path)
+def test_cancel_running_chat_preserves_context_for_the_next_input(tmp_path: Path, chat_clock) -> None:
+    client = _build_client(tmp_path, chat_clock=chat_clock)
     adapter = client.app.state.container.react_runtime._provider_adapter
 
     async def slow_complete(*, instructions, messages, tools, runtime_hints=None):
@@ -331,7 +335,7 @@ def test_cancel_running_chat_preserves_context_for_the_next_input(tmp_path: Path
     session_id = "s_cancelled123"
     first = client.post(
         "/api/chat/sessions",
-        json={"session_id": session_id, "message": "find Gamma", "page_size": 3},
+        json={"client_id": "test-client", "session_id": session_id, "message": "find Gamma", "page_size": 3},
     )
     assert first.status_code == 202
 
@@ -343,9 +347,10 @@ def test_cancel_running_chat_preserves_context_for_the_next_input(tmp_path: Path
     assert [turn["content"] for turn in cancelled_detail["turns"]] == ["find Gamma"]
 
     _stub_provider_adapter(client, reply="continued from saved context")
+    chat_clock.advance()  # Pass the submission cooldown without sleeping.
     second = client.post(
         "/api/chat/sessions",
-        json={"session_id": session_id, "message": "continue", "page_size": 3},
+        json={"client_id": "test-client", "session_id": session_id, "message": "continue", "page_size": 3},
     )
     assert second.status_code == 202
     completed = _wait_for_session_status(client, session_id, "completed")
@@ -359,7 +364,7 @@ def test_session_detail_hides_model_evidence_turns(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
     _stub_provider_adapter(client, reply="only show once")
 
-    response = client.post("/api/chat", json={"session_id": "s_visible123", "message": "hello"})
+    response = client.post("/api/chat", json={"client_id": "test-client", "session_id": "s_visible123", "message": "hello"})
     assert response.status_code == 200
     detail = client.get("/api/chat/sessions/s_visible123").json()
     assert [turn["content"] for turn in detail["turns"]] == ["hello", "only show once"]
