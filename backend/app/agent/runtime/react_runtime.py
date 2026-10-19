@@ -384,11 +384,20 @@ class ReactRuntime:
                     "memory": state.working_memory,
                 },
             )
+            # A text response without tool calls becomes the final reply, which
+            # is persisted as its own assistant turn. Mark the evidence so the
+            # context projection does not replay the same text twice.
+            final_reply = (
+                model_response.error is None
+                and not model_response.tool_calls
+                and bool((model_response.text or "").strip())
+            )
             self._record_model_call(
                 state=state,
                 response=model_response,
                 agent_name=profile.name,
                 step=step,
+                final_reply=final_reply,
             )
             if model_response.response_id:
                 state.previous_response_id = model_response.response_id
@@ -474,8 +483,14 @@ class ReactRuntime:
         agent_name: str,
         step: int,
         worker_run_id: str | None = None,
+        final_reply: bool = False,
     ) -> None:
-        """Persist per-call model evidence: transcript, usage, status and raw tool-call arguments."""
+        """Persist per-call model evidence: transcript, usage, status and raw tool-call arguments.
+
+        ``final_reply`` marks the evidence whose text is also stored as the turn's
+        final assistant reply; the context projection uses that marker to avoid
+        replaying the same text twice.
+        """
         memory = ensure_working_memory_shape(state.working_memory)
         usage_totals = memory.get("usage_totals")
         if not isinstance(usage_totals, dict):
@@ -499,6 +514,35 @@ class ReactRuntime:
                     usage_totals[key] += int(value)
         else:
             usage_totals["usage_missing"] += 1
+        model_payload: dict[str, Any] = {
+            "step": step,
+            "protocol": response.protocol,
+            "reported_model": response.reported_model,
+            "response_id": response.response_id,
+            "status": response.status,
+            "finish_reason": response.finish_reason,
+            "error": deepcopy(response.error),
+            "usage": deepcopy(response.usage),
+            "raw_usage": deepcopy(response.raw_usage),
+            "provider_ttft_ms": response.provider_ttft_ms,
+            "duration_ms": response.duration_ms,
+            "stream_mode": response.stream_mode,
+            "transcript": deepcopy(response.transcript),
+            "tool_calls": [
+                {
+                    "call_id": call.call_id,
+                    "name": call.name,
+                    "arguments": deepcopy(call.arguments),
+                    "raw_arguments": deepcopy(call.raw_arguments),
+                    "parse_error": call.parse_error,
+                }
+                for call in response.tool_calls
+            ],
+        }
+        if final_reply:
+            # Keep the raw evidence, but tell the context projection that the
+            # final assistant turn owns this text.
+            model_payload["final_reply"] = True
         self._append_turn(
             state,
             AgentTurn(
@@ -507,33 +551,7 @@ class ReactRuntime:
                 agent=agent_name,
                 worker_run_id=worker_run_id,
                 scope="worker" if worker_run_id else "conversation",
-                payload={
-                    "model": {
-                        "step": step,
-                        "protocol": response.protocol,
-                        "reported_model": response.reported_model,
-                        "response_id": response.response_id,
-                        "status": response.status,
-                        "finish_reason": response.finish_reason,
-                        "error": deepcopy(response.error),
-                        "usage": deepcopy(response.usage),
-                        "raw_usage": deepcopy(response.raw_usage),
-                        "provider_ttft_ms": response.provider_ttft_ms,
-                        "duration_ms": response.duration_ms,
-                        "stream_mode": response.stream_mode,
-                        "transcript": deepcopy(response.transcript),
-                        "tool_calls": [
-                            {
-                                "call_id": call.call_id,
-                                "name": call.name,
-                                "arguments": deepcopy(call.arguments),
-                                "raw_arguments": deepcopy(call.raw_arguments),
-                                "parse_error": call.parse_error,
-                            }
-                            for call in response.tool_calls
-                        ],
-                    }
-                },
+                payload={"model": model_payload},
             ),
             persist=False,
         )

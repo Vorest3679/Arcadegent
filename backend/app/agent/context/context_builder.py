@@ -289,8 +289,14 @@ class ContextBuilder:
         return "\n".join(lines)
 
     def _tail_turns(self, turns: list[AgentTurn], *, scope: str) -> list[AgentTurn]:
-        scoped_turns = [turn for turn in turns if turn.scope == scope
-                        and not (turn.payload.get("model") or {}).get("error")]
+        scoped_turns: list[AgentTurn] = []
+        for index, turn in enumerate(turns):
+            if turn.scope != scope or not self._is_context_evidence(turn):
+                continue
+            following = turns[index + 1] if index + 1 < len(turns) else None
+            if self._is_legacy_final_evidence(turn, following):
+                continue
+            scoped_turns.append(turn)
         if len(scoped_turns) <= self._history_turn_limit:
             return scoped_turns
         start = len(scoped_turns) - self._history_turn_limit
@@ -298,6 +304,43 @@ class ContextBuilder:
         while start > 0 and scoped_turns[start].role != "user":
             start -= 1
         return scoped_turns[start:]
+
+    @staticmethod
+    def _is_context_evidence(turn: AgentTurn) -> bool:
+        """Decide whether a stored turn belongs in the model message history.
+
+        Failed model calls carry no usable assistant message. A model call whose
+        text became the run's final reply is also represented by the dedicated
+        final assistant turn; replaying its evidence would duplicate the same
+        text in the next request.
+        """
+        model = turn.payload.get("model") if isinstance(turn.payload, dict) else None
+        if not isinstance(model, dict):
+            return True
+        return not model.get("error") and not model.get("final_reply")
+
+    @staticmethod
+    def _is_legacy_final_evidence(turn: AgentTurn, following: AgentTurn | None) -> bool:
+        """Drop a final-reply duplicate persisted before the ``final_reply`` marker.
+
+        Older sessions store the same text in a model-evidence turn and in the
+        immediately following final assistant turn. Only that exact pair is
+        skipped; evidence with tool calls stays for protocol pairing.
+        """
+        if turn.role != "assistant" or turn.scope != "conversation" or following is None:
+            return False
+        model = turn.payload.get("model") if isinstance(turn.payload, dict) else None
+        if not isinstance(model, dict) or model.get("error") or model.get("tool_calls"):
+            return False
+        if not turn.content.strip():
+            return False
+        return (
+            following.role == "assistant"
+            and following.scope == turn.scope
+            and isinstance(following.payload, dict)
+            and following.payload.get("final") is True
+            and following.content.strip() == turn.content.strip()
+        )
 
     def _to_model_message(self, turn: AgentTurn) -> dict[str, Any]:
         if turn.role == "tool":

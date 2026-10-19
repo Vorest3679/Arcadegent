@@ -84,6 +84,17 @@ End          assistant.completed(out_B, reply="Found Gamma.")
 
 When the frontend receives the first token of `out_B`, it freezes `out_A` as an intermediate reply.
 
+### Final reply in model context
+
+Every model call writes a `payload.model` evidence turn (transcript, usage, tool arguments); the final text also gets a separate `payload.final` assistant turn for the UI and history recovery. To keep the next request from sending the same final text twice, `_record_model_call` marks this evidence with `payload.model.final_reply = true`, and `ContextBuilder._tail_turns` skips that evidence turn when projecting model history:
+
+```text
+persisted:           user → assistant(evidence, final_reply=true) → assistant(final)
+next model messages: user → assistant(final)
+```
+
+Only final-reply evidence is skipped: the marker is checked first, and for older sessions persisted before the marker, a tool-call-free evidence turn whose text matches the immediately following final turn is skipped by the same rule. Model evidence with tool calls, its paired tool turns, the failed-call filter, and worker-scope isolation are unchanged; transcript and usage remain in session state but are not replayed into model messages.
+
 Known trade-offs:
 
 - If the model fails mid-call, the partial text already sent stays on screen, and the fallback text then appears under a new output_id.

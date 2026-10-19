@@ -84,6 +84,17 @@ publish("assistant.completed" or "session.failed", {"reply": final_text, ...}, o
 
 フロントエンドは `out_B` の最初の token を受け取った時点で、`out_A` を「中間応答」として確定表示します。
 
+### モデルコンテキスト内の最終応答
+
+モデル呼び出しごとに `payload.model` の evidence ターン（transcript、usage、ツール引数）が書き込まれ、最終テキストは UI と履歴復元のために別の `payload.final` assistant ターンとしても保存されます。次のリクエストで同じ最終テキストを二重に送らないよう、`_record_model_call` はこの evidence に `payload.model.final_reply = true` を付け、`ContextBuilder._tail_turns` はモデル履歴の投影時にその evidence ターンを除外します。
+
+```text
+保存:             user → assistant(evidence, final_reply=true) → assistant(final)
+次回のモデル入力: user → assistant(final)
+```
+
+除外されるのはこの最終応答の evidence だけです。まず `final_reply` マーカーを確認し、マーカー導入前に保存された古いセッションでは、ツール呼び出しを含まず、直後の final ターンとテキストが一致する evidence を同じ規則で除外します。ツール呼び出しを含むモデル evidence、対応する tool ターン、失敗したモデル呼び出しの除外規則、worker scope の分離は変わりません。transcript と usage はセッション状態に残りますが、モデルメッセージには再投影されません。
+
 既知のトレードオフ：
 
 - モデルが途中で失敗した場合、送信済みの部分テキストは画面に残り、その後フォールバック文言が新しい output_id で表示されます。

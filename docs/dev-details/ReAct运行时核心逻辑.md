@@ -84,6 +84,17 @@ publish("assistant.completed" or "session.failed", {"reply": final_text, ...}, o
 
 前端收到 `out_B` 的第一条 token 时，把 `out_A` 定格为“中间回复”。
 
+### 模型上下文中的最终回复
+
+每次模型调用都会写入一条 `payload.model` 证据回合（transcript、usage、工具参数）；最终文本还会另写一条 `payload.final` 的 assistant 回合，供界面与历史恢复使用。为避免下一轮请求把同一段最终文本发送两次，`_record_model_call` 在这段证据上标记 `payload.model.final_reply = true`，`ContextBuilder._tail_turns` 投影模型历史时跳过该证据回合：
+
+```text
+持久化：user → assistant(evidence, final_reply=true) → assistant(final)
+下一轮模型消息：user → assistant(final)
+```
+
+只有这种最终回复证据会被跳过：优先看 `final_reply` 标记；对标记出现前已持久化的旧会话，如果无工具调用的证据文本与紧随其后的 final 回合一致，也按同一规则跳过。带工具调用的模型证据、与之配对的 tool 回合、失败的模型调用过滤规则以及 worker scope 的隔离都不变；transcript 与 usage 仍保存在会话状态中，只是不重复进入模型消息。
+
 已知取舍：
 
 - 模型中途出错时，已发出的部分文本仍留在界面上，随后兜底文案以新的 output_id 出现。
