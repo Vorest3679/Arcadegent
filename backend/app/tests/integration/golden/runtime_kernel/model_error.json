@@ -1,0 +1,221 @@
+{
+  "detail": {
+    "active_subagent": "main_agent",
+    "client_location": null,
+    "created_at": "<volatile>",
+    "current_run": {
+      "run_id": "<run1>",
+      "status": "completed"
+    },
+    "destination": null,
+    "intent": "search",
+    "last_error": "fixture outage",
+    "reply": "请求已处理，但工具执行失败：fixture outage",
+    "route": null,
+    "session_id": "<s1>",
+    "shops": [],
+    "status": "failed",
+    "turn_count": 2,
+    "turns": [
+      {
+        "call_id": null,
+        "content": "find Gamma",
+        "created_at": "<volatile>",
+        "map_artifacts": null,
+        "name": null,
+        "role": "user",
+        "steps": []
+      },
+      {
+        "call_id": null,
+        "content": "请求已处理，但工具执行失败：fixture outage",
+        "created_at": "<volatile>",
+        "map_artifacts": null,
+        "name": null,
+        "role": "assistant",
+        "steps": []
+      }
+    ],
+    "updated_at": "<volatile>",
+    "view_payload": null
+  },
+  "runs": [
+    {
+      "events": [
+        {
+          "data": {},
+          "event": "run.state",
+          "kind": "control",
+          "status": "running"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "intent": "search",
+            "model": "react-runtime"
+          },
+          "event": "session.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "reason": "session.started",
+            "to_subagent": "main_agent"
+          },
+          "event": "subagent.changed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "delta": "请求已处理，但工具执行失败：fixture outage",
+            "stream_mode": "synthetic"
+          },
+          "event": "assistant.token",
+          "kind": "event",
+          "output_id": "<out1>"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "error": "fixture outage",
+            "model_error": {
+              "message": "fixture outage",
+              "type": "provider_error"
+            },
+            "reply": "请求已处理，但工具执行失败：fixture outage",
+            "reply_source": "fallback"
+          },
+          "event": "session.failed",
+          "kind": "event",
+          "output_id": "<out1>"
+        },
+        {
+          "data": {},
+          "event": "run.state",
+          "kind": "control",
+          "status": "completed"
+        }
+      ],
+      "response": {
+        "intent": "search",
+        "reply": "请求已处理，但工具执行失败：fixture outage",
+        "route": null,
+        "run_id": "<run1>",
+        "session_id": "<s1>",
+        "shops": []
+      }
+    }
+  ],
+  "state": {
+    "active_subagent": "main_agent",
+    "intent": "search",
+    "last_error": "fixture outage",
+    "status": "failed",
+    "turn_index": 1,
+    "turns": [
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "find Gamma",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "city_code": null,
+          "client_id": "test-client",
+          "county_code": null,
+          "intent": null,
+          "keyword": null,
+          "location": null,
+          "message": "find Gamma",
+          "page_size": 5,
+          "province_code": null,
+          "session_id": "<s1>",
+          "shop_id": null
+        },
+        "role": "user",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "model": {
+            "duration_ms": null,
+            "error": {
+              "message": "fixture outage",
+              "type": "provider_error"
+            },
+            "finish_reason": null,
+            "protocol": null,
+            "provider_ttft_ms": null,
+            "raw_usage": null,
+            "reported_model": null,
+            "response_id": null,
+            "status": "failed",
+            "step": 1,
+            "stream_mode": "synthetic",
+            "tool_calls": [],
+            "transcript": {},
+            "usage": {}
+          }
+        },
+        "role": "assistant",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "请求已处理，但工具执行失败：fixture outage",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "final": true,
+          "map_artifacts": null,
+          "reply_source": "fallback"
+        },
+        "role": "assistant",
+        "scope": "conversation",
+        "worker_run_id": null
+      }
+    ],
+    "working_memory": {
+      "artifacts": {},
+      "keyword": "Gamma",
+      "last_error": {
+        "message": "fixture outage",
+        "source": "model",
+        "type": "provider_error"
+      },
+      "last_request": {
+        "city_code": null,
+        "client_id": "test-client",
+        "county_code": null,
+        "intent": null,
+        "keyword": null,
+        "location": null,
+        "message": "find Gamma",
+        "page_size": 5,
+        "province_code": null,
+        "session_id": "<s1>",
+        "shop_id": null
+      },
+      "reply": "请求已处理，但工具执行失败：fixture outage",
+      "usage_totals": {
+        "cached_input_tokens": 0,
+        "calls": 1,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "usage_missing": 1
+      },
+      "worker_runs": []
+    }
+  }
+}

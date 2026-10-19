@@ -1,0 +1,492 @@
+{
+  "detail": {
+    "active_subagent": "main_agent",
+    "client_location": null,
+    "created_at": "<volatile>",
+    "current_run": {
+      "run_id": "<run1>",
+      "status": "completed"
+    },
+    "destination": null,
+    "intent": "search",
+    "last_error": "agent exhausted its step budget",
+    "reply": "已收到请求，但暂时没有找到和“Gamma”相关的结果，可以换个关键词试试。",
+    "route": null,
+    "session_id": "<s1>",
+    "shops": [],
+    "status": "failed",
+    "turn_count": 2,
+    "turns": [
+      {
+        "call_id": null,
+        "content": "find Gamma",
+        "created_at": "<volatile>",
+        "map_artifacts": null,
+        "name": null,
+        "role": "user",
+        "steps": [
+          {
+            "agent": "main_agent",
+            "call_id": "ls0",
+            "created_at": "<volatile>",
+            "kind": "tool",
+            "name": "list_skills",
+            "status": "completed"
+          },
+          {
+            "agent": "main_agent",
+            "call_id": "ls1",
+            "created_at": "<volatile>",
+            "kind": "tool",
+            "name": "list_skills",
+            "status": "completed"
+          },
+          {
+            "agent": "main_agent",
+            "call_id": "ls2",
+            "created_at": "<volatile>",
+            "kind": "tool",
+            "name": "list_skills",
+            "status": "completed"
+          }
+        ]
+      },
+      {
+        "call_id": null,
+        "content": "已收到请求，但暂时没有找到和“Gamma”相关的结果，可以换个关键词试试。",
+        "created_at": "<volatile>",
+        "map_artifacts": null,
+        "name": null,
+        "role": "assistant",
+        "steps": []
+      }
+    ],
+    "updated_at": "<volatile>",
+    "view_payload": null
+  },
+  "runs": [
+    {
+      "events": [
+        {
+          "data": {},
+          "event": "run.state",
+          "kind": "control",
+          "status": "running"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "intent": "search",
+            "model": "react-runtime"
+          },
+          "event": "session.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "reason": "session.started",
+            "to_subagent": "main_agent"
+          },
+          "event": "subagent.changed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "call_id": "ls0",
+            "tool": "list_skills",
+            "worker_run_id": null
+          },
+          "event": "tool.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "call_id": "ls0",
+            "tool": "list_skills",
+            "worker_run_id": null
+          },
+          "event": "tool.completed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "call_id": "ls1",
+            "tool": "list_skills",
+            "worker_run_id": null
+          },
+          "event": "tool.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "call_id": "ls1",
+            "tool": "list_skills",
+            "worker_run_id": null
+          },
+          "event": "tool.completed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "call_id": "ls2",
+            "tool": "list_skills",
+            "worker_run_id": null
+          },
+          "event": "tool.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "call_id": "ls2",
+            "tool": "list_skills",
+            "worker_run_id": null
+          },
+          "event": "tool.completed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "delta": "已收到请求，但暂时没有找到和“Gamma”相关的结果，可以换个关键词试试。",
+            "stream_mode": "synthetic"
+          },
+          "event": "assistant.token",
+          "kind": "event",
+          "output_id": "<out1>"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "error": "agent exhausted its step budget",
+            "model_error": {
+              "message": "agent exhausted its step budget",
+              "type": "step_limit"
+            },
+            "reply": "已收到请求，但暂时没有找到和“Gamma”相关的结果，可以换个关键词试试。",
+            "reply_source": "fallback"
+          },
+          "event": "session.failed",
+          "kind": "event",
+          "output_id": "<out1>"
+        },
+        {
+          "data": {},
+          "event": "run.state",
+          "kind": "control",
+          "status": "completed"
+        }
+      ],
+      "response": {
+        "intent": "search",
+        "reply": "已收到请求，但暂时没有找到和“Gamma”相关的结果，可以换个关键词试试。",
+        "route": null,
+        "run_id": "<run1>",
+        "session_id": "<s1>",
+        "shops": []
+      }
+    }
+  ],
+  "state": {
+    "active_subagent": "main_agent",
+    "intent": "search",
+    "last_error": "agent exhausted its step budget",
+    "status": "failed",
+    "turn_index": 1,
+    "turns": [
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "find Gamma",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "city_code": null,
+          "client_id": "test-client",
+          "county_code": null,
+          "intent": null,
+          "keyword": null,
+          "location": null,
+          "message": "find Gamma",
+          "page_size": 5,
+          "province_code": null,
+          "session_id": "<s1>",
+          "shop_id": null
+        },
+        "role": "user",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "model": {
+            "duration_ms": null,
+            "error": null,
+            "finish_reason": null,
+            "protocol": null,
+            "provider_ttft_ms": null,
+            "raw_usage": null,
+            "reported_model": null,
+            "response_id": null,
+            "status": null,
+            "step": 1,
+            "stream_mode": "synthetic",
+            "tool_calls": [
+              {
+                "arguments": {},
+                "call_id": "ls0",
+                "name": "list_skills",
+                "parse_error": null,
+                "raw_arguments": null
+              }
+            ],
+            "transcript": {},
+            "usage": {}
+          }
+        },
+        "role": "assistant",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": "ls0",
+        "content": "{\"skills\": [{\"name\": \"navigation-result-reading\", \"description\": \"Interpret route distances, durations, and destinations. Use when context_payload includes route.\"}, {\"name\": \"response-composition\", \"description\": \"Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.\"}, {\"name\": \"search-result-reading\", \"description\": \"Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.\"}]}",
+        "created_at": "<volatile>",
+        "name": "list_skills",
+        "payload": {
+          "argument_evidence": {
+            "hydrated_fields": [],
+            "parse_error": null,
+            "parsed_arguments": {},
+            "preparation_error": null,
+            "prepared_arguments": {},
+            "raw_arguments": null
+          },
+          "arguments": {},
+          "result": {
+            "skills": [
+              {
+                "description": "Interpret route distances, durations, and destinations. Use when context_payload includes route.",
+                "name": "navigation-result-reading"
+              },
+              {
+                "description": "Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.",
+                "name": "response-composition"
+              },
+              {
+                "description": "Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.",
+                "name": "search-result-reading"
+              }
+            ]
+          },
+          "status": "completed"
+        },
+        "role": "tool",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "model": {
+            "duration_ms": null,
+            "error": null,
+            "finish_reason": null,
+            "protocol": null,
+            "provider_ttft_ms": null,
+            "raw_usage": null,
+            "reported_model": null,
+            "response_id": null,
+            "status": null,
+            "step": 2,
+            "stream_mode": "synthetic",
+            "tool_calls": [
+              {
+                "arguments": {},
+                "call_id": "ls1",
+                "name": "list_skills",
+                "parse_error": null,
+                "raw_arguments": null
+              }
+            ],
+            "transcript": {},
+            "usage": {}
+          }
+        },
+        "role": "assistant",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": "ls1",
+        "content": "{\"skills\": [{\"name\": \"navigation-result-reading\", \"description\": \"Interpret route distances, durations, and destinations. Use when context_payload includes route.\"}, {\"name\": \"response-composition\", \"description\": \"Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.\"}, {\"name\": \"search-result-reading\", \"description\": \"Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.\"}]}",
+        "created_at": "<volatile>",
+        "name": "list_skills",
+        "payload": {
+          "argument_evidence": {
+            "hydrated_fields": [],
+            "parse_error": null,
+            "parsed_arguments": {},
+            "preparation_error": null,
+            "prepared_arguments": {},
+            "raw_arguments": null
+          },
+          "arguments": {},
+          "result": {
+            "skills": [
+              {
+                "description": "Interpret route distances, durations, and destinations. Use when context_payload includes route.",
+                "name": "navigation-result-reading"
+              },
+              {
+                "description": "Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.",
+                "name": "response-composition"
+              },
+              {
+                "description": "Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.",
+                "name": "search-result-reading"
+              }
+            ]
+          },
+          "status": "completed"
+        },
+        "role": "tool",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "model": {
+            "duration_ms": null,
+            "error": null,
+            "finish_reason": null,
+            "protocol": null,
+            "provider_ttft_ms": null,
+            "raw_usage": null,
+            "reported_model": null,
+            "response_id": null,
+            "status": null,
+            "step": 3,
+            "stream_mode": "synthetic",
+            "tool_calls": [
+              {
+                "arguments": {},
+                "call_id": "ls2",
+                "name": "list_skills",
+                "parse_error": null,
+                "raw_arguments": null
+              }
+            ],
+            "transcript": {},
+            "usage": {}
+          }
+        },
+        "role": "assistant",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": "ls2",
+        "content": "{\"skills\": [{\"name\": \"navigation-result-reading\", \"description\": \"Interpret route distances, durations, and destinations. Use when context_payload includes route.\"}, {\"name\": \"response-composition\", \"description\": \"Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.\"}, {\"name\": \"search-result-reading\", \"description\": \"Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.\"}]}",
+        "created_at": "<volatile>",
+        "name": "list_skills",
+        "payload": {
+          "argument_evidence": {
+            "hydrated_fields": [],
+            "parse_error": null,
+            "parsed_arguments": {},
+            "preparation_error": null,
+            "prepared_arguments": {},
+            "raw_arguments": null
+          },
+          "arguments": {},
+          "result": {
+            "skills": [
+              {
+                "description": "Interpret route distances, durations, and destinations. Use when context_payload includes route.",
+                "name": "navigation-result-reading"
+              },
+              {
+                "description": "Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.",
+                "name": "response-composition"
+              },
+              {
+                "description": "Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.",
+                "name": "search-result-reading"
+              }
+            ]
+          },
+          "status": "completed"
+        },
+        "role": "tool",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "已收到请求，但暂时没有找到和“Gamma”相关的结果，可以换个关键词试试。",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "final": true,
+          "map_artifacts": null,
+          "reply_source": "fallback"
+        },
+        "role": "assistant",
+        "scope": "conversation",
+        "worker_run_id": null
+      }
+    ],
+    "working_memory": {
+      "artifacts": {},
+      "keyword": "Gamma",
+      "last_request": {
+        "city_code": null,
+        "client_id": "test-client",
+        "county_code": null,
+        "intent": null,
+        "keyword": null,
+        "location": null,
+        "message": "find Gamma",
+        "page_size": 5,
+        "province_code": null,
+        "session_id": "<s1>",
+        "shop_id": null
+      },
+      "reply": "已收到请求，但暂时没有找到和“Gamma”相关的结果，可以换个关键词试试。",
+      "usage_totals": {
+        "cached_input_tokens": 0,
+        "calls": 3,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "usage_missing": 3
+      },
+      "worker_runs": []
+    }
+  }
+}

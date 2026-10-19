@@ -1,0 +1,2431 @@
+{
+  "detail": {
+    "active_subagent": "main_agent",
+    "client_location": null,
+    "created_at": "<volatile>",
+    "current_run": {
+      "run_id": "<run1>",
+      "status": "completed"
+    },
+    "destination": {
+      "address": "Test Address",
+      "arcade_count": 1,
+      "city_code": "110100000000",
+      "city_name": "Beijing",
+      "county_code": "110101000000",
+      "county_name": "Dongcheng",
+      "distance_m": null,
+      "ea_status": null,
+      "end_time": null,
+      "fav_count": null,
+      "geo": {
+        "gcj02": null,
+        "precision": "exact",
+        "source": "catalog",
+        "wgs84": {
+          "coord_system": "wgs84",
+          "lat": 39.90923,
+          "lng": 116.397428,
+          "precision": "exact",
+          "source": "catalog"
+        }
+      },
+      "locked": null,
+      "name": "Gamma Arcade",
+      "name_pinyin": null,
+      "pay_type": null,
+      "price": null,
+      "province_code": "110000000000",
+      "province_name": "Beijing",
+      "source": "bemanicn",
+      "source_id": 10,
+      "source_url": "https://map.bemanicn.com/s/10",
+      "start_time": null,
+      "status": null,
+      "transport": null,
+      "type": null,
+      "updated_at": "<volatile>"
+    },
+    "intent": "navigate",
+    "last_error": null,
+    "reply": "步行路线已经规划完成。",
+    "route": {
+      "degraded": false,
+      "destination": {
+        "coord_system": "gcj02",
+        "lat": 39.905,
+        "lng": 116.32,
+        "precision": "approx",
+        "source": "route"
+      },
+      "distance_m": 1350,
+      "duration_s": 960,
+      "hint": null,
+      "mode": "walking",
+      "origin": {
+        "coord_system": "gcj02",
+        "lat": 39.9,
+        "lng": 116.3,
+        "precision": "approx",
+        "source": "client"
+      },
+      "polyline": [
+        {
+          "coord_system": "gcj02",
+          "lat": 39.9,
+          "lng": 116.3,
+          "precision": "approx",
+          "source": "route"
+        },
+        {
+          "coord_system": "gcj02",
+          "lat": 39.901,
+          "lng": 116.31,
+          "precision": "approx",
+          "source": "route"
+        },
+        {
+          "coord_system": "gcj02",
+          "lat": 39.901,
+          "lng": 116.31,
+          "precision": "approx",
+          "source": "route"
+        },
+        {
+          "coord_system": "gcj02",
+          "lat": 39.905,
+          "lng": 116.32,
+          "precision": "approx",
+          "source": "route"
+        }
+      ],
+      "provider": "amap",
+      "route_kind": "provider"
+    },
+    "session_id": "<s1>",
+    "shops": [
+      {
+        "address": "Test Address",
+        "arcade_count": 1,
+        "city_code": "110100000000",
+        "city_name": "Beijing",
+        "county_code": "110101000000",
+        "county_name": "Dongcheng",
+        "distance_m": null,
+        "ea_status": null,
+        "end_time": null,
+        "fav_count": null,
+        "geo": {
+          "gcj02": null,
+          "precision": "exact",
+          "source": "catalog",
+          "wgs84": {
+            "coord_system": "wgs84",
+            "lat": 39.90923,
+            "lng": 116.397428,
+            "precision": "exact",
+            "source": "catalog"
+          }
+        },
+        "locked": null,
+        "name": "Gamma Arcade",
+        "name_pinyin": null,
+        "pay_type": null,
+        "price": null,
+        "province_code": "110000000000",
+        "province_name": "Beijing",
+        "source": "bemanicn",
+        "source_id": 10,
+        "source_url": "https://map.bemanicn.com/s/10",
+        "start_time": null,
+        "status": null,
+        "transport": null,
+        "type": null,
+        "updated_at": "<volatile>"
+      }
+    ],
+    "status": "completed",
+    "turn_count": 2,
+    "turns": [
+      {
+        "call_id": null,
+        "content": "从起点走到 Gamma Arcade",
+        "created_at": "<volatile>",
+        "map_artifacts": null,
+        "name": null,
+        "role": "user",
+        "steps": [
+          {
+            "agent": "navigation_worker",
+            "call_id": "dest",
+            "created_at": "<volatile>",
+            "kind": "tool",
+            "name": "db_query_tool",
+            "status": "completed"
+          },
+          {
+            "agent": "navigation_worker",
+            "call_id": "geo",
+            "created_at": "<volatile>",
+            "kind": "tool",
+            "name": "geo_resolve_tool",
+            "status": "completed"
+          },
+          {
+            "agent": "navigation_worker",
+            "call_id": "route",
+            "created_at": "<volatile>",
+            "kind": "tool",
+            "name": "route_plan_tool",
+            "status": "completed"
+          },
+          {
+            "agent": "main_agent",
+            "call_id": "w1",
+            "created_at": "<volatile>",
+            "kind": "tool",
+            "name": "invoke_worker",
+            "status": "completed"
+          }
+        ]
+      },
+      {
+        "call_id": null,
+        "content": "步行路线已经规划完成。",
+        "created_at": "<volatile>",
+        "map_artifacts": {
+          "client_location": null,
+          "destination": {
+            "address": "Test Address",
+            "arcade_count": 1,
+            "city_code": "110100000000",
+            "city_name": "Beijing",
+            "county_code": "110101000000",
+            "county_name": "Dongcheng",
+            "distance_m": null,
+            "ea_status": null,
+            "end_time": null,
+            "fav_count": null,
+            "geo": {
+              "gcj02": null,
+              "precision": "exact",
+              "source": "catalog",
+              "wgs84": {
+                "coord_system": "wgs84",
+                "lat": 39.90923,
+                "lng": 116.397428,
+                "precision": "exact",
+                "source": "catalog"
+              }
+            },
+            "locked": null,
+            "name": "Gamma Arcade",
+            "name_pinyin": null,
+            "pay_type": null,
+            "price": null,
+            "province_code": "110000000000",
+            "province_name": "Beijing",
+            "source": "bemanicn",
+            "source_id": 10,
+            "source_url": "https://map.bemanicn.com/s/10",
+            "start_time": null,
+            "status": null,
+            "transport": null,
+            "type": null,
+            "updated_at": "<volatile>"
+          },
+          "route": {
+            "degraded": false,
+            "destination": {
+              "coord_system": "gcj02",
+              "lat": 39.905,
+              "lng": 116.32,
+              "precision": "approx",
+              "source": "route"
+            },
+            "distance_m": 1350,
+            "duration_s": 960,
+            "hint": null,
+            "mode": "walking",
+            "origin": {
+              "coord_system": "gcj02",
+              "lat": 39.9,
+              "lng": 116.3,
+              "precision": "approx",
+              "source": "client"
+            },
+            "polyline": [
+              {
+                "coord_system": "gcj02",
+                "lat": 39.9,
+                "lng": 116.3,
+                "precision": "approx",
+                "source": "route"
+              },
+              {
+                "coord_system": "gcj02",
+                "lat": 39.901,
+                "lng": 116.31,
+                "precision": "approx",
+                "source": "route"
+              },
+              {
+                "coord_system": "gcj02",
+                "lat": 39.901,
+                "lng": 116.31,
+                "precision": "approx",
+                "source": "route"
+              },
+              {
+                "coord_system": "gcj02",
+                "lat": 39.905,
+                "lng": 116.32,
+                "precision": "approx",
+                "source": "route"
+              }
+            ],
+            "provider": "amap",
+            "route_kind": "provider"
+          },
+          "shops": [
+            {
+              "address": "Test Address",
+              "arcade_count": 1,
+              "city_code": "110100000000",
+              "city_name": "Beijing",
+              "county_code": "110101000000",
+              "county_name": "Dongcheng",
+              "distance_m": null,
+              "ea_status": null,
+              "end_time": null,
+              "fav_count": null,
+              "geo": {
+                "gcj02": null,
+                "precision": "exact",
+                "source": "catalog",
+                "wgs84": {
+                  "coord_system": "wgs84",
+                  "lat": 39.90923,
+                  "lng": 116.397428,
+                  "precision": "exact",
+                  "source": "catalog"
+                }
+              },
+              "locked": null,
+              "name": "Gamma Arcade",
+              "name_pinyin": null,
+              "pay_type": null,
+              "price": null,
+              "province_code": "110000000000",
+              "province_name": "Beijing",
+              "source": "bemanicn",
+              "source_id": 10,
+              "source_url": "https://map.bemanicn.com/s/10",
+              "start_time": null,
+              "status": null,
+              "transport": null,
+              "type": null,
+              "updated_at": "<volatile>"
+            }
+          ],
+          "view_payload": null
+        },
+        "name": null,
+        "role": "assistant",
+        "steps": []
+      }
+    ],
+    "updated_at": "<volatile>",
+    "view_payload": null
+  },
+  "runs": [
+    {
+      "events": [
+        {
+          "data": {},
+          "event": "run.state",
+          "kind": "control",
+          "status": "running"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "intent": "search",
+            "model": "react-runtime"
+          },
+          "event": "session.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "reason": "session.started",
+            "to_subagent": "main_agent"
+          },
+          "event": "subagent.changed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "call_id": "w1",
+            "tool": "invoke_worker",
+            "worker_run_id": null
+          },
+          "event": "tool.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "navigation_worker",
+            "from_subagent": "main_agent",
+            "reason": "worker.started",
+            "to_subagent": "navigation_worker",
+            "worker_run_id": "<wrk1>"
+          },
+          "event": "subagent.changed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "navigation_worker",
+            "run_id": "<wrk1>",
+            "task_preview": "从起点步行到 Gamma Arcade",
+            "worker": "navigation_worker"
+          },
+          "event": "worker.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "navigation_worker",
+            "call_id": "dest",
+            "tool": "db_query_tool",
+            "worker_run_id": "<wrk1>"
+          },
+          "event": "tool.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "navigation_worker",
+            "call_id": "dest",
+            "tool": "db_query_tool",
+            "worker_run_id": "<wrk1>"
+          },
+          "event": "tool.completed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "navigation_worker",
+            "call_id": "geo",
+            "tool": "geo_resolve_tool",
+            "worker_run_id": "<wrk1>"
+          },
+          "event": "tool.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "navigation_worker",
+            "call_id": "geo",
+            "tool": "geo_resolve_tool",
+            "worker_run_id": "<wrk1>"
+          },
+          "event": "tool.completed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "navigation_worker",
+            "call_id": "route",
+            "tool": "route_plan_tool",
+            "worker_run_id": "<wrk1>"
+          },
+          "event": "tool.started",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "degraded": false,
+            "destination": {
+              "coord_system": "gcj02",
+              "lat": 39.905,
+              "lng": 116.32,
+              "precision": "approx",
+              "source": "route"
+            },
+            "distance_m": 1350,
+            "duration_s": 960,
+            "hint": null,
+            "mode": "walking",
+            "origin": {
+              "coord_system": "gcj02",
+              "lat": 39.9,
+              "lng": 116.3,
+              "precision": "approx",
+              "source": "client"
+            },
+            "polyline": [
+              {
+                "coord_system": "gcj02",
+                "lat": 39.9,
+                "lng": 116.3,
+                "precision": "approx",
+                "source": "route"
+              },
+              {
+                "coord_system": "gcj02",
+                "lat": 39.901,
+                "lng": 116.31,
+                "precision": "approx",
+                "source": "route"
+              },
+              {
+                "coord_system": "gcj02",
+                "lat": 39.901,
+                "lng": 116.31,
+                "precision": "approx",
+                "source": "route"
+              },
+              {
+                "coord_system": "gcj02",
+                "lat": 39.905,
+                "lng": 116.32,
+                "precision": "approx",
+                "source": "route"
+              }
+            ],
+            "provider": "amap",
+            "route_kind": "provider"
+          },
+          "event": "navigation.route_ready",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "navigation_worker",
+            "call_id": "route",
+            "distance_m": 1350,
+            "tool": "route_plan_tool",
+            "worker_run_id": "<wrk1>"
+          },
+          "event": "tool.completed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "navigation_worker",
+            "run_id": "<wrk1>",
+            "status": "completed",
+            "summary": "route ready",
+            "worker": "navigation_worker"
+          },
+          "event": "worker.completed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "from_subagent": "navigation_worker",
+            "reason": "worker.completed",
+            "to_subagent": "main_agent",
+            "worker_run_id": "<wrk1>"
+          },
+          "event": "subagent.changed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "call_id": "w1",
+            "tool": "invoke_worker",
+            "worker_run_id": null
+          },
+          "event": "tool.completed",
+          "kind": "event"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "delta": "步行路线已经规划完成。",
+            "stream_mode": "synthetic"
+          },
+          "event": "assistant.token",
+          "kind": "event",
+          "output_id": "<out1>"
+        },
+        {
+          "data": {
+            "active_subagent": "main_agent",
+            "error": null,
+            "model_error": null,
+            "reply": "步行路线已经规划完成。",
+            "reply_source": "model"
+          },
+          "event": "assistant.completed",
+          "kind": "event",
+          "output_id": "<out1>"
+        },
+        {
+          "data": {},
+          "event": "run.state",
+          "kind": "control",
+          "status": "completed"
+        }
+      ],
+      "response": {
+        "intent": "navigate",
+        "reply": "步行路线已经规划完成。",
+        "route": {
+          "degraded": false,
+          "destination": {
+            "coord_system": "gcj02",
+            "lat": 39.905,
+            "lng": 116.32,
+            "precision": "approx",
+            "source": "route"
+          },
+          "distance_m": 1350,
+          "duration_s": 960,
+          "hint": null,
+          "mode": "walking",
+          "origin": {
+            "coord_system": "gcj02",
+            "lat": 39.9,
+            "lng": 116.3,
+            "precision": "approx",
+            "source": "client"
+          },
+          "polyline": [
+            {
+              "coord_system": "gcj02",
+              "lat": 39.9,
+              "lng": 116.3,
+              "precision": "approx",
+              "source": "route"
+            },
+            {
+              "coord_system": "gcj02",
+              "lat": 39.901,
+              "lng": 116.31,
+              "precision": "approx",
+              "source": "route"
+            },
+            {
+              "coord_system": "gcj02",
+              "lat": 39.901,
+              "lng": 116.31,
+              "precision": "approx",
+              "source": "route"
+            },
+            {
+              "coord_system": "gcj02",
+              "lat": 39.905,
+              "lng": 116.32,
+              "precision": "approx",
+              "source": "route"
+            }
+          ],
+          "provider": "amap",
+          "route_kind": "provider"
+        },
+        "run_id": "<run1>",
+        "session_id": "<s1>",
+        "shops": [
+          {
+            "address": "Test Address",
+            "arcade_count": 1,
+            "city_code": "110100000000",
+            "city_name": "Beijing",
+            "county_code": "110101000000",
+            "county_name": "Dongcheng",
+            "distance_m": null,
+            "ea_status": null,
+            "end_time": null,
+            "fav_count": null,
+            "geo": {
+              "gcj02": null,
+              "precision": "exact",
+              "source": "catalog",
+              "wgs84": {
+                "coord_system": "wgs84",
+                "lat": 39.90923,
+                "lng": 116.397428,
+                "precision": "exact",
+                "source": "catalog"
+              }
+            },
+            "locked": null,
+            "name": "Gamma Arcade",
+            "name_pinyin": null,
+            "pay_type": null,
+            "price": null,
+            "province_code": "110000000000",
+            "province_name": "Beijing",
+            "source": "bemanicn",
+            "source_id": 10,
+            "source_url": "https://map.bemanicn.com/s/10",
+            "start_time": null,
+            "status": null,
+            "transport": null,
+            "type": null,
+            "updated_at": "<volatile>"
+          }
+        ]
+      }
+    }
+  ],
+  "state": {
+    "active_subagent": "main_agent",
+    "intent": "navigate",
+    "last_error": null,
+    "status": "completed",
+    "turn_index": 1,
+    "turns": [
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "从起点走到 Gamma Arcade",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "city_code": null,
+          "client_id": "test-client",
+          "county_code": null,
+          "intent": null,
+          "keyword": null,
+          "location": null,
+          "message": "从起点走到 Gamma Arcade",
+          "page_size": 5,
+          "province_code": null,
+          "session_id": "<s1>",
+          "shop_id": null
+        },
+        "role": "user",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "model": {
+            "duration_ms": null,
+            "error": null,
+            "finish_reason": null,
+            "protocol": null,
+            "provider_ttft_ms": null,
+            "raw_usage": null,
+            "reported_model": null,
+            "response_id": null,
+            "status": null,
+            "step": 1,
+            "stream_mode": "synthetic",
+            "tool_calls": [
+              {
+                "arguments": {
+                  "task": "从起点步行到 Gamma Arcade",
+                  "worker": "navigation_worker"
+                },
+                "call_id": "w1",
+                "name": "invoke_worker",
+                "parse_error": null,
+                "raw_arguments": null
+              }
+            ],
+            "transcript": {},
+            "usage": {}
+          }
+        },
+        "role": "assistant",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "navigation_worker",
+        "call_id": null,
+        "content": "",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "model": {
+            "duration_ms": null,
+            "error": null,
+            "finish_reason": null,
+            "protocol": null,
+            "provider_ttft_ms": null,
+            "raw_usage": null,
+            "reported_model": null,
+            "response_id": null,
+            "status": null,
+            "step": 1,
+            "stream_mode": "synthetic",
+            "tool_calls": [
+              {
+                "arguments": {
+                  "page": 1,
+                  "page_size": 1,
+                  "shop_id": 10
+                },
+                "call_id": "dest",
+                "name": "db_query_tool",
+                "parse_error": null,
+                "raw_arguments": null
+              }
+            ],
+            "transcript": {},
+            "usage": {}
+          }
+        },
+        "role": "assistant",
+        "scope": "worker",
+        "worker_run_id": "<wrk1>"
+      },
+      {
+        "agent": "navigation_worker",
+        "call_id": "dest",
+        "content": "{\"shop\": {\"source\": \"bemanicn\", \"source_id\": 10, \"source_url\": \"https://map.bemanicn.com/s/10\", \"name\": \"Gamma Arcade\", \"name_pinyin\": null, \"address\": \"Test Address\", \"transport\": null, \"url\": null, \"comment\": null, \"province_code\": \"110000000000\", \"province_name\": \"Beijing\", \"city_code\": \"110100000000\", \"city_name\": \"Beijing\", \"county_code\": \"110101000000\", \"county_name\": \"Dongcheng\", \"status\": null, \"type\": null, \"pay_type\": null, \"locked\": null, \"ea_status\": null, \"price\": null, \"start_time\": null, \"end_time\": null, \"fav_count\": null, \"created_at\": null, \"updated_at\": \"2026-02-20T00:00:00Z\", \"option1\": null, \"option2\": null, \"option3\": null, \"option4\": null, \"option5\": null, \"collab\": null, \"image_thumb\": null, \"events\": [], \"arcades\": [{\"id\": null, \"title_id\": null, \"title_name\": \"CHUNITHM\", \"quantity\": 2, \"version\": null, \"coin\": null, \"eacoin\": null, \"comment\": null}], \"arcade_count\": 1, \"longitude_gcj02\": null, \"latitude_gcj02\": null, \"longitude_wgs84\": 116.397428, \"latitude_wgs84\": 39.90923, \"raw\": {\"source\": \"bemanicn\", \"source_id\": 10, \"source_url\": \"https://map.bemanicn.com/s/10\", \"name\": \"Gamma Arcade\", \"address\": \"Test Address\", \"province_code\": \"110000000000\", \"province_name\": \"Beijing\", \"city_code\": \"110100000000\", \"city_name\": \"Beijing\", \"county_code\": \"110101000000\", \"county_name\": \"Dongcheng\", \"updated_at\": \"2026-02-20T00:00:00Z\", \"longitude_wgs84\": 116.397428, \"latitude_wgs84\": 39.90923, \"arcades\": [{\"title_name\": \"CHUNITHM\", \"quantity\": 2}]}, \"_search_blob\": \"gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  \", \"_load_line\": 1}}",
+        "created_at": "<volatile>",
+        "name": "db_query_tool",
+        "payload": {
+          "argument_evidence": {
+            "hydrated_fields": [],
+            "parse_error": null,
+            "parsed_arguments": {
+              "page": 1,
+              "page_size": 1,
+              "shop_id": 10
+            },
+            "preparation_error": null,
+            "prepared_arguments": {
+              "page": 1,
+              "page_size": 1,
+              "shop_id": 10
+            },
+            "raw_arguments": null
+          },
+          "arguments": {
+            "page": 1,
+            "page_size": 1,
+            "shop_id": 10
+          },
+          "result": {
+            "shop": {
+              "_load_line": 1,
+              "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+              "address": "Test Address",
+              "arcade_count": 1,
+              "arcades": [
+                {
+                  "coin": null,
+                  "comment": null,
+                  "eacoin": null,
+                  "id": null,
+                  "quantity": 2,
+                  "title_id": null,
+                  "title_name": "CHUNITHM",
+                  "version": null
+                }
+              ],
+              "city_code": "110100000000",
+              "city_name": "Beijing",
+              "collab": null,
+              "comment": null,
+              "county_code": "110101000000",
+              "county_name": "Dongcheng",
+              "created_at": null,
+              "ea_status": null,
+              "end_time": null,
+              "events": [],
+              "fav_count": null,
+              "image_thumb": null,
+              "latitude_gcj02": null,
+              "latitude_wgs84": 39.90923,
+              "locked": null,
+              "longitude_gcj02": null,
+              "longitude_wgs84": 116.397428,
+              "name": "Gamma Arcade",
+              "name_pinyin": null,
+              "option1": null,
+              "option2": null,
+              "option3": null,
+              "option4": null,
+              "option5": null,
+              "pay_type": null,
+              "price": null,
+              "province_code": "110000000000",
+              "province_name": "Beijing",
+              "raw": {
+                "address": "Test Address",
+                "arcades": [
+                  {
+                    "quantity": 2,
+                    "title_name": "CHUNITHM"
+                  }
+                ],
+                "city_code": "110100000000",
+                "city_name": "Beijing",
+                "county_code": "110101000000",
+                "county_name": "Dongcheng",
+                "latitude_wgs84": 39.90923,
+                "longitude_wgs84": 116.397428,
+                "name": "Gamma Arcade",
+                "province_code": "110000000000",
+                "province_name": "Beijing",
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "updated_at": "<volatile>"
+              },
+              "source": "bemanicn",
+              "source_id": 10,
+              "source_url": "https://map.bemanicn.com/s/10",
+              "start_time": null,
+              "status": null,
+              "transport": null,
+              "type": null,
+              "updated_at": "<volatile>",
+              "url": null
+            }
+          },
+          "status": "completed"
+        },
+        "role": "tool",
+        "scope": "worker",
+        "worker_run_id": "<wrk1>"
+      },
+      {
+        "agent": "navigation_worker",
+        "call_id": null,
+        "content": "",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "model": {
+            "duration_ms": null,
+            "error": null,
+            "finish_reason": null,
+            "protocol": null,
+            "provider_ttft_ms": null,
+            "raw_usage": null,
+            "reported_model": null,
+            "response_id": null,
+            "status": null,
+            "step": 2,
+            "stream_mode": "synthetic",
+            "tool_calls": [
+              {
+                "arguments": {
+                  "province_code": "110000000000"
+                },
+                "call_id": "geo",
+                "name": "geo_resolve_tool",
+                "parse_error": null,
+                "raw_arguments": null
+              }
+            ],
+            "transcript": {},
+            "usage": {}
+          }
+        },
+        "role": "assistant",
+        "scope": "worker",
+        "worker_run_id": "<wrk1>"
+      },
+      {
+        "agent": "navigation_worker",
+        "call_id": "geo",
+        "content": "{\"provider\": \"amap\"}",
+        "created_at": "<volatile>",
+        "name": "geo_resolve_tool",
+        "payload": {
+          "argument_evidence": {
+            "hydrated_fields": [],
+            "parse_error": null,
+            "parsed_arguments": {
+              "province_code": "110000000000"
+            },
+            "preparation_error": null,
+            "prepared_arguments": {
+              "province_code": "110000000000"
+            },
+            "raw_arguments": null
+          },
+          "arguments": {
+            "province_code": "110000000000"
+          },
+          "result": {
+            "provider": "amap"
+          },
+          "status": "completed"
+        },
+        "role": "tool",
+        "scope": "worker",
+        "worker_run_id": "<wrk1>"
+      },
+      {
+        "agent": "navigation_worker",
+        "call_id": null,
+        "content": "",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "model": {
+            "duration_ms": null,
+            "error": null,
+            "finish_reason": null,
+            "protocol": null,
+            "provider_ttft_ms": null,
+            "raw_usage": null,
+            "reported_model": null,
+            "response_id": null,
+            "status": null,
+            "step": 3,
+            "stream_mode": "synthetic",
+            "tool_calls": [
+              {
+                "arguments": {
+                  "destination": "116.32,39.905",
+                  "mode": "walking",
+                  "origin": "116.3,39.9",
+                  "provider": "amap"
+                },
+                "call_id": "route",
+                "name": "route_plan_tool",
+                "parse_error": null,
+                "raw_arguments": null
+              }
+            ],
+            "transcript": {},
+            "usage": {}
+          }
+        },
+        "role": "assistant",
+        "scope": "worker",
+        "worker_run_id": "<wrk1>"
+      },
+      {
+        "agent": "navigation_worker",
+        "call_id": "route",
+        "content": "{\"route\": {\"provider\": \"amap\", \"mode\": \"walking\", \"distance_m\": 1350, \"duration_s\": 960, \"origin\": {\"lng\": 116.3, \"lat\": 39.9, \"coord_system\": \"gcj02\", \"source\": \"client\", \"precision\": \"approx\"}, \"destination\": {\"lng\": 116.32, \"lat\": 39.905, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, \"polyline\": [{\"lng\": 116.3, \"lat\": 39.9, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, {\"lng\": 116.31, \"lat\": 39.901, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, {\"lng\": 116.31, \"lat\": 39.901, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, {\"lng\": 116.32, \"lat\": 39.905, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}], \"hint\": null, \"degraded\": false, \"route_kind\": \"provider\"}}",
+        "created_at": "<volatile>",
+        "name": "route_plan_tool",
+        "payload": {
+          "argument_evidence": {
+            "hydrated_fields": [
+              "origin",
+              "destination"
+            ],
+            "parse_error": null,
+            "parsed_arguments": {
+              "destination": "116.32,39.905",
+              "mode": "walking",
+              "origin": "116.3,39.9",
+              "provider": "amap"
+            },
+            "preparation_error": null,
+            "prepared_arguments": {
+              "destination": {
+                "lat": 39.905,
+                "lng": 116.32
+              },
+              "mode": "walking",
+              "origin": {
+                "lat": 39.9,
+                "lng": 116.3
+              },
+              "provider": "amap"
+            },
+            "raw_arguments": null
+          },
+          "arguments": {
+            "destination": {
+              "lat": 39.905,
+              "lng": 116.32
+            },
+            "mode": "walking",
+            "origin": {
+              "lat": 39.9,
+              "lng": 116.3
+            },
+            "provider": "amap"
+          },
+          "result": {
+            "route": {
+              "degraded": false,
+              "destination": {
+                "coord_system": "gcj02",
+                "lat": 39.905,
+                "lng": 116.32,
+                "precision": "approx",
+                "source": "route"
+              },
+              "distance_m": 1350,
+              "duration_s": 960,
+              "hint": null,
+              "mode": "walking",
+              "origin": {
+                "coord_system": "gcj02",
+                "lat": 39.9,
+                "lng": 116.3,
+                "precision": "approx",
+                "source": "client"
+              },
+              "polyline": [
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.9,
+                  "lng": 116.3,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.901,
+                  "lng": 116.31,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.901,
+                  "lng": 116.31,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.905,
+                  "lng": 116.32,
+                  "precision": "approx",
+                  "source": "route"
+                }
+              ],
+              "provider": "amap",
+              "route_kind": "provider"
+            }
+          },
+          "status": "completed"
+        },
+        "role": "tool",
+        "scope": "worker",
+        "worker_run_id": "<wrk1>"
+      },
+      {
+        "agent": "navigation_worker",
+        "call_id": null,
+        "content": "route ready",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "model": {
+            "duration_ms": null,
+            "error": null,
+            "finish_reason": null,
+            "protocol": null,
+            "provider_ttft_ms": null,
+            "raw_usage": null,
+            "reported_model": null,
+            "response_id": null,
+            "status": null,
+            "step": 4,
+            "stream_mode": "synthetic",
+            "tool_calls": [],
+            "transcript": {},
+            "usage": {}
+          }
+        },
+        "role": "assistant",
+        "scope": "worker",
+        "worker_run_id": "<wrk1>"
+      },
+      {
+        "agent": "main_agent",
+        "call_id": "w1",
+        "content": "{\"worker\": \"navigation_worker\", \"run_id\": \"<wrk1>\", \"status\": \"completed\", \"summary\": \"route ready\", \"result\": {\"summary\": \"route ready\", \"destination\": {\"source\": \"bemanicn\", \"source_id\": 10, \"source_url\": \"https://map.bemanicn.com/s/10\", \"name\": \"Gamma Arcade\", \"name_pinyin\": null, \"address\": \"Test Address\", \"transport\": null, \"url\": null, \"comment\": null, \"province_code\": \"110000000000\", \"province_name\": \"Beijing\", \"city_code\": \"110100000000\", \"city_name\": \"Beijing\", \"county_code\": \"110101000000\", \"county_name\": \"Dongcheng\", \"status\": null, \"type\": null, \"pay_type\": null, \"locked\": null, \"ea_status\": null, \"price\": null, \"start_time\": null, \"end_time\": null, \"fav_count\": null, \"created_at\": null, \"updated_at\": \"2026-02-20T00:00:00Z\", \"option1\": null, \"option2\": null, \"option3\": null, \"option4\": null, \"option5\": null, \"collab\": null, \"image_thumb\": null, \"events\": [], \"arcades\": [{\"id\": null, \"title_id\": null, \"title_name\": \"CHUNITHM\", \"quantity\": 2, \"version\": null, \"coin\": null, \"eacoin\": null, \"comment\": null}], \"arcade_count\": 1, \"longitude_gcj02\": null, \"latitude_gcj02\": null, \"longitude_wgs84\": 116.397428, \"latitude_wgs84\": 39.90923, \"raw\": {\"source\": \"bemanicn\", \"source_id\": 10, \"source_url\": \"https://map.bemanicn.com/s/10\", \"name\": \"Gamma Arcade\", \"address\": \"Test Address\", \"province_code\": \"110000000000\", \"province_name\": \"Beijing\", \"city_code\": \"110100000000\", \"city_name\": \"Beijing\", \"county_code\": \"110101000000\", \"county_name\": \"Dongcheng\", \"updated_at\": \"2026-02-20T00:00:00Z\", \"longitude_wgs84\": 116.397428, \"latitude_wgs84\": 39.90923, \"arcades\": [{\"title_name\": \"CHUNITHM\", \"quantity\": 2}]}, \"_search_blob\": \"gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  \", \"_load_line\": 1}, \"route\": {\"provider\": \"amap\", \"mode\": \"walking\", \"distance_m\": 1350, \"duration_s\": 960, \"origin\": {\"lng\": 116.3, \"lat\": 39.9, \"coord_system\": \"gcj02\", \"source\": \"client\", \"precision\": \"approx\"}, \"destination\": {\"lng\": 116.32, \"lat\": 39.905, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, \"polyline\": [{\"lng\": 116.3, \"lat\": 39.9, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, {\"lng\": 116.31, \"lat\": 39.901, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, {\"lng\": 116.31, \"lat\": 39.901, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, {\"lng\": 116.32, \"lat\": 39.905, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}], \"hint\": null, \"degraded\": false, \"route_kind\": \"provider\"}, \"provider\": \"amap\", \"needs_clarification\": false, \"missing_fields\": []}, \"artifacts\": {\"shop\": {\"source\": \"bemanicn\", \"source_id\": 10, \"source_url\": \"https://map.bemanicn.com/s/10\", \"name\": \"Gamma Arcade\", \"name_pinyin\": null, \"address\": \"Test Address\", \"transport\": null, \"url\": null, \"comment\": null, \"province_code\": \"110000000000\", \"province_name\": \"Beijing\", \"city_code\": \"110100000000\", \"city_name\": \"Beijing\", \"county_code\": \"110101000000\", \"county_name\": \"Dongcheng\", \"status\": null, \"type\": null, \"pay_type\": null, \"locked\": null, \"ea_status\": null, \"price\": null, \"start_time\": null, \"end_time\": null, \"fav_count\": null, \"created_at\": null, \"updated_at\": \"2026-02-20T00:00:00Z\", \"option1\": null, \"option2\": null, \"option3\": null, \"option4\": null, \"option5\": null, \"collab\": null, \"image_thumb\": null, \"events\": [], \"arcades\": [{\"id\": null, \"title_id\": null, \"title_name\": \"CHUNITHM\", \"quantity\": 2, \"version\": null, \"coin\": null, \"eacoin\": null, \"comment\": null}], \"arcade_count\": 1, \"longitude_gcj02\": null, \"latitude_gcj02\": null, \"longitude_wgs84\": 116.397428, \"latitude_wgs84\": 39.90923, \"raw\": {\"source\": \"bemanicn\", \"source_id\": 10, \"source_url\": \"https://map.bemanicn.com/s/10\", \"name\": \"Gamma Arcade\", \"address\": \"Test Address\", \"province_code\": \"110000000000\", \"province_name\": \"Beijing\", \"city_code\": \"110100000000\", \"city_name\": \"Beijing\", \"county_code\": \"110101000000\", \"county_name\": \"Dongcheng\", \"updated_at\": \"2026-02-20T00:00:00Z\", \"longitude_wgs84\": 116.397428, \"latitude_wgs84\": 39.90923, \"arcades\": [{\"title_name\": \"CHUNITHM\", \"quantity\": 2}]}, \"_search_blob\": \"gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  \", \"_load_line\": 1}, \"route\": {\"provider\": \"amap\", \"mode\": \"walking\", \"distance_m\": 1350, \"duration_s\": 960, \"origin\": {\"lng\": 116.3, \"lat\": 39.9, \"coord_system\": \"gcj02\", \"source\": \"client\", \"precision\": \"approx\"}, \"destination\": {\"lng\": 116.32, \"lat\": 39.905, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, \"polyline\": [{\"lng\": 116.3, \"lat\": 39.9, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, {\"lng\": 116.31, \"lat\": 39.901, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, {\"lng\": 116.31, \"lat\": 39.901, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}, {\"lng\": 116.32, \"lat\": 39.905, \"coord_system\": \"gcj02\", \"source\": \"route\", \"precision\": \"approx\"}], \"hint\": null, \"degraded\": false, \"route_kind\": \"provider\"}, \"destination\": {\"source\": \"bemanicn\", \"source_id\": 10, \"source_url\": \"https://map.bemanicn.com/s/10\", \"name\": \"Gamma Arcade\", \"name_pinyin\": null, \"address\": \"Test Address\", \"transport\": null, \"url\": null, \"comment\": null, \"province_code\": \"110000000000\", \"province_name\": \"Beijing\", \"city_code\": \"110100000000\", \"city_name\": \"Beijing\", \"county_code\": \"110101000000\", \"county_name\": \"Dongcheng\", \"status\": null, \"type\": null, \"pay_type\": null, \"locked\": null, \"ea_status\": null, \"price\": null, \"start_time\": null, \"end_time\": null, \"fav_count\": null, \"created_at\": null, \"updated_at\": \"2026-02-20T00:00:00Z\", \"option1\": null, \"option2\": null, \"option3\": null, \"option4\": null, \"option5\": null, \"collab\": null, \"image_thumb\": null, \"events\": [], \"arcades\": [{\"id\": null, \"title_id\": null, \"title_name\": \"CHUNITHM\", \"quantity\": 2, \"version\": null, \"coin\": null, \"eacoin\": null, \"comment\": null}], \"arcade_count\": 1, \"longitude_gcj02\": null, \"latitude_gcj02\": null, \"longitude_wgs84\": 116.397428, \"latitude_wgs84\": 39.90923, \"raw\": {\"source\": \"bemanicn\", \"source_id\": 10, \"source_url\": \"https://map.bemanicn.com/s/10\", \"name\": \"Gamma Arcade\", \"address\": \"Test Address\", \"province_code\": \"110000000000\", \"province_name\": \"Beijing\", \"city_code\": \"110100000000\", \"city_name\": \"Beijing\", \"county_code\": \"110101000000\", \"county_name\": \"Dongcheng\", \"updated_at\": \"2026-02-20T00:00:00Z\", \"longitude_wgs84\": 116.397428, \"latitude_wgs84\": 39.90923, \"arcades\": [{\"title_name\": \"CHUNITHM\", \"quantity\": 2}]}, \"_search_blob\": \"gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  \", \"_load_line\": 1}}, \"missing_fields\": [], \"error\": null, \"task\": \"从起点步行到 Gamma Arcade\", \"task_preview\": \"从起点步行到 Gamma Arcade\", \"usage\": {\"calls\": 4, \"input_tokens\": 0, \"output_tokens\": 0, \"cached_input_tokens\": 0, \"reasoning_tokens\": 0, \"usage_missing\": 4}}",
+        "created_at": "<volatile>",
+        "name": "invoke_worker",
+        "payload": {
+          "argument_evidence": {
+            "hydrated_fields": [],
+            "parse_error": null,
+            "parsed_arguments": {
+              "task": "从起点步行到 Gamma Arcade",
+              "worker": "navigation_worker"
+            },
+            "preparation_error": null,
+            "prepared_arguments": {
+              "task": "从起点步行到 Gamma Arcade",
+              "worker": "navigation_worker"
+            },
+            "raw_arguments": null
+          },
+          "arguments": {
+            "task": "从起点步行到 Gamma Arcade",
+            "worker": "navigation_worker"
+          },
+          "result": {
+            "artifacts": {
+              "destination": {
+                "_load_line": 1,
+                "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+                "address": "Test Address",
+                "arcade_count": 1,
+                "arcades": [
+                  {
+                    "coin": null,
+                    "comment": null,
+                    "eacoin": null,
+                    "id": null,
+                    "quantity": 2,
+                    "title_id": null,
+                    "title_name": "CHUNITHM",
+                    "version": null
+                  }
+                ],
+                "city_code": "110100000000",
+                "city_name": "Beijing",
+                "collab": null,
+                "comment": null,
+                "county_code": "110101000000",
+                "county_name": "Dongcheng",
+                "created_at": null,
+                "ea_status": null,
+                "end_time": null,
+                "events": [],
+                "fav_count": null,
+                "image_thumb": null,
+                "latitude_gcj02": null,
+                "latitude_wgs84": 39.90923,
+                "locked": null,
+                "longitude_gcj02": null,
+                "longitude_wgs84": 116.397428,
+                "name": "Gamma Arcade",
+                "name_pinyin": null,
+                "option1": null,
+                "option2": null,
+                "option3": null,
+                "option4": null,
+                "option5": null,
+                "pay_type": null,
+                "price": null,
+                "province_code": "110000000000",
+                "province_name": "Beijing",
+                "raw": {
+                  "address": "Test Address",
+                  "arcades": [
+                    {
+                      "quantity": 2,
+                      "title_name": "CHUNITHM"
+                    }
+                  ],
+                  "city_code": "110100000000",
+                  "city_name": "Beijing",
+                  "county_code": "110101000000",
+                  "county_name": "Dongcheng",
+                  "latitude_wgs84": 39.90923,
+                  "longitude_wgs84": 116.397428,
+                  "name": "Gamma Arcade",
+                  "province_code": "110000000000",
+                  "province_name": "Beijing",
+                  "source": "bemanicn",
+                  "source_id": 10,
+                  "source_url": "https://map.bemanicn.com/s/10",
+                  "updated_at": "<volatile>"
+                },
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "start_time": null,
+                "status": null,
+                "transport": null,
+                "type": null,
+                "updated_at": "<volatile>",
+                "url": null
+              },
+              "route": {
+                "degraded": false,
+                "destination": {
+                  "coord_system": "gcj02",
+                  "lat": 39.905,
+                  "lng": 116.32,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                "distance_m": 1350,
+                "duration_s": 960,
+                "hint": null,
+                "mode": "walking",
+                "origin": {
+                  "coord_system": "gcj02",
+                  "lat": 39.9,
+                  "lng": 116.3,
+                  "precision": "approx",
+                  "source": "client"
+                },
+                "polyline": [
+                  {
+                    "coord_system": "gcj02",
+                    "lat": 39.9,
+                    "lng": 116.3,
+                    "precision": "approx",
+                    "source": "route"
+                  },
+                  {
+                    "coord_system": "gcj02",
+                    "lat": 39.901,
+                    "lng": 116.31,
+                    "precision": "approx",
+                    "source": "route"
+                  },
+                  {
+                    "coord_system": "gcj02",
+                    "lat": 39.901,
+                    "lng": 116.31,
+                    "precision": "approx",
+                    "source": "route"
+                  },
+                  {
+                    "coord_system": "gcj02",
+                    "lat": 39.905,
+                    "lng": 116.32,
+                    "precision": "approx",
+                    "source": "route"
+                  }
+                ],
+                "provider": "amap",
+                "route_kind": "provider"
+              },
+              "shop": {
+                "_load_line": 1,
+                "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+                "address": "Test Address",
+                "arcade_count": 1,
+                "arcades": [
+                  {
+                    "coin": null,
+                    "comment": null,
+                    "eacoin": null,
+                    "id": null,
+                    "quantity": 2,
+                    "title_id": null,
+                    "title_name": "CHUNITHM",
+                    "version": null
+                  }
+                ],
+                "city_code": "110100000000",
+                "city_name": "Beijing",
+                "collab": null,
+                "comment": null,
+                "county_code": "110101000000",
+                "county_name": "Dongcheng",
+                "created_at": null,
+                "ea_status": null,
+                "end_time": null,
+                "events": [],
+                "fav_count": null,
+                "image_thumb": null,
+                "latitude_gcj02": null,
+                "latitude_wgs84": 39.90923,
+                "locked": null,
+                "longitude_gcj02": null,
+                "longitude_wgs84": 116.397428,
+                "name": "Gamma Arcade",
+                "name_pinyin": null,
+                "option1": null,
+                "option2": null,
+                "option3": null,
+                "option4": null,
+                "option5": null,
+                "pay_type": null,
+                "price": null,
+                "province_code": "110000000000",
+                "province_name": "Beijing",
+                "raw": {
+                  "address": "Test Address",
+                  "arcades": [
+                    {
+                      "quantity": 2,
+                      "title_name": "CHUNITHM"
+                    }
+                  ],
+                  "city_code": "110100000000",
+                  "city_name": "Beijing",
+                  "county_code": "110101000000",
+                  "county_name": "Dongcheng",
+                  "latitude_wgs84": 39.90923,
+                  "longitude_wgs84": 116.397428,
+                  "name": "Gamma Arcade",
+                  "province_code": "110000000000",
+                  "province_name": "Beijing",
+                  "source": "bemanicn",
+                  "source_id": 10,
+                  "source_url": "https://map.bemanicn.com/s/10",
+                  "updated_at": "<volatile>"
+                },
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "start_time": null,
+                "status": null,
+                "transport": null,
+                "type": null,
+                "updated_at": "<volatile>",
+                "url": null
+              }
+            },
+            "error": null,
+            "missing_fields": [],
+            "result": {
+              "destination": {
+                "_load_line": 1,
+                "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+                "address": "Test Address",
+                "arcade_count": 1,
+                "arcades": [
+                  {
+                    "coin": null,
+                    "comment": null,
+                    "eacoin": null,
+                    "id": null,
+                    "quantity": 2,
+                    "title_id": null,
+                    "title_name": "CHUNITHM",
+                    "version": null
+                  }
+                ],
+                "city_code": "110100000000",
+                "city_name": "Beijing",
+                "collab": null,
+                "comment": null,
+                "county_code": "110101000000",
+                "county_name": "Dongcheng",
+                "created_at": null,
+                "ea_status": null,
+                "end_time": null,
+                "events": [],
+                "fav_count": null,
+                "image_thumb": null,
+                "latitude_gcj02": null,
+                "latitude_wgs84": 39.90923,
+                "locked": null,
+                "longitude_gcj02": null,
+                "longitude_wgs84": 116.397428,
+                "name": "Gamma Arcade",
+                "name_pinyin": null,
+                "option1": null,
+                "option2": null,
+                "option3": null,
+                "option4": null,
+                "option5": null,
+                "pay_type": null,
+                "price": null,
+                "province_code": "110000000000",
+                "province_name": "Beijing",
+                "raw": {
+                  "address": "Test Address",
+                  "arcades": [
+                    {
+                      "quantity": 2,
+                      "title_name": "CHUNITHM"
+                    }
+                  ],
+                  "city_code": "110100000000",
+                  "city_name": "Beijing",
+                  "county_code": "110101000000",
+                  "county_name": "Dongcheng",
+                  "latitude_wgs84": 39.90923,
+                  "longitude_wgs84": 116.397428,
+                  "name": "Gamma Arcade",
+                  "province_code": "110000000000",
+                  "province_name": "Beijing",
+                  "source": "bemanicn",
+                  "source_id": 10,
+                  "source_url": "https://map.bemanicn.com/s/10",
+                  "updated_at": "<volatile>"
+                },
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "start_time": null,
+                "status": null,
+                "transport": null,
+                "type": null,
+                "updated_at": "<volatile>",
+                "url": null
+              },
+              "missing_fields": [],
+              "needs_clarification": false,
+              "provider": "amap",
+              "route": {
+                "degraded": false,
+                "destination": {
+                  "coord_system": "gcj02",
+                  "lat": 39.905,
+                  "lng": 116.32,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                "distance_m": 1350,
+                "duration_s": 960,
+                "hint": null,
+                "mode": "walking",
+                "origin": {
+                  "coord_system": "gcj02",
+                  "lat": 39.9,
+                  "lng": 116.3,
+                  "precision": "approx",
+                  "source": "client"
+                },
+                "polyline": [
+                  {
+                    "coord_system": "gcj02",
+                    "lat": 39.9,
+                    "lng": 116.3,
+                    "precision": "approx",
+                    "source": "route"
+                  },
+                  {
+                    "coord_system": "gcj02",
+                    "lat": 39.901,
+                    "lng": 116.31,
+                    "precision": "approx",
+                    "source": "route"
+                  },
+                  {
+                    "coord_system": "gcj02",
+                    "lat": 39.901,
+                    "lng": 116.31,
+                    "precision": "approx",
+                    "source": "route"
+                  },
+                  {
+                    "coord_system": "gcj02",
+                    "lat": 39.905,
+                    "lng": 116.32,
+                    "precision": "approx",
+                    "source": "route"
+                  }
+                ],
+                "provider": "amap",
+                "route_kind": "provider"
+              },
+              "summary": "route ready"
+            },
+            "run_id": "<wrk1>",
+            "status": "completed",
+            "summary": "route ready",
+            "task": "从起点步行到 Gamma Arcade",
+            "task_preview": "从起点步行到 Gamma Arcade",
+            "usage": {
+              "cached_input_tokens": 0,
+              "calls": 4,
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "reasoning_tokens": 0,
+              "usage_missing": 4
+            },
+            "worker": "navigation_worker"
+          },
+          "status": "completed"
+        },
+        "role": "tool",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "步行路线已经规划完成。",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "model": {
+            "duration_ms": null,
+            "error": null,
+            "final_reply": true,
+            "finish_reason": null,
+            "protocol": null,
+            "provider_ttft_ms": null,
+            "raw_usage": null,
+            "reported_model": null,
+            "response_id": null,
+            "status": null,
+            "step": 2,
+            "stream_mode": "synthetic",
+            "tool_calls": [],
+            "transcript": {},
+            "usage": {}
+          }
+        },
+        "role": "assistant",
+        "scope": "conversation",
+        "worker_run_id": null
+      },
+      {
+        "agent": "main_agent",
+        "call_id": null,
+        "content": "步行路线已经规划完成。",
+        "created_at": "<volatile>",
+        "name": null,
+        "payload": {
+          "final": true,
+          "map_artifacts": {
+            "client_location": null,
+            "destination": {
+              "_load_line": 1,
+              "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+              "address": "Test Address",
+              "arcade_count": 1,
+              "arcades": [
+                {
+                  "coin": null,
+                  "comment": null,
+                  "eacoin": null,
+                  "id": null,
+                  "quantity": 2,
+                  "title_id": null,
+                  "title_name": "CHUNITHM",
+                  "version": null
+                }
+              ],
+              "city_code": "110100000000",
+              "city_name": "Beijing",
+              "collab": null,
+              "comment": null,
+              "county_code": "110101000000",
+              "county_name": "Dongcheng",
+              "created_at": null,
+              "ea_status": null,
+              "end_time": null,
+              "events": [],
+              "fav_count": null,
+              "image_thumb": null,
+              "latitude_gcj02": null,
+              "latitude_wgs84": 39.90923,
+              "locked": null,
+              "longitude_gcj02": null,
+              "longitude_wgs84": 116.397428,
+              "name": "Gamma Arcade",
+              "name_pinyin": null,
+              "option1": null,
+              "option2": null,
+              "option3": null,
+              "option4": null,
+              "option5": null,
+              "pay_type": null,
+              "price": null,
+              "province_code": "110000000000",
+              "province_name": "Beijing",
+              "raw": {
+                "address": "Test Address",
+                "arcades": [
+                  {
+                    "quantity": 2,
+                    "title_name": "CHUNITHM"
+                  }
+                ],
+                "city_code": "110100000000",
+                "city_name": "Beijing",
+                "county_code": "110101000000",
+                "county_name": "Dongcheng",
+                "latitude_wgs84": 39.90923,
+                "longitude_wgs84": 116.397428,
+                "name": "Gamma Arcade",
+                "province_code": "110000000000",
+                "province_name": "Beijing",
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "updated_at": "<volatile>"
+              },
+              "source": "bemanicn",
+              "source_id": 10,
+              "source_url": "https://map.bemanicn.com/s/10",
+              "start_time": null,
+              "status": null,
+              "transport": null,
+              "type": null,
+              "updated_at": "<volatile>",
+              "url": null
+            },
+            "route": {
+              "degraded": false,
+              "destination": {
+                "coord_system": "gcj02",
+                "lat": 39.905,
+                "lng": 116.32,
+                "precision": "approx",
+                "source": "route"
+              },
+              "distance_m": 1350,
+              "duration_s": 960,
+              "hint": null,
+              "mode": "walking",
+              "origin": {
+                "coord_system": "gcj02",
+                "lat": 39.9,
+                "lng": 116.3,
+                "precision": "approx",
+                "source": "client"
+              },
+              "polyline": [
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.9,
+                  "lng": 116.3,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.901,
+                  "lng": 116.31,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.901,
+                  "lng": 116.31,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.905,
+                  "lng": 116.32,
+                  "precision": "approx",
+                  "source": "route"
+                }
+              ],
+              "provider": "amap",
+              "route_kind": "provider"
+            },
+            "shops": [
+              {
+                "_load_line": 1,
+                "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+                "address": "Test Address",
+                "arcade_count": 1,
+                "arcades": [
+                  {
+                    "coin": null,
+                    "comment": null,
+                    "eacoin": null,
+                    "id": null,
+                    "quantity": 2,
+                    "title_id": null,
+                    "title_name": "CHUNITHM",
+                    "version": null
+                  }
+                ],
+                "city_code": "110100000000",
+                "city_name": "Beijing",
+                "collab": null,
+                "comment": null,
+                "county_code": "110101000000",
+                "county_name": "Dongcheng",
+                "created_at": null,
+                "ea_status": null,
+                "end_time": null,
+                "events": [],
+                "fav_count": null,
+                "image_thumb": null,
+                "latitude_gcj02": null,
+                "latitude_wgs84": 39.90923,
+                "locked": null,
+                "longitude_gcj02": null,
+                "longitude_wgs84": 116.397428,
+                "name": "Gamma Arcade",
+                "name_pinyin": null,
+                "option1": null,
+                "option2": null,
+                "option3": null,
+                "option4": null,
+                "option5": null,
+                "pay_type": null,
+                "price": null,
+                "province_code": "110000000000",
+                "province_name": "Beijing",
+                "raw": {
+                  "address": "Test Address",
+                  "arcades": [
+                    {
+                      "quantity": 2,
+                      "title_name": "CHUNITHM"
+                    }
+                  ],
+                  "city_code": "110100000000",
+                  "city_name": "Beijing",
+                  "county_code": "110101000000",
+                  "county_name": "Dongcheng",
+                  "latitude_wgs84": 39.90923,
+                  "longitude_wgs84": 116.397428,
+                  "name": "Gamma Arcade",
+                  "province_code": "110000000000",
+                  "province_name": "Beijing",
+                  "source": "bemanicn",
+                  "source_id": 10,
+                  "source_url": "https://map.bemanicn.com/s/10",
+                  "updated_at": "<volatile>"
+                },
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "start_time": null,
+                "status": null,
+                "transport": null,
+                "type": null,
+                "updated_at": "<volatile>",
+                "url": null
+              }
+            ],
+            "view_payload": null
+          },
+          "reply_source": "model"
+        },
+        "role": "assistant",
+        "scope": "conversation",
+        "worker_run_id": null
+      }
+    ],
+    "working_memory": {
+      "artifact_meta": {
+        "destination": {
+          "turn_index": 1,
+          "updated_at": "<volatile>"
+        },
+        "route": {
+          "turn_index": 1,
+          "updated_at": "<volatile>"
+        },
+        "shop": {
+          "turn_index": 1,
+          "updated_at": "<volatile>"
+        }
+      },
+      "artifacts": {
+        "destination": {
+          "_load_line": 1,
+          "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+          "address": "Test Address",
+          "arcade_count": 1,
+          "arcades": [
+            {
+              "coin": null,
+              "comment": null,
+              "eacoin": null,
+              "id": null,
+              "quantity": 2,
+              "title_id": null,
+              "title_name": "CHUNITHM",
+              "version": null
+            }
+          ],
+          "city_code": "110100000000",
+          "city_name": "Beijing",
+          "collab": null,
+          "comment": null,
+          "county_code": "110101000000",
+          "county_name": "Dongcheng",
+          "created_at": null,
+          "ea_status": null,
+          "end_time": null,
+          "events": [],
+          "fav_count": null,
+          "image_thumb": null,
+          "latitude_gcj02": null,
+          "latitude_wgs84": 39.90923,
+          "locked": null,
+          "longitude_gcj02": null,
+          "longitude_wgs84": 116.397428,
+          "name": "Gamma Arcade",
+          "name_pinyin": null,
+          "option1": null,
+          "option2": null,
+          "option3": null,
+          "option4": null,
+          "option5": null,
+          "pay_type": null,
+          "price": null,
+          "province_code": "110000000000",
+          "province_name": "Beijing",
+          "raw": {
+            "address": "Test Address",
+            "arcades": [
+              {
+                "quantity": 2,
+                "title_name": "CHUNITHM"
+              }
+            ],
+            "city_code": "110100000000",
+            "city_name": "Beijing",
+            "county_code": "110101000000",
+            "county_name": "Dongcheng",
+            "latitude_wgs84": 39.90923,
+            "longitude_wgs84": 116.397428,
+            "name": "Gamma Arcade",
+            "province_code": "110000000000",
+            "province_name": "Beijing",
+            "source": "bemanicn",
+            "source_id": 10,
+            "source_url": "https://map.bemanicn.com/s/10",
+            "updated_at": "<volatile>"
+          },
+          "source": "bemanicn",
+          "source_id": 10,
+          "source_url": "https://map.bemanicn.com/s/10",
+          "start_time": null,
+          "status": null,
+          "transport": null,
+          "type": null,
+          "updated_at": "<volatile>",
+          "url": null
+        },
+        "route": {
+          "degraded": false,
+          "destination": {
+            "coord_system": "gcj02",
+            "lat": 39.905,
+            "lng": 116.32,
+            "precision": "approx",
+            "source": "route"
+          },
+          "distance_m": 1350,
+          "duration_s": 960,
+          "hint": null,
+          "mode": "walking",
+          "origin": {
+            "coord_system": "gcj02",
+            "lat": 39.9,
+            "lng": 116.3,
+            "precision": "approx",
+            "source": "client"
+          },
+          "polyline": [
+            {
+              "coord_system": "gcj02",
+              "lat": 39.9,
+              "lng": 116.3,
+              "precision": "approx",
+              "source": "route"
+            },
+            {
+              "coord_system": "gcj02",
+              "lat": 39.901,
+              "lng": 116.31,
+              "precision": "approx",
+              "source": "route"
+            },
+            {
+              "coord_system": "gcj02",
+              "lat": 39.901,
+              "lng": 116.31,
+              "precision": "approx",
+              "source": "route"
+            },
+            {
+              "coord_system": "gcj02",
+              "lat": 39.905,
+              "lng": 116.32,
+              "precision": "approx",
+              "source": "route"
+            }
+          ],
+          "provider": "amap",
+          "route_kind": "provider"
+        },
+        "shop": {
+          "_load_line": 1,
+          "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+          "address": "Test Address",
+          "arcade_count": 1,
+          "arcades": [
+            {
+              "coin": null,
+              "comment": null,
+              "eacoin": null,
+              "id": null,
+              "quantity": 2,
+              "title_id": null,
+              "title_name": "CHUNITHM",
+              "version": null
+            }
+          ],
+          "city_code": "110100000000",
+          "city_name": "Beijing",
+          "collab": null,
+          "comment": null,
+          "county_code": "110101000000",
+          "county_name": "Dongcheng",
+          "created_at": null,
+          "ea_status": null,
+          "end_time": null,
+          "events": [],
+          "fav_count": null,
+          "image_thumb": null,
+          "latitude_gcj02": null,
+          "latitude_wgs84": 39.90923,
+          "locked": null,
+          "longitude_gcj02": null,
+          "longitude_wgs84": 116.397428,
+          "name": "Gamma Arcade",
+          "name_pinyin": null,
+          "option1": null,
+          "option2": null,
+          "option3": null,
+          "option4": null,
+          "option5": null,
+          "pay_type": null,
+          "price": null,
+          "province_code": "110000000000",
+          "province_name": "Beijing",
+          "raw": {
+            "address": "Test Address",
+            "arcades": [
+              {
+                "quantity": 2,
+                "title_name": "CHUNITHM"
+              }
+            ],
+            "city_code": "110100000000",
+            "city_name": "Beijing",
+            "county_code": "110101000000",
+            "county_name": "Dongcheng",
+            "latitude_wgs84": 39.90923,
+            "longitude_wgs84": 116.397428,
+            "name": "Gamma Arcade",
+            "province_code": "110000000000",
+            "province_name": "Beijing",
+            "source": "bemanicn",
+            "source_id": 10,
+            "source_url": "https://map.bemanicn.com/s/10",
+            "updated_at": "<volatile>"
+          },
+          "source": "bemanicn",
+          "source_id": 10,
+          "source_url": "https://map.bemanicn.com/s/10",
+          "start_time": null,
+          "status": null,
+          "transport": null,
+          "type": null,
+          "updated_at": "<volatile>",
+          "url": null
+        }
+      },
+      "keyword": "Arcade",
+      "last_request": {
+        "city_code": null,
+        "client_id": "test-client",
+        "county_code": null,
+        "intent": null,
+        "keyword": null,
+        "location": null,
+        "message": "从起点走到 Gamma Arcade",
+        "page_size": 5,
+        "province_code": null,
+        "session_id": "<s1>",
+        "shop_id": null
+      },
+      "last_route_endpoints": {
+        "destination": {
+          "coord_system": "gcj02",
+          "lat": 39.905,
+          "lng": 116.32,
+          "precision": "approx",
+          "source": "route"
+        },
+        "mode": "walking",
+        "origin": {
+          "coord_system": "gcj02",
+          "lat": 39.9,
+          "lng": 116.3,
+          "precision": "approx",
+          "source": "client"
+        },
+        "provider": "amap"
+      },
+      "provider": "amap",
+      "reply": "步行路线已经规划完成。",
+      "usage_totals": {
+        "cached_input_tokens": 0,
+        "calls": 6,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "usage_missing": 6
+      },
+      "worker_runs": [
+        {
+          "artifacts": {
+            "destination": {
+              "_load_line": 1,
+              "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+              "address": "Test Address",
+              "arcade_count": 1,
+              "arcades": [
+                {
+                  "coin": null,
+                  "comment": null,
+                  "eacoin": null,
+                  "id": null,
+                  "quantity": 2,
+                  "title_id": null,
+                  "title_name": "CHUNITHM",
+                  "version": null
+                }
+              ],
+              "city_code": "110100000000",
+              "city_name": "Beijing",
+              "collab": null,
+              "comment": null,
+              "county_code": "110101000000",
+              "county_name": "Dongcheng",
+              "created_at": null,
+              "ea_status": null,
+              "end_time": null,
+              "events": [],
+              "fav_count": null,
+              "image_thumb": null,
+              "latitude_gcj02": null,
+              "latitude_wgs84": 39.90923,
+              "locked": null,
+              "longitude_gcj02": null,
+              "longitude_wgs84": 116.397428,
+              "name": "Gamma Arcade",
+              "name_pinyin": null,
+              "option1": null,
+              "option2": null,
+              "option3": null,
+              "option4": null,
+              "option5": null,
+              "pay_type": null,
+              "price": null,
+              "province_code": "110000000000",
+              "province_name": "Beijing",
+              "raw": {
+                "address": "Test Address",
+                "arcades": [
+                  {
+                    "quantity": 2,
+                    "title_name": "CHUNITHM"
+                  }
+                ],
+                "city_code": "110100000000",
+                "city_name": "Beijing",
+                "county_code": "110101000000",
+                "county_name": "Dongcheng",
+                "latitude_wgs84": 39.90923,
+                "longitude_wgs84": 116.397428,
+                "name": "Gamma Arcade",
+                "province_code": "110000000000",
+                "province_name": "Beijing",
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "updated_at": "<volatile>"
+              },
+              "source": "bemanicn",
+              "source_id": 10,
+              "source_url": "https://map.bemanicn.com/s/10",
+              "start_time": null,
+              "status": null,
+              "transport": null,
+              "type": null,
+              "updated_at": "<volatile>",
+              "url": null
+            },
+            "route": {
+              "degraded": false,
+              "destination": {
+                "coord_system": "gcj02",
+                "lat": 39.905,
+                "lng": 116.32,
+                "precision": "approx",
+                "source": "route"
+              },
+              "distance_m": 1350,
+              "duration_s": 960,
+              "hint": null,
+              "mode": "walking",
+              "origin": {
+                "coord_system": "gcj02",
+                "lat": 39.9,
+                "lng": 116.3,
+                "precision": "approx",
+                "source": "client"
+              },
+              "polyline": [
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.9,
+                  "lng": 116.3,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.901,
+                  "lng": 116.31,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.901,
+                  "lng": 116.31,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.905,
+                  "lng": 116.32,
+                  "precision": "approx",
+                  "source": "route"
+                }
+              ],
+              "provider": "amap",
+              "route_kind": "provider"
+            },
+            "shop": {
+              "_load_line": 1,
+              "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+              "address": "Test Address",
+              "arcade_count": 1,
+              "arcades": [
+                {
+                  "coin": null,
+                  "comment": null,
+                  "eacoin": null,
+                  "id": null,
+                  "quantity": 2,
+                  "title_id": null,
+                  "title_name": "CHUNITHM",
+                  "version": null
+                }
+              ],
+              "city_code": "110100000000",
+              "city_name": "Beijing",
+              "collab": null,
+              "comment": null,
+              "county_code": "110101000000",
+              "county_name": "Dongcheng",
+              "created_at": null,
+              "ea_status": null,
+              "end_time": null,
+              "events": [],
+              "fav_count": null,
+              "image_thumb": null,
+              "latitude_gcj02": null,
+              "latitude_wgs84": 39.90923,
+              "locked": null,
+              "longitude_gcj02": null,
+              "longitude_wgs84": 116.397428,
+              "name": "Gamma Arcade",
+              "name_pinyin": null,
+              "option1": null,
+              "option2": null,
+              "option3": null,
+              "option4": null,
+              "option5": null,
+              "pay_type": null,
+              "price": null,
+              "province_code": "110000000000",
+              "province_name": "Beijing",
+              "raw": {
+                "address": "Test Address",
+                "arcades": [
+                  {
+                    "quantity": 2,
+                    "title_name": "CHUNITHM"
+                  }
+                ],
+                "city_code": "110100000000",
+                "city_name": "Beijing",
+                "county_code": "110101000000",
+                "county_name": "Dongcheng",
+                "latitude_wgs84": 39.90923,
+                "longitude_wgs84": 116.397428,
+                "name": "Gamma Arcade",
+                "province_code": "110000000000",
+                "province_name": "Beijing",
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "updated_at": "<volatile>"
+              },
+              "source": "bemanicn",
+              "source_id": 10,
+              "source_url": "https://map.bemanicn.com/s/10",
+              "start_time": null,
+              "status": null,
+              "transport": null,
+              "type": null,
+              "updated_at": "<volatile>",
+              "url": null
+            }
+          },
+          "error": null,
+          "missing_fields": [],
+          "result": {
+            "destination": {
+              "_load_line": 1,
+              "_search_blob": "gamma arcade  test address   beijing beijing dongcheng 110000000000 110100000000 110101000000 chunithm  ",
+              "address": "Test Address",
+              "arcade_count": 1,
+              "arcades": [
+                {
+                  "coin": null,
+                  "comment": null,
+                  "eacoin": null,
+                  "id": null,
+                  "quantity": 2,
+                  "title_id": null,
+                  "title_name": "CHUNITHM",
+                  "version": null
+                }
+              ],
+              "city_code": "110100000000",
+              "city_name": "Beijing",
+              "collab": null,
+              "comment": null,
+              "county_code": "110101000000",
+              "county_name": "Dongcheng",
+              "created_at": null,
+              "ea_status": null,
+              "end_time": null,
+              "events": [],
+              "fav_count": null,
+              "image_thumb": null,
+              "latitude_gcj02": null,
+              "latitude_wgs84": 39.90923,
+              "locked": null,
+              "longitude_gcj02": null,
+              "longitude_wgs84": 116.397428,
+              "name": "Gamma Arcade",
+              "name_pinyin": null,
+              "option1": null,
+              "option2": null,
+              "option3": null,
+              "option4": null,
+              "option5": null,
+              "pay_type": null,
+              "price": null,
+              "province_code": "110000000000",
+              "province_name": "Beijing",
+              "raw": {
+                "address": "Test Address",
+                "arcades": [
+                  {
+                    "quantity": 2,
+                    "title_name": "CHUNITHM"
+                  }
+                ],
+                "city_code": "110100000000",
+                "city_name": "Beijing",
+                "county_code": "110101000000",
+                "county_name": "Dongcheng",
+                "latitude_wgs84": 39.90923,
+                "longitude_wgs84": 116.397428,
+                "name": "Gamma Arcade",
+                "province_code": "110000000000",
+                "province_name": "Beijing",
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "updated_at": "<volatile>"
+              },
+              "source": "bemanicn",
+              "source_id": 10,
+              "source_url": "https://map.bemanicn.com/s/10",
+              "start_time": null,
+              "status": null,
+              "transport": null,
+              "type": null,
+              "updated_at": "<volatile>",
+              "url": null
+            },
+            "missing_fields": [],
+            "needs_clarification": false,
+            "provider": "amap",
+            "route": {
+              "degraded": false,
+              "destination": {
+                "coord_system": "gcj02",
+                "lat": 39.905,
+                "lng": 116.32,
+                "precision": "approx",
+                "source": "route"
+              },
+              "distance_m": 1350,
+              "duration_s": 960,
+              "hint": null,
+              "mode": "walking",
+              "origin": {
+                "coord_system": "gcj02",
+                "lat": 39.9,
+                "lng": 116.3,
+                "precision": "approx",
+                "source": "client"
+              },
+              "polyline": [
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.9,
+                  "lng": 116.3,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.901,
+                  "lng": 116.31,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.901,
+                  "lng": 116.31,
+                  "precision": "approx",
+                  "source": "route"
+                },
+                {
+                  "coord_system": "gcj02",
+                  "lat": 39.905,
+                  "lng": 116.32,
+                  "precision": "approx",
+                  "source": "route"
+                }
+              ],
+              "provider": "amap",
+              "route_kind": "provider"
+            },
+            "summary": "route ready"
+          },
+          "run_id": "<wrk1>",
+          "status": "completed",
+          "summary": "route ready",
+          "task": "从起点步行到 Gamma Arcade",
+          "task_preview": "从起点步行到 Gamma Arcade",
+          "usage": {
+            "cached_input_tokens": 0,
+            "calls": 4,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0,
+            "usage_missing": 4
+          },
+          "worker": "navigation_worker"
+        }
+      ]
+    }
+  }
+}
