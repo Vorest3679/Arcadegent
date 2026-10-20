@@ -3,16 +3,28 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
-from contextvars import ContextVar
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from app.agent.context.context_builder import ContextBuilder
+from app.agent.context.turn_recorder import (
+    append_turn,
+    merge_usage_totals,
+    persist_worker_evidence_turns,
+    record_model_call,
+    record_tool_result_turn,
+)
 from app.agent.llm.provider_adapter import ModelResponse, ProviderAdapter, collect_stream
+from app.agent.runtime.events import (
+    bind_run_events,
+    emit_agent_changed,
+    publish as publish_event,
+    publish_assistant_text,
+    reset_run_events,
+)
 from app.agent.runtime.loop_guard import LoopGuard
 from app.agent.skills.execution import SkillExecution, bind_skill_execution
 from app.agent.skills.registry import SkillRegistry
@@ -36,14 +48,9 @@ from app.protocol.messages import (
 )
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
 from app.session.events import RunEvent
-from app.session.injector import NullPublisher, RunPublisher
+from app.session.injector import RunPublisher
 
 logger = get_logger(__name__)
-
-# ContextVar 按当前异步上下文保存 run 发布器，避免并发请求之间互相串用。
-# run_chat 开始时绑定、结束时恢复；因此主 Agent、子 Agent 和工具的嵌套调用
-# 都能读取并发布事件，无需在调用链中逐层传递该对象。
-_run_events: ContextVar[RunPublisher] = ContextVar("arcadegent_run_events", default=NullPublisher())
 
 
 def _infer_intent(message: str) -> IntentType:
@@ -129,11 +136,11 @@ class ReactRuntime:
 
     async def run_chat(self, request: ChatRequest, *, events: RunPublisher) -> ChatResponse:
         """Session-aware chat execution; stream events go to ``events``."""
-        token = _run_events.set(events)
+        token = bind_run_events(events)
         try:
             return await self._run_chat(request)
         finally:
-            _run_events.reset(token)
+            reset_run_events(token)
 
     async def _run_chat(self, request: ChatRequest) -> ChatResponse:
         session_id = request.session_id or f"s_{uuid4().hex[:12]}"
@@ -157,7 +164,7 @@ class ReactRuntime:
             state.working_memory["last_error"] = {"message": error_message}
             state.updated_at = _utc_now_iso()
             self._session_store.save_session(state)
-            self._publish(
+            publish_event(
                 RunEvent.SESSION_FAILED,
                 {
                     "error": error_message,
@@ -217,7 +224,7 @@ class ReactRuntime:
 
         # Persist the user turn and session.started before the first cancellable
         # discovery operation, so cancellation during refresh cannot lose input.
-        self._append_turn(
+        append_turn(
             state,
             AgentTurn(
                 role="user",
@@ -226,8 +233,9 @@ class ReactRuntime:
                 scope="conversation",
                 payload=request_payload,
             ),
+            session_store=self._session_store,
         )
-        self._publish(
+        publish_event(
             RunEvent.SESSION_STARTED,
             {
                 "intent": state.intent,
@@ -235,8 +243,7 @@ class ReactRuntime:
                 "active_subagent": state.active_subagent,
             },
         )
-        self._emit_agent_changed(
-            session_id=session_id,
+        emit_agent_changed(
             to_agent=state.active_subagent,
             reason="session.started",
         )
@@ -264,8 +271,8 @@ class ReactRuntime:
             # The reply was not published as model output (summary tool, fallback):
             # show it as a new output so earlier outputs stay sealed.
             output_id = _new_output_id()
-            self._publish_assistant_text(final_text, output_id=output_id, stream_mode="synthetic")
-        self._append_turn(
+            publish_assistant_text(final_text, output_id=output_id, stream_mode="synthetic")
+        append_turn(
             state,
             AgentTurn(
                 role="assistant",
@@ -278,6 +285,7 @@ class ReactRuntime:
                     "map_artifacts": self._snapshot_turn_map_artifacts(state),
                 },
             ),
+            session_store=self._session_store,
         )
         response = await self._build_response(session_id=session_id, state=state, final_text=final_text)
         state.active_subagent = "main_agent"
@@ -293,7 +301,7 @@ class ReactRuntime:
             state.status = "completed"
             state.last_error = None
         self._session_store.save_session(state)
-        self._publish(
+        publish_event(
             RunEvent.SESSION_FAILED if model_error else RunEvent.ASSISTANT_COMPLETED,
             {
                 "reply": final_text,
@@ -392,7 +400,7 @@ class ReactRuntime:
                 and not model_response.tool_calls
                 and bool((model_response.text or "").strip())
             )
-            self._record_model_call(
+            record_model_call(
                 state=state,
                 response=model_response,
                 agent_name=profile.name,
@@ -463,123 +471,17 @@ class ReactRuntime:
             text = (response.text or "").strip()
             if response.error is not None or not text:
                 return response, False
-            self._publish_assistant_text(text, output_id=output_id, stream_mode="synthetic")
+            publish_assistant_text(text, output_id=output_id, stream_mode="synthetic")
             return response, True
         published = False
 
         def publish(text: str) -> None:
             nonlocal published
-            self._publish_assistant_text(text, output_id=output_id, stream_mode="provider")
+            publish_assistant_text(text, output_id=output_id, stream_mode="provider")
             published = True
 
         final = await collect_stream(adapter.stream(**request), on_text=publish)
         return final, published
-
-    def _record_model_call(
-        self,
-        *,
-        state: AgentSessionState,
-        response: Any,
-        agent_name: str,
-        step: int,
-        worker_run_id: str | None = None,
-        final_reply: bool = False,
-    ) -> None:
-        """Persist per-call model evidence: transcript, usage, status and raw tool-call arguments.
-
-        ``final_reply`` marks the evidence whose text is also stored as the turn's
-        final assistant reply; the context projection uses that marker to avoid
-        replaying the same text twice.
-        """
-        memory = ensure_working_memory_shape(state.working_memory)
-        usage_totals = memory.get("usage_totals")
-        if not isinstance(usage_totals, dict):
-            usage_totals = {
-                "calls": 0,
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cached_input_tokens": 0,
-                "reasoning_tokens": 0,
-                "usage_missing": 0,
-            }
-            memory["usage_totals"] = usage_totals
-        usage_totals["calls"] += 1
-        usage = response.usage if isinstance(response.usage, dict) else {}
-        if any(usage.get(key) is not None for key in ("input_tokens", "output_tokens", "total_tokens")):
-            # cached/reasoning tokens are subsets of input/output; they are tracked
-            # alongside, never added on top of the totals.
-            for key in ("input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"):
-                value = usage.get(key)
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    usage_totals[key] += int(value)
-        else:
-            usage_totals["usage_missing"] += 1
-        model_payload: dict[str, Any] = {
-            "step": step,
-            "protocol": response.protocol,
-            "reported_model": response.reported_model,
-            "response_id": response.response_id,
-            "status": response.status,
-            "finish_reason": response.finish_reason,
-            "error": deepcopy(response.error),
-            "usage": deepcopy(response.usage),
-            "raw_usage": deepcopy(response.raw_usage),
-            "provider_ttft_ms": response.provider_ttft_ms,
-            "duration_ms": response.duration_ms,
-            "stream_mode": response.stream_mode,
-            "transcript": deepcopy(response.transcript),
-            "tool_calls": [
-                {
-                    "call_id": call.call_id,
-                    "name": call.name,
-                    "arguments": deepcopy(call.arguments),
-                    "raw_arguments": deepcopy(call.raw_arguments),
-                    "parse_error": call.parse_error,
-                }
-                for call in response.tool_calls
-            ],
-        }
-        if final_reply:
-            # Keep the raw evidence, but tell the context projection that the
-            # final assistant turn owns this text.
-            model_payload["final_reply"] = True
-        self._append_turn(
-            state,
-            AgentTurn(
-                role="assistant",
-                content=response.text or "",
-                agent=agent_name,
-                worker_run_id=worker_run_id,
-                scope="worker" if worker_run_id else "conversation",
-                payload={"model": model_payload},
-            ),
-            persist=False,
-        )
-
-    @staticmethod
-    def _merge_usage_totals(
-        *,
-        parent_memory: dict[str, Any],
-        worker_memory: dict[str, Any],
-    ) -> None:
-        worker_totals = worker_memory.get("usage_totals")
-        if not isinstance(worker_totals, dict):
-            return
-        parent_memory = ensure_working_memory_shape(parent_memory)
-        parent_totals = parent_memory.get("usage_totals")
-        if not isinstance(parent_totals, dict):
-            parent_totals = {
-                "calls": 0,
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cached_input_tokens": 0,
-                "reasoning_tokens": 0,
-                "usage_missing": 0,
-            }
-            parent_memory["usage_totals"] = parent_totals
-        for key, value in worker_totals.items():
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                parent_totals[key] = int(parent_totals.get(key) or 0) + int(value)
 
     async def _execute_tool_calls(
         self,
@@ -595,7 +497,7 @@ class ReactRuntime:
         for call in tool_calls:
             # The trace starts when the model proposes the tool, so argument
             # preparation failures are also captured as a complete tool span.
-            self._publish(
+            publish_event(
                 RunEvent.TOOL_STARTED,
                 {
                     "tool": call.name,
@@ -758,14 +660,13 @@ class ReactRuntime:
         previous_agent = state.active_subagent
         state.active_subagent = worker_name
         self._session_store.save_session(state)
-        self._emit_agent_changed(
-            session_id=session_id,
+        emit_agent_changed(
             from_agent=previous_agent,
             to_agent=worker_name,
             reason="worker.started",
             worker_run_id=run_id,
         )
-        self._publish(
+        publish_event(
             RunEvent.WORKER_STARTED,
             {
                 "worker": worker_name,
@@ -806,7 +707,7 @@ class ReactRuntime:
                     "memory": worker_state.working_memory,
                 },
             )
-            self._record_model_call(
+            record_model_call(
                 state=worker_state,
                 response=model_response,
                 agent_name=worker_name,
@@ -870,11 +771,11 @@ class ReactRuntime:
             worker_memory=worker_state.working_memory,
             turn_index=state.turn_index,
         )
-        self._merge_usage_totals(
+        merge_usage_totals(
             parent_memory=state.working_memory,
             worker_memory=worker_state.working_memory,
         )
-        self._persist_worker_evidence_turns(parent_state=state, worker_state=worker_state)
+        persist_worker_evidence_turns(parent_state=state, worker_state=worker_state)
         envelope = self._build_worker_envelope(
             worker_name=worker_name,
             run_id=run_id,
@@ -889,7 +790,7 @@ class ReactRuntime:
         if envelope["status"] == "failed":
             state.last_error = envelope["error"]
             state.working_memory["last_error"] = {"message": envelope["error"]}
-            self._publish(
+            publish_event(
                 RunEvent.WORKER_FAILED,
                 {
                     "worker": worker_name,
@@ -901,7 +802,7 @@ class ReactRuntime:
         else:
             state.last_error = None
             state.working_memory.pop("last_error", None)
-            self._publish(
+            publish_event(
                 RunEvent.WORKER_COMPLETED,
                 {
                     "worker": worker_name,
@@ -915,8 +816,7 @@ class ReactRuntime:
         state.active_subagent = "main_agent"
         state.updated_at = _utc_now_iso()
         self._session_store.save_session(state)
-        self._emit_agent_changed(
-            session_id=session_id,
+        emit_agent_changed(
             from_agent=worker_name,
             to_agent="main_agent",
             reason="worker.completed",
@@ -947,8 +847,8 @@ class ReactRuntime:
             route = result.output.get("route")
             if isinstance(route, dict):
                 payload["distance_m"] = route.get("distance_m")
-                self._publish(RunEvent.NAVIGATION_ROUTE_READY, route)
-            self._publish(RunEvent.TOOL_COMPLETED, payload)
+                publish_event(RunEvent.NAVIGATION_ROUTE_READY, route)
+            publish_event(RunEvent.TOOL_COMPLETED, payload)
             logger.info(
                 "tool.completed session_ref=%s tool_ref=%s agent_ref=%s",
                 log_ref(session_id),
@@ -957,7 +857,7 @@ class ReactRuntime:
             )
         else:
             error_message = result.error_message or "tool execution failed"
-            self._publish(
+            publish_event(
                 RunEvent.TOOL_FAILED,
                 {
                     "tool": result.tool_name,
@@ -974,24 +874,15 @@ class ReactRuntime:
                 log_ref(agent_name),
             )
 
-        self._append_turn(
-            state,
-            AgentTurn(
-                role="tool",
-                name=result.tool_name,
-                call_id=result.call_id,
-                content=json.dumps(result.output, ensure_ascii=False),
-                agent=agent_name,
-                worker_run_id=worker_run_id,
-                scope="worker" if worker_run_id else "conversation",
-                payload={
-                    "status": result.status,
-                    "result": result.output,
-                    "arguments": deepcopy(tool_arguments) if isinstance(tool_arguments, dict) else {},
-                    "argument_evidence": deepcopy(argument_evidence) if isinstance(argument_evidence, dict) else None,
-                },
-            ),
+        record_tool_result_turn(
+            state=state,
+            result=result,
+            agent_name=agent_name,
+            worker_run_id=worker_run_id,
+            tool_arguments=tool_arguments,
             persist=persist,
+            argument_evidence=argument_evidence,
+            session_store=self._session_store if persist else None,
         )
         self._apply_tool_memory(state=state, result=result)
 
@@ -1155,37 +1046,6 @@ class ReactRuntime:
         if isinstance(worker_memory.get("last_mcp_result"), dict):
             parent_memory["last_mcp_result"] = deepcopy(worker_memory["last_mcp_result"])
         return promoted
-
-    def _persist_worker_evidence_turns(
-        self,
-        *,
-        parent_state: AgentSessionState,
-        worker_state: AgentSessionState,
-    ) -> None:
-        """Copy worker tool turns and model-call evidence turns into the parent session."""
-        for turn in worker_state.turns:
-            is_model_turn = (
-                turn.role == "assistant"
-                and isinstance(turn.payload, dict)
-                and isinstance(turn.payload.get("model"), dict)
-            )
-            if turn.role != "tool" and not is_model_turn:
-                continue
-            self._append_turn(
-                parent_state,
-                AgentTurn(
-                    role=turn.role,
-                    content=turn.content,
-                    agent=turn.agent,
-                    name=turn.name,
-                    call_id=turn.call_id,
-                    worker_run_id=turn.worker_run_id,
-                    scope=turn.scope,
-                    payload=deepcopy(turn.payload),
-                    created_at=turn.created_at,
-                ),
-                persist=False,
-            )
 
     def _build_worker_envelope(
         self,
@@ -1449,45 +1309,3 @@ class ReactRuntime:
             raise SessionOwnershipError(state.session_id)
         if state.client_id is None:
             state.client_id = client_id
-
-    def _append_turn(self, state: AgentSessionState, turn: AgentTurn, *, persist: bool = True) -> None:
-        """Append a turn to the session state, with optional persistence."""
-        state.turns.append(turn)
-        state.updated_at = _utc_now_iso()
-        if persist:
-            self._session_store.save_session(state)
-
-    @staticmethod
-    def _publish(event: str, data: dict[str, Any] | None = None, *, output_id: str | None = None) -> None:
-        _run_events.get().publish(event, data, output_id=output_id)
-
-    def _emit_agent_changed(
-        self,
-        *,
-        session_id: str,
-        to_agent: str,
-        reason: str,
-        from_agent: str | None = None,
-        worker_run_id: str | None = None,
-    ) -> None:
-        """Emit an agent change event to the replay buffer."""
-        payload: dict[str, Any] = {
-            "active_subagent": to_agent,
-            "to_subagent": to_agent,
-            "reason": reason,
-        }
-        if from_agent:
-            payload["from_subagent"] = from_agent
-        if worker_run_id:
-            payload["worker_run_id"] = worker_run_id
-        self._publish(RunEvent.SUBAGENT_CHANGED, payload)
-
-    def _publish_assistant_text(self, text: str, *, output_id: str, stream_mode: str) -> None:
-        """Publish reply text as a delta of one output; reasoning is never published."""
-        if not text:
-            return
-        self._publish(
-            RunEvent.ASSISTANT_TOKEN,
-            {"delta": text, "active_subagent": "main_agent", "stream_mode": stream_mode},
-            output_id=output_id,
-        )

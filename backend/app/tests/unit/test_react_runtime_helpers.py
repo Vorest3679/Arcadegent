@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.agent.tools.builtin.executors import db_query as db_query_executor
 from app.agent.tools.builtin.executors import summary as summary_executor
 from app.agent.tools.builtin.executors import result_selection as result_selection_executor
+from app.agent.context.turn_recorder import persist_worker_evidence_turns
 from app.agent.runtime.react_runtime import ReactRuntime
 from app.agent.runtime.session_state import (
     AgentTurn,
@@ -269,7 +270,6 @@ def test_promote_worker_artifacts_keeps_last_mcp_result() -> None:
 
 
 def test_persist_worker_evidence_turns_copies_tool_payload_arguments() -> None:
-    runtime = _runtime()
     parent_state = AgentSessionState(session_id="s_parent")
     worker_state = AgentSessionState(
         session_id="s_worker",
@@ -291,7 +291,7 @@ def test_persist_worker_evidence_turns_copies_tool_payload_arguments() -> None:
         ],
     )
 
-    runtime._persist_worker_evidence_turns(
+    persist_worker_evidence_turns(
         parent_state=parent_state,
         worker_state=worker_state,
     )
