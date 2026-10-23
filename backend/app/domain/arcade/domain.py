@@ -88,11 +88,13 @@ class ArcadeTurnDomain(BaseTurnDomain):
         parent_memory: dict[str, Any],
         worker_memory: dict[str, Any],
         turn_index: int,
+        partial: bool = False,
     ) -> dict[str, Any]:
         return worker_results.promote_worker_artifacts(
             parent_memory=parent_memory,
             worker_memory=worker_memory,
             turn_index=turn_index,
+            partial=partial,
         )
 
     def build_worker_envelope(

@@ -55,8 +55,13 @@ def promote_worker_artifacts(
     parent_memory: dict[str, Any],
     worker_memory: dict[str, Any],
     turn_index: int,
+    partial: bool = False,
 ) -> dict[str, Any]:
-    """Merge a finished worker's artifacts and supporting memory into the parent."""
+    """Merge a finished worker's artifacts and supporting memory into the parent.
+
+    A failed worker's artifacts are still promoted but flagged ``partial`` in
+    ``artifact_meta`` so readers can tell them from a complete result.
+    """
     promoted: dict[str, Any] = {}
     for key in _PROMOTABLE_KEYS:
         value = get_working_memory_artifact(worker_memory, key)
@@ -65,6 +70,8 @@ def promote_worker_artifacts(
         if value is None:
             continue
         set_working_memory_artifact(parent_memory, key, value, turn_index=turn_index)
+        if partial:
+            parent_memory["artifact_meta"][key]["status"] = "partial"
         promoted[key] = deepcopy(value)
     if isinstance(worker_memory.get("last_db_query"), dict):
         parent_memory["last_db_query"] = deepcopy(worker_memory["last_db_query"])

@@ -20,10 +20,10 @@ from app.agent.context.turn_recorder import (
     append_turn,
     merge_usage_totals,
     persist_worker_evidence_turns,
-    record_model_call,
-    record_tool_result_turn,
 )
-from app.agent.llm.provider_adapter import ModelResponse, ProviderAdapter, collect_stream
+from app.agent.llm.provider_adapter import ProviderAdapter
+from app.agent.runtime.actions import ToolActions
+from app.agent.runtime.agent_loop import AgentLoop, LoopSpec
 from app.agent.runtime.domain_port import BaseTurnDomain, TurnDomain
 from app.agent.runtime.events import (
     bind_run_events,
@@ -41,13 +41,11 @@ from app.agent.runtime.lifecycle import (
     LifecycleScope,
     RunScope,
     StateView,
-    StepPolicy,
-    StepScope,
     TurnScope,
     WorkerScope,
 )
-from app.agent.runtime.loop_guard import LoopGuard
-from app.agent.skills.execution import SkillExecution, bind_skill_execution
+from app.agent.runtime.outcome import STATUS_COMPLETED, STATUS_FAILED, LoopOutcome, RunBudget
+from app.agent.skills.execution import SkillExecution
 from app.agent.skills.registry import SkillRegistry
 from app.agent.runtime.session_state import (
     AgentSessionState,
@@ -58,14 +56,17 @@ from app.agent.runtime.session_state import (
     reset_turn_scratch,
 )
 from app.infra.db.protocols import SessionStateRepository
-from app.agent.subagents.subagent_builder import SubAgentBuilder, SubAgentProfile
-from app.agent.tools.base import CAP_CONCLUDES_TURN, CAP_SPAWN_AGENT
-from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
+from app.agent.subagents.subagent_builder import SubAgentBuilder
+from app.agent.tools.registry import ToolRegistry
 from app.infra.observability.logger import get_logger, log_exception_frames, log_ref
 from app.session.events import RunEvent
 from app.session.injector import RunPublisher
 
 logger = get_logger(__name__)
+
+# A turn's total model calls across the main loop and all workers, as a
+# multiple of the per-loop step cap.
+_TOTAL_BUDGET_FACTOR = 4
 
 
 def _utc_now_iso() -> str:
@@ -154,6 +155,49 @@ class AgentKernel:
         self._skill_registry = skill_registry
         self._domain: TurnDomain = domain or BaseTurnDomain()
         self._lifecycle = LifecycleDispatcher(self._domain)
+
+    def _new_loop(self, turn: TurnInput) -> AgentLoop:
+        # Built per run from the current attributes, so replaced collaborators
+        # (tests, evaluation wiring) take effect.
+        async def spawn_worker(
+            *,
+            state: AgentSessionState,
+            worker_name: str,
+            task: str,
+            spawnable: tuple[str, ...],
+            budget: RunBudget | None,
+        ) -> dict[str, Any]:
+            return await self._run_worker(
+                session_id=state.session_id,
+                turn=turn,
+                state=state,
+                worker_name=worker_name,
+                task=task,
+                spawnable=spawnable,
+                budget=(budget or self._new_budget()).child(),
+            )
+
+        actions = ToolActions(
+            tool_registry=self._tool_registry,
+            domain=self._domain,
+            session_store=self._session_store,
+            subagent_builder=self._subagent_builder,
+            emit=self._emit,
+            spawn_worker=spawn_worker,
+        )
+        return AgentLoop(
+            context_builder=self._context_builder,
+            tool_registry=self._tool_registry,
+            provider_adapter=self._provider_adapter,
+            domain=self._domain,
+            actions=actions,
+            new_context=self._lifecycle_context,
+            emit=self._emit,
+            finish_step=self._finish_step,
+        )
+
+    def _new_budget(self) -> RunBudget:
+        return RunBudget(self._max_steps, total_steps=self._max_steps * _TOTAL_BUDGET_FACTOR)
 
     def _environment(self) -> AgentEnvironment:
         return AgentEnvironment(
@@ -359,12 +403,16 @@ class AgentKernel:
 
         if self._skill_registry is not None:
             await asyncio.to_thread(self._skill_registry.refresh)
-        final_text, model_error, output_id = await self._run_main_agent(
+        outcome = await self._run_main_agent(
             turn=turn,
             session_id=session_id,
             state=state,
             ctx=ctx,
+            budget=self._new_budget(),
         )
+        final_text = outcome.text
+        output_id = outcome.output_id
+        model_error = None if outcome.status == STATUS_COMPLETED else outcome.error
 
         reply_source = "model"
         if not final_text:
@@ -456,275 +504,20 @@ class AgentKernel:
         session_id: str,
         state: AgentSessionState,
         ctx: LifecycleContext,
-    ) -> tuple[str | None, dict[str, Any] | None, str | None]:
-        """Return final text, model error and the output_id the final text was published under."""
+        budget: RunBudget,
+    ) -> LoopOutcome:
         profile = self._subagent_builder.get("main_agent")
-        guard = LoopGuard(self._max_steps)
-        final_text: str | None = None
-        final_output_id: str | None = None
-        model_error: dict[str, Any] | None = None
+        spec = LoopSpec(
+            session_id=session_id,
+            state=state,
+            profile=profile,
+            request=turn.request,
+            request_payload=turn.request_payload,
+            budget=budget,
+            scope={"turn": ctx.turn},
+        )
 
-        while not guard.exhausted:
-            step = guard.next()
-            step_ctx = self._lifecycle_context(
-                LifecycleScope.STEP,
-                LifecyclePhase.CREATE,
-                session_id=session_id,
-                turn=ctx.turn,
-                turn_index=state.turn_index,
-                step=StepScope(index=step, policy=StepPolicy(), state=StateView(state)),
-            )
-            try:
-                await self._emit(step_ctx)
-                state.active_subagent = profile.name
-                context = self._context_builder.build(
-                    session_state=state,
-                    request=turn.request,
-                    subagent=profile,
-                )
-                logger.debug(
-                    "chat.context session_ref=%s step=%s subagent_ref=%s allowed_tool_count=%s message_count=%s",
-                    log_ref(session_id),
-                    step,
-                    log_ref(state.active_subagent),
-                    len(profile.allowed_tools),
-                    len(context.messages),
-                )
-                output_id = _new_output_id()
-                model_response, published = await self._call_main_model(
-                    output_id=output_id,
-                    instructions=context.instructions,
-                    messages=context.messages,
-                    tools=await self._tool_registry.tool_definitions(allowed_tools=profile.allowed_tools),
-                    runtime_hints={
-                        **self._domain.runtime_hints(state),
-                        **(step_ctx.step.policy.runtime_hints if step_ctx.step is not None else {}),
-                        "active_subagent": state.active_subagent,
-                        "request": turn.request_payload,
-                        "memory": state.working_memory,
-                    },
-                )
-                # A text response without tool calls becomes the final reply, which
-                # is persisted as its own assistant turn. Mark the evidence so the
-                # context projection does not replay the same text twice.
-                final_reply = (
-                    model_response.error is None
-                    and not model_response.tool_calls
-                    and bool((model_response.text or "").strip())
-                )
-                record_model_call(
-                    state=state,
-                    response=model_response,
-                    agent_name=profile.name,
-                    step=step,
-                    final_reply=final_reply,
-                )
-                if model_response.response_id:
-                    state.previous_response_id = model_response.response_id
-                logger.info(
-                    "chat.step session_ref=%s step=%s subagent_ref=%s tool_calls=%s has_text=%s",
-                    log_ref(session_id),
-                    step,
-                    log_ref(state.active_subagent),
-                    len(model_response.tool_calls),
-                    bool(model_response.text),
-                )
-
-                if model_response.error is not None:
-                    model_error = dict(model_response.error)
-                    state.working_memory["last_error"] = {
-                        "message": model_error.get("message"),
-                        "type": model_error.get("type"),
-                        "source": "model",
-                    }
-                    logger.warning(
-                        "chat.model_error session_ref=%s step=%s error_ref=%s",
-                        log_ref(session_id),
-                        step,
-                        log_ref(str(model_error.get("type") or "unknown")),
-                    )
-                    break
-
-                if model_response.tool_calls:
-                    await self._execute_tool_calls(
-                        session_id=session_id,
-                        turn=turn,
-                        session_state=state,
-                        tool_calls=model_response.tool_calls,
-                        profile=profile,
-                        step_ctx=step_ctx,
-                    )
-                    if state.working_memory.get("reply"):
-                        final_text = str(state.working_memory.get("reply"))
-                        break
-                    continue
-
-                if model_response.text:
-                    final_text = model_response.text.strip()
-                    final_output_id = output_id if published else None
-                    break
-
-                if state.working_memory.get("reply"):
-                    final_text = str(state.working_memory.get("reply"))
-                    break
-            finally:
-                await self._finish_step(step_ctx)
-
-        if final_text is None and model_error is None:
-            model_error = {"type": "step_limit", "message": "agent exhausted its step budget"}
-        return final_text, model_error, final_output_id
-
-    async def _call_main_model(self, *, output_id: str, **request: Any) -> tuple[ModelResponse, bool]:
-        """Run one main-agent model call, publishing its text as one output.
-
-        Returns the response and whether its text was published under ``output_id``.
-        Cancelling the run closes the provider stream through ``collect_stream``.
-        """
-        adapter = self._provider_adapter
-        if not adapter.streaming:
-            response = await adapter.complete(**request)
-            text = (response.text or "").strip()
-            if response.error is not None or not text:
-                return response, False
-            publish_assistant_text(text, output_id=output_id, stream_mode="synthetic")
-            return response, True
-        published = False
-
-        def publish(text: str) -> None:
-            nonlocal published
-            publish_assistant_text(text, output_id=output_id, stream_mode="provider")
-            published = True
-
-        final = await collect_stream(adapter.stream(**request), on_text=publish)
-        return final, published
-
-    async def _execute_tool_calls(
-        self,
-        *,
-        session_id: str,
-        turn: TurnInput,
-        session_state: AgentSessionState,
-        tool_calls: list[Any],
-        profile: SubAgentProfile,
-        worker_run_id: str | None = None,
-        persist: bool = True,
-        step_ctx: LifecycleContext | None = None,
-    ) -> None:
-        for call in tool_calls:
-            # The trace starts when the model proposes the tool, so argument
-            # preparation failures are also captured as a complete tool span.
-            publish_event(
-                RunEvent.TOOL_STARTED,
-                {
-                    "tool": call.name,
-                    "call_id": call.call_id,
-                    "active_subagent": profile.name,
-                    "worker_run_id": worker_run_id,
-                },
-            )
-            preparation_error: str | None = None
-            try:
-                if call.parse_error:
-                    raise ValueError(f"invalid tool arguments: {call.parse_error}")
-                prepared_args, hydrated_fields = await self._tool_registry.prepare_arguments(
-                    tool_name=call.name,
-                    raw_arguments=call.arguments,
-                    runtime_context=session_state.working_memory,
-                )
-            except Exception as exc:
-                prepared_args, hydrated_fields = dict(call.arguments), []
-                preparation_error = f"{type(exc).__name__}: {exc}"
-            argument_evidence = {
-                "raw_arguments": deepcopy(call.raw_arguments),
-                "parsed_arguments": deepcopy(call.arguments),
-                "parse_error": call.parse_error,
-                "prepared_arguments": deepcopy(prepared_args),
-                "hydrated_fields": list(hydrated_fields),
-                "preparation_error": preparation_error,
-            }
-            if preparation_error is not None:
-                logger.warning(
-                    "tool.prepare_failed session_ref=%s tool_ref=%s call_ref=%s agent_ref=%s",
-                    log_ref(session_id),
-                    log_ref(call.name),
-                    log_ref(call.call_id),
-                    log_ref(profile.name),
-                )
-                result = ToolExecutionResult(
-                    call_id=call.call_id,
-                    tool_name=call.name,
-                    status="failed",
-                    output={
-                        "error": {
-                            "type": "argument_preparation_error",
-                            "message": preparation_error,
-                        }
-                    },
-                    error_message=preparation_error,
-                )
-                await self._record_tool_result(
-                    session_id=session_id,
-                    state=session_state,
-                    result=result,
-                    agent_name=profile.name,
-                    worker_run_id=worker_run_id,
-                    tool_arguments=prepared_args,
-                    argument_evidence=argument_evidence,
-                    persist=persist,
-                    step_ctx=step_ctx,
-                )
-                continue
-            logger.info(
-                "tool.call session_ref=%s tool_ref=%s call_ref=%s agent_ref=%s arg_count=%s",
-                log_ref(session_id),
-                log_ref(call.name),
-                log_ref(call.call_id),
-                log_ref(profile.name),
-                len(prepared_args),
-            )
-            if hydrated_fields:
-                logger.debug(
-                    "tool.call.hydrated session_ref=%s tool_ref=%s call_ref=%s field_count=%s",
-                    log_ref(session_id),
-                    log_ref(call.name),
-                    log_ref(call.call_id),
-                    len(hydrated_fields),
-                )
-            with bind_skill_execution(profile.name, session_state.skill_execution):
-                result = await self._tool_registry.execute(
-                    call_id=call.call_id,
-                    tool_name=call.name,
-                    raw_arguments=prepared_args,
-                    allowed_tools=profile.allowed_tools,
-                )
-            if result.status == "completed" and CAP_SPAWN_AGENT in result.capabilities:
-                envelope = await self._run_worker(
-                    session_id=session_id,
-                    turn=turn,
-                    state=session_state,
-                    worker_name=str(result.output.get("worker") or "").strip(),
-                    task=str(result.output.get("task") or "").strip(),
-                    spawnable=self._subagent_builder.node(profile.name).spawnable,
-                )
-                result = ToolExecutionResult(
-                    call_id=result.call_id,
-                    tool_name=result.tool_name,
-                    status="failed" if envelope.get("status") == "failed" else "completed",
-                    output=envelope,
-                    error_message=envelope.get("error"),
-                    capabilities=result.capabilities,
-                )
-            await self._record_tool_result(
-                session_id=session_id,
-                state=session_state,
-                result=result,
-                agent_name=profile.name,
-                worker_run_id=worker_run_id,
-                tool_arguments=prepared_args,
-                argument_evidence=argument_evidence,
-                persist=persist,
-                step_ctx=step_ctx,
-            )
+        return await self._new_loop(turn).run(spec)
 
     async def _run_worker(
         self,
@@ -735,6 +528,7 @@ class AgentKernel:
         worker_name: str,
         task: str,
         spawnable: tuple[str, ...],
+        budget: RunBudget,
     ) -> dict[str, Any]:
         if worker_name not in spawnable or not task:
             return _invalid_worker_envelope(worker_name=worker_name, task=task)
@@ -813,115 +607,28 @@ class AgentKernel:
                 },
             )
 
-            final_text: str | None = None
-            failed_error: str | None = None
-            guard = LoopGuard(self._max_steps)
-            while not guard.exhausted:
-                step = guard.next()
-                step_ctx = self._lifecycle_context(
-                    LifecycleScope.STEP,
-                    LifecyclePhase.CREATE,
-                    session_id=session_id,
-                    worker_run_id=run_id,
-                    worker=worker_scope,
-                    turn_index=worker_state.turn_index,
-                    step=StepScope(index=step, policy=StepPolicy(), state=StateView(worker_state)),
-                )
-                try:
-                    await self._emit(step_ctx)
-                    context = self._context_builder.build(
-                        session_state=worker_state,
-                        request=turn.request,
-                        subagent=worker_profile,
-                    )
-                    logger.debug(
-                        "worker.context session_ref=%s worker_ref=%s run_ref=%s step=%s allowed_tool_count=%s message_count=%s",
-                        log_ref(session_id),
-                        log_ref(worker_name),
-                        log_ref(run_id),
-                        step,
-                        len(worker_profile.allowed_tools),
-                        len(context.messages),
-                    )
-                    model_response = await self._provider_adapter.complete(
-                        instructions=context.instructions,
-                        messages=context.messages,
-                        tools=await self._tool_registry.tool_definitions(allowed_tools=worker_profile.allowed_tools),
-                        runtime_hints={
-                            **self._domain.runtime_hints(worker_state),
-                            **(step_ctx.step.policy.runtime_hints if step_ctx.step is not None else {}),
-                            "active_subagent": worker_name,
-                            "worker_run_id": run_id,
-                            "request": turn.request_payload,
-                            "memory": worker_state.working_memory,
-                        },
-                    )
-                    record_model_call(
-                        state=worker_state,
-                        response=model_response,
-                        agent_name=worker_name,
-                        step=step,
-                        worker_run_id=run_id,
-                    )
-                    if model_response.response_id:
-                        worker_state.previous_response_id = model_response.response_id
-                    logger.info(
-                        "worker.step session_ref=%s worker_ref=%s run_ref=%s step=%s tool_calls=%s has_text=%s",
-                        log_ref(session_id),
-                        log_ref(worker_name),
-                        log_ref(run_id),
-                        step,
-                        len(model_response.tool_calls),
-                        bool(model_response.text),
-                    )
+            worker_spec = LoopSpec(
+                session_id=session_id,
+                state=worker_state,
+                profile=worker_profile,
+                request=turn.request,
+                request_payload=turn.request_payload,
+                budget=budget,
+                scope={"worker_run_id": run_id, "worker": worker_scope},
+                worker_run_id=run_id,
+                publish_text=False,
+                persist=False,
+                fail_on_tool_error=True,
+            )
 
-                    if model_response.error is not None:
-                        failed_error = _short(
-                            str(model_response.error.get("message") or "model call failed"),
-                            limit=240,
-                        )
-                        logger.warning(
-                            "worker.model_error session_ref=%s worker_ref=%s run_ref=%s step=%s has_error=%s",
-                            log_ref(session_id),
-                            log_ref(worker_name),
-                            log_ref(run_id),
-                            step,
-                            True,
-                        )
-                        break
-
-                    if model_response.tool_calls:
-                        await self._execute_tool_calls(
-                            session_id=session_id,
-                            turn=turn,
-                            session_state=worker_state,
-                            tool_calls=model_response.tool_calls,
-                            profile=worker_profile,
-                            worker_run_id=run_id,
-                            persist=False,
-                            step_ctx=step_ctx,
-                        )
-                        if worker_state.working_memory.get("last_error"):
-                            failed_error = _short(
-                                str(worker_state.working_memory.get("last_error")),
-                                limit=240,
-                            )
-                        else:
-                            failed_error = None
-                        continue
-
-                    if model_response.text:
-                        final_text = model_response.text.strip()
-                    break
-                finally:
-                    await self._finish_step(step_ctx)
-
-            if final_text is None and guard.exhausted and failed_error is None:
-                failed_error = "worker exhausted its step budget"
+            outcome = await self._new_loop(turn).run(worker_spec)
+            final_text = outcome.text
+            failed_error = self._worker_failed_error(outcome)
             promoted_artifacts = self._domain.promote_worker_artifacts(
                 parent_memory=state.working_memory,
                 worker_memory=worker_state.working_memory,
                 turn_index=state.turn_index,
+                partial=failed_error is not None,
             )
             commit_worker_evidence()
             envelope = self._domain.build_worker_envelope(
@@ -948,8 +655,8 @@ class AgentKernel:
                     },
                 )
             else:
-                state.last_error = None
-                state.working_memory.pop("last_error", None)
+                # Error recovery belongs to the batch layer: a successful spawn
+                # must not erase a sibling tool failure from the same batch.
                 publish_event(
                     RunEvent.WORKER_COMPLETED,
                     {
@@ -1001,84 +708,16 @@ class AgentKernel:
             await self._safe_emit(worker_ctx)
         return envelope
 
-    async def _record_tool_result(
-        self,
-        *,
-        session_id: str,
-        state: AgentSessionState,
-        result: ToolExecutionResult,
-        agent_name: str,
-        worker_run_id: str | None,
-        tool_arguments: dict[str, Any] | None,
-        persist: bool,
-        argument_evidence: dict[str, Any] | None = None,
-        step_ctx: LifecycleContext | None = None,
-    ) -> None:
-        """Record a tool result: events, evidence turn, kernel memory, then domain projection."""
-        if result.status == "completed":
-            signal = self._domain.tool_result_signal(state=state, result=result)
-            for event_name, event_data in signal.events:
-                publish_event(event_name, event_data)
-            payload: dict[str, Any] = {
-                "tool": result.tool_name,
-                "call_id": result.call_id,
-                "active_subagent": agent_name,
-                "worker_run_id": worker_run_id,
-            }
-            payload.update(signal.completed_fields)
-            publish_event(RunEvent.TOOL_COMPLETED, payload)
-            logger.info(
-                "tool.completed session_ref=%s tool_ref=%s agent_ref=%s",
-                log_ref(session_id),
-                log_ref(result.tool_name),
-                log_ref(agent_name),
-            )
-        else:
-            error_message = result.error_message or "tool execution failed"
-            publish_event(
-                RunEvent.TOOL_FAILED,
-                {
-                    "tool": result.tool_name,
-                    "call_id": result.call_id,
-                    "error": error_message,
-                    "active_subagent": agent_name,
-                    "worker_run_id": worker_run_id,
-                },
-            )
-            logger.warning(
-                "tool.failed session_ref=%s tool_ref=%s agent_ref=%s",
-                log_ref(session_id),
-                log_ref(result.tool_name),
-                log_ref(agent_name),
-            )
-
-        record_tool_result_turn(
-            state=state,
-            result=result,
-            agent_name=agent_name,
-            worker_run_id=worker_run_id,
-            tool_arguments=tool_arguments,
-            persist=persist,
-            argument_evidence=argument_evidence,
-            session_store=self._session_store if persist else None,
-        )
-        memory = state.working_memory
-        if result.status != "completed":
-            error_payload = result.output.get("error")
-            memory["last_error"] = error_payload if error_payload is not None else result.error_message
-            state.updated_at = _utc_now_iso()
-        else:
-            memory.pop("last_error", None)
-            if CAP_CONCLUDES_TURN in result.capabilities:
-                reply = result.output.get("reply")
-                if isinstance(reply, str) and reply.strip():
-                    memory["reply"] = reply.strip()
-        if step_ctx is not None:
-            # The domain projects the result into its memory after the kernel
-            # has applied its own bookkeeping.
-            step_ctx.tool_result = result
-            step_ctx.phase = LifecyclePhase.UPDATE
-            await self._emit(step_ctx)
+    @staticmethod
+    def _worker_failed_error(outcome: LoopOutcome) -> str | None:
+        """Worker failure text: model/tool error first, then the step-limit notice."""
+        if outcome.status == STATUS_COMPLETED:
+            return None
+        if outcome.status == STATUS_FAILED:
+            return _short(str((outcome.error or {}).get("message") or "model call failed"), limit=240)
+        if outcome.pending_tool_error is not None:
+            return _short(outcome.pending_tool_error, limit=240)
+        return str((outcome.error or {}).get("message") or "worker exhausted its step budget")
 
     def _bind_client_scope(self, state: AgentSessionState, client_id: str | None) -> None:
         """Attach a browser-owned client id to new sessions and reject cross-client writes."""

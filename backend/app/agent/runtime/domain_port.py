@@ -66,8 +66,13 @@ class WorkerPolicy(Protocol):
         parent_memory: dict[str, Any],
         worker_memory: dict[str, Any],
         turn_index: int,
+        partial: bool = False,
     ) -> dict[str, Any]:
-        """Merge a finished worker's artifacts into the parent memory."""
+        """Merge a finished worker's artifacts into the parent memory.
+
+        ``partial`` is True when the worker failed: the promoted artifacts are
+        whatever it produced before failing and should be marked as such.
+        """
 
     def build_worker_envelope(
         self,
@@ -135,6 +140,7 @@ class BaseTurnDomain(BaseLifecycleHooks):
         parent_memory: dict[str, Any],
         worker_memory: dict[str, Any],
         turn_index: int,
+        partial: bool = False,
     ) -> dict[str, Any]:
         return {}
 
