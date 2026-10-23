@@ -1,6 +1,6 @@
 # ReAct 运行时核心逻辑
 
-本文说明 `ReactRuntime` 一次对话的执行主线。对应源码：`backend/app/agent/runtime/react_runtime.py`、`backend/app/agent/llm/provider_adapter.py`、`backend/app/agent/llm/streaming.py`。run 的接受、取消和 SSE 传输见 [会话运行生命周期与 SSE](./会话运行生命周期与SSE.md)。
+本文说明 `ReactRuntime` 一次对话的执行主线。对应源码：`backend/app/agent/runtime/react_runtime.py`（应用门面）、`backend/app/agent/runtime/kernel.py`（通用内核）、`backend/app/agent/runtime/lifecycle.py`（作用域与 hook 分发）、`backend/app/agent/runtime/domain_port.py`、`backend/app/agent/llm/provider_adapter.py`、`backend/app/agent/llm/streaming.py`。run 的接受、取消和 SSE 传输见 [会话运行生命周期与 SSE](./会话运行生命周期与SSE.md)。
 
 > 本文目前只写了主 agent 循环与模型输出的发布方式，worker、上下文构建、工具记忆等内容后续补充。
 
@@ -18,8 +18,8 @@ while not guard.exhausted:
     if response.error is not None:
         break                                    # 模型出错：不执行本次的工具调用
     if response.tool_calls:
-        await self._execute_tool_calls(...)      # 含 invoke_worker → _run_worker
-        if memory.get("reply"):                  # summary_tool 写入的回复
+        await self._execute_tool_calls(...)      # spawn_agent 工具 → _run_worker
+        if memory.get("reply"):                  # concludes_turn 工具的回复
             final_text = memory["reply"]; break
         continue                                 # 下一轮，新的 output_id
     if response.text:
@@ -67,8 +67,8 @@ async def _call_main_model(self, *, output_id, **request):
 # _run_chat_session（简化）
 final_text, model_error, output_id = await self._run_main_agent(...)
 if not final_text:
-    final_text, output_id = self._fallback_reply(...), None
-if output_id is None:                            # summary_tool 回复或兜底文案
+    final_text, output_id = domain.fallback_reply(...), None
+if output_id is None:                            # concludes_turn 回复或兜底文案
     output_id = _new_output_id()
     publish("assistant.token", {"delta": final_text, "stream_mode": "synthetic"}, output_id)
 publish("assistant.completed" or "session.failed", {"reply": final_text, ...}, output_id)
@@ -99,6 +99,129 @@ publish("assistant.completed" or "session.failed", {"reply": final_text, ...}, o
 
 - 模型中途出错时，已发出的部分文本仍留在界面上，随后兜底文案以新的 output_id 出现。
 - 中间文本会被定格保留，需要靠 prompt 约束主 agent 不在工具调用前输出空洞客套话。
+
+## 内核与领域端口
+
+`ReactRuntime` 只是应用门面：把 `ChatRequest` 映射成 `TurnInput`，调用 `AgentKernel.run_turn`，再返回领域投影的 `ChatResponse`。通用执行主线在 `AgentKernel` 中，它不认识机厅业务，也不 import `ChatRequest` / `ChatResponse`；业务语义经 `TurnDomain` 注入（机厅实现为 `backend/app/domain/arcade/ArcadeTurnDomain`，由 `core/container.py` 传入）；不传时使用 `BaseTurnDomain`，内核仍能完整跑通一轮。
+
+内核自己维护的不变量，不依赖领域实现：
+
+| 不变量 | 内核做法 |
+| --- | --- |
+| 每轮开始清除上一轮的 `reply`、`last_error` | `reset_turn_scratch`，在 turn 钩子之前执行 |
+| 工具失败写 `last_error`，成功清除 | 记录工具结果时由内核维护；worker 据此判定失败 |
+| 结束本轮 | 工具描述符声明 `concludes_turn` capability，输出 `{"reply": str}` |
+| 派生 worker | 工具声明 `spawn_agent` capability，输出 `{"worker", "task"}`；合法名单来自当前节点的 `AgentNode.spawnable`（`SubAgentBuilder.node(name)`），非法派发由内核返回失败信封 |
+
+领域继承 `BaseTurnDomain`，只覆盖需要的部分。分两类（对应 Vue 中“生命周期钩子改状态”与“render / computed 产出数据”）：
+
+**改状态：生命周期钩子**（详见下一节）
+
+| 钩子 | 时机 | 典型用途 |
+| --- | --- | --- |
+| `on_turn_mount` | 内核重置本轮临时键之后、第一次调模型之前 | 按请求写入本轮领域记忆、判定 intent |
+| `on_step_update` | 每个工具结果经内核记账之后（成功、失败都会触发） | 把工具输出投影进执行该工具的状态 |
+| `on_worker_mount` | worker 状态创建后、第一次调模型之前 | 从只读的父状态挑选记忆写入 worker |
+
+**产出数据：`TurnDomain` 协议的函数**
+
+| 协议 | 方法 | 默认行为 |
+| --- | --- | --- |
+| `TurnMetadata` | `runtime_hints`、`session_event_fields`、`turn_summary` | 无附加字段 |
+| `ToolObserver` | `tool_result_signal`（返回的事件排在 `tool.completed` 之前） | 无事件 |
+| `WorkerPolicy` | `promote_worker_artifacts`、`build_worker_envelope` | 不提升产物、通用信封 |
+| `TurnPresenter` | `fallback_reply`、`turn_display_snapshot`、`build_response` | 通用兜底文本、无展示快照、`TurnReply` |
+
+`backend/app/tests/integration/test_runtime_kernel_domain.py` 直接使用 `AgentKernel.run_turn`，以 `BaseTurnDomain` 和一个最小的非机厅领域验证上述约定。
+
+## 生命周期与作用域（阶段 2.7 设计）
+
+阶段 2.7 核心已实施；本节记录设计，避免实现时把“生命周期”做成另一套隐式状态。
+
+### 从 Vue3 借的是作用域，不是组件
+
+Vue 的 `create → mount → update → unmount` 很适合描述一个对象从构造、绑定环境、更新到释放的过程。Agent 也有类似的层级，但它是异步、可取消、多层嵌套的：
+
+```text
+Session
+  └─ Run
+       └─ Turn
+            └─ ReAct Step
+                 └─ Worker（worker 自身也是一次小型 Run）
+```
+
+因此不照搬 `ref/reactive`、组件实例或 `provide/inject` 魔法，而是采用“作用域 + 状态机 + 显式 hook”：
+
+| 阶段 | Agent 语义 |
+| --- | --- |
+| `create` | 分配状态、校验输入，不产生外部副作用 |
+| `mount` | 绑定环境，加载 session/tool/skill，本轮配置生效 |
+| `update` | 每个 ReAct step / tool result，更新 hints、memory、artifacts |
+| `before_unmount` | 构建响应、flush 业务状态、准备展示快照 |
+| `unmounted` | 清理资源、记录 trace；必须幂等，放在 `finally` |
+| `error` | 异常/取消进入卸载流程，不吞原始错误 |
+
+### ctx 的分栏
+
+```text
+ctx.env       长生命周期服务：provider、tools、skill_registry（不含 session store）
+ctx.run       RunScope：session_id、state
+ctx.turn      TurnScope：turn_index、state、request（不透明）、final_text
+ctx.step      StepScope：index、StepPolicy、state
+ctx.worker    WorkerScope：worker_name、run_id、state、parent_state（只读）
+ctx.state     最内层作用域的 state（worker > step > turn > run）
+ctx.memory    ctx.state 当前的 working_memory
+ctx.events    通用事件发布口
+ctx.response  before_unmount 时为已投影的响应（只读通知）
+```
+
+- `state` 是 `StateView`，每次读取反映 `AgentSessionState` 的当前值。钩子可以写的只有：`working_memory` 中除内核保留键之外的键（领域记忆），以及 `intent` 属性。其余属性（`status`、`turns`、替换 `working_memory` 对象等）赋值会抛 `AttributeError`；读取时返回深拷贝快照，列表以元组返回，修改历史 turn 的嵌套 payload 或 skill 执行状态不会影响内核。此前的浅层冻结只保护列表本身，会泄漏内部可变对象。
+- 内核保留键 `reply`、`last_error`、`usage_totals`、`worker_runs`（`session_state.KERNEL_MEMORY_KEYS`）：dispatcher 在被覆盖的钩子前后比较这些键，变化即恢复原值并抛 `LifecycleViolation`，本轮按失败处理。未覆盖的默认钩子不做比较；最坏情况（20 条 worker 记录）每次约 4 ms。
+- 领域辅助函数的状态参数标注为 `DomainState` 协议（`session_id`、`turn_index`、`working_memory`、可写 `intent`），钩子传入的 `StateView` 和单测直接构造的 `AgentSessionState` 都满足它。
+- `parent_state` 是只读视图：`working_memory` 返回副本，`intent` 不可赋值；worker 只能改自己的隔离状态。
+- session store 不在 `ctx.env` 中。
+- `StepPolicy` 是“这一步怎么做”，目前只有 `runtime_hints`，在 step `create` 钩子里可写，合并进本步 provider hints。临时工具开关、停止条件、`TurnConfig`（model / reasoning_effort）等到真正接入时再加，不提前暴露不生效的字段。
+- `memory` 在 `working_memory` 拆分为内核区/领域区之前是整份记忆（保留键受上面的检查保护）；拆分后改为领域命名空间。
+
+`plan` 这个名字留给真正的 planner。以后做多步规划时，`ctx.plan` 应该是 `Plan(steps=[...])`，而不是一个配置袋。
+
+### 两个容易放错的字段
+
+这是设计讨论里最容易混淆的地方，单独记下：
+
+- **`spawnable_workers` 不是 config，是拓扑。** 它表示“当前 agent 节点能派发哪些 worker”，应放到 `AgentNode.spawnable`；全局“存在哪些 worker”仍由 `SubAgentBuilder` 维护。2.7 起 `_run_worker` 只按当前节点的 `AgentNode.spawnable` 校验。若本轮要临时收紧，放 `StepPolicy`，不要放 `TurnConfig`。
+- **`payload_mapper` 不是 config，是领域依赖。** `ArcadePayloadMapper` 带 geo resolver、缓存和 HTTP 配置，是长生命周期服务，只在 `ArcadeTurnDomain.build_response` 使用；应留在 `ArcadeTurnDomain` 构造注入，不能塞进通用 `TurnConfig`。否则内核被迫知道“payload mapper”这个机厅概念，每轮 config 还会携带服务对象。
+
+### domain 如何进入内核
+
+domain 进入内核时会被翻译成 core 能理解的概念，但语义由适配器保留：
+
+| domain 语义 | core 概念 |
+| --- | --- |
+| `ChatRequest` | `TurnInput.request`（不透明） |
+| 机厅 intent / memory | `ctx.memory["arcade"]`、`runtime_hints` |
+| 店铺/路线产物 | `Artifact` 或命名空间 memory |
+| `navigation.route_ready` | 通用 `Event(name, data)` |
+| `ArcadePayloadMapper` | domain 构造依赖，不进 core |
+| worker 合法名单 | `AgentNode.spawnable` |
+| `ChatResponse` | presenter 返回的 opaque result |
+
+原则是：**不是把 domain 削平，而是让 core 只携带、不解释**。domain 在适配器内部继续使用自己的服务、类型和规则；跨边界只传 core DTO。
+
+### 分发与收尾
+
+`runtime/lifecycle.py` 计划提供 `LifecycleEvent`、`LifecycleDispatcher` 和默认 no-op 的 `BaseLifecycleHooks`：
+
+- 内核只发 `(scope, phase, ctx)`，dispatcher 映射到 `on_turn_mount`、`on_turn_before_unmount` 等显式方法。
+- 当前只注入一个 domain，hook 顺序就是调用点顺序；多 domain 的注册顺序/逆序执行留给后续。
+- `unmounted` 恰好一次；异常和 `CancelledError` 也走 `before_unmount → unmounted`。
+- main/worker 的整个 step（从 `on_step_start`、上下文构建到模型证据和工具结果处理）由统一 `try/finally` 收尾。避免只在模型调用和工具执行周围清理，导致更早的钩子或上下文异常遗漏 `on_step_end`。回归测试覆盖两个循环在开始钩子、上下文构建时的异常与取消，并检查清理次数和原始异常。
+- `create/mount/update` 失败则中止并进入错误卸载；`before_unmount` 失败仍执行 `unmounted`；`unmounted` 失败只记录，不覆盖主错误。
+- 改状态的逻辑只在钩子里（`on_turn_mount`、`on_step_update`、`on_worker_mount`），同一时机没有第二个入口；返回数据的策略（hints、`tool_result_signal`、worker envelope、`build_response`）仍是显式函数，由内核直接调用。`BaseLifecycleHooks` 的默认钩子都是空操作，覆盖时不需要调用 `super()`。
+- 钩子可写之后，多个领域并存时的执行顺序会影响结果；接入第二个领域前须先实现“注册顺序挂载、逆序卸载”。
+- worker 收尾：证据回写与 usage 合并恰好执行一次——正常路径在构建信封前执行；异常或取消时在 `finally` 中补做，并把父会话 `active_subagent` 恢复为 `main_agent` 后保存，run 的终态（failed / cancelled）仍交给 run/session 层记录。
+
+2.7–2.8 已把这些边界显式化：`runtime/lifecycle.py` 提供 dispatcher、`StateView`、保留键检查和 `BaseLifecycleHooks`；`AgentKernel` 在 run/turn/step/worker 边界发事件；`AgentNode.spawnable` 是唯一的 worker 合法名单；`StepPolicy.runtime_hints` 已合并进 provider hints。剩余：model/reasoning_effort 进入 provider 请求（阶段 3）、session scope 事件、多 domain 钩子顺序、并行 worker 父级顺序（阶段 7）、公共 `TurnContext/TurnState/ToolResult` 契约（阶段 5/8）。
 
 ## 配置
 

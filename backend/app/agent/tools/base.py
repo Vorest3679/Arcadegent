@@ -7,6 +7,12 @@ from typing import Any, Callable, Protocol
 
 ToolValidator = Callable[[dict[str, Any]], Any]
 
+# Capabilities the execution kernel acts on. A ``spawn_agent`` tool returns
+# ``{"worker": str, "task": str}`` and the kernel runs that worker; a
+# ``concludes_turn`` tool returns ``{"reply": str}`` and its reply ends the turn.
+CAP_SPAWN_AGENT = "spawn_agent"
+CAP_CONCLUDES_TURN = "concludes_turn"
+
 
 @dataclass(frozen=True)
 class ToolInputValidationError(Exception):

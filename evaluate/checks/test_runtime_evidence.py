@@ -7,11 +7,13 @@ import pytest
 from app.agent.llm.provider_adapter import ModelResponse, ModelToolCall
 from app.agent.context.turn_recorder import merge_usage_totals, record_model_call
 from app.agent.runtime.events import bind_run_events, reset_run_events
+from app.agent.runtime.kernel import TurnInput
 from app.agent.runtime.react_runtime import ReactRuntime
 from app.agent.runtime.session_state import AgentSessionState, state_from_dict, state_to_dict
 from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
+from app.domain.arcade.domain import ArcadeTurnDomain
 from app.protocol.messages import ChatRequest
 from app.session.injector import CollectingPublisher
 
@@ -42,6 +44,7 @@ def test_model_and_worker_usage_count_each_request_once_and_keep_missing_evidenc
 @pytest.mark.parametrize("failure", ["unknown_tool", "prepare_failed", "invalid_json"])
 def test_preparation_failure_closes_event_pair_and_preserves_raw_arguments(failure, tmp_path):
     runtime = object.__new__(ReactRuntime)
+    runtime._domain = ArcadeTurnDomain()
     runtime._tool_registry = ToolRegistry(providers=[], permission_checker=ToolPermissionChecker(
         policy_file=tmp_path / "no-policy.yaml"))
     if failure == "prepare_failed":
@@ -54,9 +57,17 @@ def test_preparation_failure_closes_event_pair_and_preserves_raw_arguments(failu
                          parse_error="invalid JSON" if failure == "invalid_json" else None)
     published = CollectingPublisher()
     token = bind_run_events(published)
+    request = ChatRequest(message="查找机厅")
+    turn = TurnInput(
+        session_id=None,
+        client_id=None,
+        message=request.message,
+        request=request,
+        request_payload=request.model_dump(mode="json"),
+    )
     try:
         asyncio.run(runtime._execute_tool_calls(
-            session_id=state.session_id, request=ChatRequest(message="查找机厅"), session_state=state,
+            session_id=state.session_id, turn=turn, session_state=state,
             tool_calls=[call], profile=SubAgentBuilder().get("main_agent"), persist=False,
         ))
     finally:

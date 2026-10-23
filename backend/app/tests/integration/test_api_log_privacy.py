@@ -174,7 +174,7 @@ def test_runtime_failure_logs_exception_type_without_message(tmp_path) -> None:
     plain_stream = io.StringIO()
     plain_handler = logging.StreamHandler(plain_stream)
     plain_handler.setFormatter(logging.Formatter("%(message)s"))
-    runtime_logger = logging.getLogger("app.agent.runtime.react_runtime")
+    runtime_logger = logging.getLogger("app.agent.runtime.kernel")
     root.addHandler(handler)
     runtime_logger.addHandler(plain_handler)
     try:
@@ -188,7 +188,7 @@ def test_runtime_failure_logs_exception_type_without_message(tmp_path) -> None:
     assert secret not in output
     assert "chat.failed" in output
     assert "exception_type=RuntimeError" in output
-    assert "agent/runtime/react_runtime.py:" in output
+    assert "agent/runtime/kernel.py:" in output
     assert __file__ not in output
     assert secret not in plain_stream.getvalue()
-    assert "app_frames=agent/runtime/react_runtime.py:" in plain_stream.getvalue()
+    assert "app_frames=agent/runtime/kernel.py:" in plain_stream.getvalue()

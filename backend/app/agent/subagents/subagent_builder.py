@@ -8,6 +8,7 @@ from typing import Any, Literal, cast
 
 import yaml
 
+from app.agent.subagents.agent_node import AgentNode
 from app.protocol.messages import IntentType
 
 SubAgentName = Literal["main_agent", "search_worker", "navigation_worker"]
@@ -70,6 +71,21 @@ class SubAgentBuilder:
 
     def get(self, name: str) -> SubAgentProfile:
         return self._profiles.get(name, self._profiles["main_agent"])
+
+    def worker_names(self) -> tuple[str, ...]:
+        """Profiles the main agent may spawn as isolated workers."""
+        return tuple(name for name in self._profiles if name != "main_agent")
+
+    def node(self, name: str) -> AgentNode:
+        """Resolve a profile into the kernel-facing node policy."""
+        profile = self.get(name)
+        is_main = profile.name == "main_agent"
+        return AgentNode(
+            profile=profile,
+            scope="conversation" if is_main else "worker",
+            publish_text=is_main,
+            spawnable=self.worker_names() if is_main else (),
+        )
 
     def resolve_initial(self, intent: IntentType | None) -> SubAgentName:
         _ = intent

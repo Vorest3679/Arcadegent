@@ -1,4 +1,4 @@
-"""Unit tests for ReactRuntime helper behaviors."""
+"""Unit tests for arcade domain and runtime helper behaviors."""
 
 from __future__ import annotations
 
@@ -6,18 +6,20 @@ from app.agent.tools.builtin.executors import db_query as db_query_executor
 from app.agent.tools.builtin.executors import summary as summary_executor
 from app.agent.tools.builtin.executors import result_selection as result_selection_executor
 from app.agent.context.turn_recorder import persist_worker_evidence_turns
-from app.agent.runtime.react_runtime import ReactRuntime
 from app.agent.runtime.session_state import (
     AgentTurn,
     AgentSessionState,
     get_working_memory_artifact,
+    reset_turn_scratch,
     set_working_memory_artifact,
 )
 from app.agent.tools.registry import ToolExecutionResult
+from app.domain.arcade import observations
+from app.domain.arcade.domain import ArcadeTurnDomain
 
 
-def _runtime() -> ReactRuntime:
-    return object.__new__(ReactRuntime)
+def _domain() -> ArcadeTurnDomain:
+    return ArcadeTurnDomain()
 
 
 def test_prepare_tool_arguments_hydrates_search_summary_from_memory() -> None:
@@ -68,34 +70,36 @@ def test_result_selection_rejects_stale_or_duplicate_ids_and_allows_empty() -> N
 
 
 def test_explicit_selection_overrides_candidates_and_detail_for_display() -> None:
-    runtime = _runtime()
+    domain = _domain()
     memory: dict = {}
     set_working_memory_artifact(memory, "shops", [{"source_id": 1}, {"source_id": 2}, {"source_id": 3}], turn_index=1)
     set_working_memory_artifact(memory, "shop", {"source_id": 3}, turn_index=1)
     set_working_memory_artifact(memory, "selected_shops", [{"source_id": 2}, {"source_id": 1}], turn_index=1)
 
-    assert [row["source_id"] for row in runtime._display_shops(memory)] == [2, 1]
+    assert [row["source_id"] for row in domain.display_shops(memory)] == [2, 1]
 
 
 def test_query_replaces_old_selection_and_selection_commits_new_cards() -> None:
-    runtime = _runtime()
+    domain = _domain()
     state = AgentSessionState(session_id="s_new_query")
     set_working_memory_artifact(state.working_memory, "selected_shops", [{"source_id": 99}], turn_index=1)
     state.turn_index = 2
-    runtime._apply_tool_memory(
+    observations.apply_tool_result(
+        intent_policy=domain.intent_policy,
         state=state,
         result=ToolExecutionResult(call_id="query", tool_name="db_query_tool", status="completed", output={
             "shops": [{"source_id": 1}, {"source_id": 2}, {"source_id": 3}], "total": 3,
         }),
     )
     assert get_working_memory_artifact(state.working_memory, "selected_shops") is None
-    runtime._apply_tool_memory(
+    observations.apply_tool_result(
+        intent_policy=domain.intent_policy,
         state=state,
         result=ToolExecutionResult(call_id="select", tool_name="result_selection_tool", status="completed", output={
             "selected_shop_ids": [2, 1], "shops": [{"source_id": 2}, {"source_id": 1}],
         }),
     )
-    assert [row["source_id"] for row in runtime._display_shops(state.working_memory)] == [2, 1]
+    assert [row["source_id"] for row in domain.display_shops(state.working_memory)] == [2, 1]
 
 
 def test_prepare_tool_arguments_hydrates_navigation_summary_from_memory() -> None:
@@ -198,14 +202,14 @@ def test_prepare_tool_arguments_overrides_default_sort_with_title_quantity_conte
 
 
 def test_build_worker_memory_snapshot_copies_promotable_artifacts() -> None:
-    runtime = _runtime()
+    domain = _domain()
     state = AgentSessionState(session_id="s_snapshot")
     set_working_memory_artifact(state.working_memory, "shops", [{"name": "Alpha"}])
     set_working_memory_artifact(state.working_memory, "route", {"provider": "amap", "mode": "walking"})
     state.working_memory["keyword"] = "maimai"
     state.working_memory["last_db_query"] = {"keyword": "maimai"}
 
-    worker_memory = runtime._build_worker_memory_snapshot(state.working_memory)
+    worker_memory = domain.worker_memory_snapshot(state.working_memory)
 
     assert get_working_memory_artifact(worker_memory, "shops")[0]["name"] == "Alpha"
     assert get_working_memory_artifact(worker_memory, "route") is None
@@ -213,18 +217,20 @@ def test_build_worker_memory_snapshot_copies_promotable_artifacts() -> None:
     assert worker_memory["last_db_query"]["keyword"] == "maimai"
 
 
-def test_prepare_turn_memory_clears_stale_reply() -> None:
-    runtime = _runtime()
-    prepared = runtime._prepare_turn_memory({"reply": "old reply"})
+def test_reset_turn_scratch_clears_stale_reply_and_error() -> None:
+    prepared = reset_turn_scratch({"reply": "old reply", "last_error": {"message": "x"}, "keyword": "maimai"})
 
     assert "reply" not in prepared
+    assert "last_error" not in prepared
+    assert prepared["keyword"] == "maimai"
 
 
 def test_apply_tool_memory_keeps_mcp_resolved_locations() -> None:
-    runtime = _runtime()
+    domain = _domain()
     state = AgentSessionState(session_id="s_mcp_geo")
 
-    runtime._apply_tool_memory(
+    observations.apply_tool_result(
+        intent_policy=domain.intent_policy,
         state=state,
         result=ToolExecutionResult(
             call_id="call_geo",
@@ -247,7 +253,7 @@ def test_apply_tool_memory_keeps_mcp_resolved_locations() -> None:
 
 
 def test_promote_worker_artifacts_keeps_last_mcp_result() -> None:
-    runtime = _runtime()
+    domain = _domain()
     parent_state = AgentSessionState(session_id="s_parent")
     worker_state = AgentSessionState(session_id="s_worker")
     worker_state.working_memory["last_mcp_result"] = {
@@ -260,7 +266,7 @@ def test_promote_worker_artifacts_keeps_last_mcp_result() -> None:
         },
     }
 
-    runtime._promote_worker_artifacts(
+    domain.promote_worker_artifacts(
         parent_memory=parent_state.working_memory,
         worker_memory=worker_state.working_memory,
         turn_index=parent_state.turn_index,

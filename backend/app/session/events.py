@@ -6,7 +6,8 @@ be added, existing ones are not renamed without updating
 
 Business events (`kind="event"`) are published by the runtime:
 
-- `session.started`: `intent`, `model`, `active_subagent`.
+- `session.started`: `model`, `active_subagent`, plus optional domain fields
+  (the arcade domain supplies `intent`).
 - `subagent.changed`: `active_subagent`, `to_subagent`, `reason`,
   optional `from_subagent`, `worker_run_id`.
 - `worker.started`: `worker`, `run_id`, `task_preview`, `active_subagent`.

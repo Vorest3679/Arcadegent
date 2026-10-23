@@ -18,6 +18,7 @@ from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.mcp_gateway import MCPToolGateway, build_mcp_server_configs
 from app.agent.tools.registry import ToolRegistry
 from app.core.config import Settings
+from app.domain.arcade.domain import ArcadeTurnDomain
 from app.infra.db.local import LocalArcadeStore
 from app.infra.db.online import SupabaseArcadeRepository, SupabaseRepositoryConfig, build_supabase_session_repository
 from app.infra.db.protocols import ArcadeRepository, SessionStateRepository
@@ -123,9 +124,9 @@ def build_container(
         tool_registry=tool_registry,
         provider_adapter=provider_adapter,
         session_store=session_store,
-        arcade_payload_mapper=arcade_payload_mapper,
         max_steps=settings.agent_max_steps,
         skill_registry=skill_registry,
+        domain=ArcadeTurnDomain(payload_mapper=arcade_payload_mapper),
     )
     chat_runs = ChatRunService(
         runtime=react_runtime,

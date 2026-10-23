@@ -3,7 +3,7 @@
   "kind": "function",
   "description": "Dispatch a focused task brief to a worker and return its structured result envelope.",
   "executor": "app.agent.tools.builtin.executors.invoke_worker:execute",
-  "capabilities": ["builtin", "read_only", "orchestration"],
+  "capabilities": ["builtin", "read_only", "orchestration", "spawn_agent"],
   "metadata": {
     "tool_function": "app.agent.tools.builtin.executors.invoke_worker:execute"
   },

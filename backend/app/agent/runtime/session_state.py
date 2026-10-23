@@ -78,6 +78,23 @@ def ensure_working_memory_shape(memory: dict[str, Any] | None) -> dict[str, Any]
     return normalized
 
 
+# Working-memory keys owned by the kernel. Lifecycle hooks may write any other
+# key (domain memory) but never these.
+KERNEL_MEMORY_KEYS: tuple[str, ...] = ("reply", "last_error", "usage_totals", "worker_runs")
+
+
+def reset_turn_scratch(memory: dict[str, Any] | None) -> dict[str, Any]:
+    """Clear kernel-owned per-turn keys before a new turn starts.
+
+    ``reply`` ends the turn once a concluding tool sets it and ``last_error``
+    marks the latest tool failure, so neither may leak into the next turn.
+    """
+    normalized = ensure_working_memory_shape(memory)
+    normalized.pop("reply", None)
+    normalized.pop("last_error", None)
+    return normalized
+
+
 def get_working_memory_artifact(memory: dict[str, Any] | None, key: str) -> Any:
     normalized = ensure_working_memory_shape(memory)
     artifacts = normalized["artifacts"]

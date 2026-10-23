@@ -30,6 +30,11 @@ def reset_run_events(token: Token[RunPublisher]) -> None:
     _run_events.reset(token)
 
 
+def current_run_events() -> RunPublisher:
+    """Publisher bound to the current context (or a null publisher)."""
+    return _run_events.get()
+
+
 def publish(event: str, data: dict[str, Any] | None = None, *, output_id: str | None = None) -> None:
     """Publish one business event on the publisher bound to this context."""
     _run_events.get().publish(event, data, output_id=output_id)

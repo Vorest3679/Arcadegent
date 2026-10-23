@@ -53,6 +53,7 @@ class ToolExecutionResult:
     status: str
     output: dict[str, Any]
     error_message: str | None = None
+    capabilities: tuple[str, ...] = ()
 
 
 class ToolRegistry:
@@ -168,6 +169,7 @@ class ToolRegistry:
                 status=result.status,
                 output=result.output,
                 error_message=result.error_message,
+                capabilities=descriptor.capabilities,
             )
         except ToolPermissionError as exc:
             return self._failed(

@@ -337,9 +337,9 @@ def test_invalid_json_cannot_be_hydrated_into_success(tmp_path: Path) -> None:
     assert evidence["hydrated_fields"] == []
 
 def test_previous_route_is_not_promoted_as_new_result() -> None:
-    from app.agent.runtime.react_runtime import ReactRuntime
     from app.agent.runtime.session_state import set_working_memory_artifact
-    runtime = object.__new__(ReactRuntime)
+    from app.domain.arcade.domain import ArcadeTurnDomain
+    domain = ArcadeTurnDomain()
     memory = {}
     set_working_memory_artifact(memory, "route", {"distance_m": 100}, turn_index=1)
     set_working_memory_artifact(memory, "shops", [{"source_id": 10}], turn_index=1)
@@ -347,15 +347,15 @@ def test_previous_route_is_not_promoted_as_new_result() -> None:
         "origin": {"lng": 116.3, "lat": 39.9},
         "destination": {"lng": 116.4, "lat": 39.91},
     }
-    prepared = runtime._prepare_turn_memory(memory)
+    prepared = domain.prepare_turn_memory(memory)
     assert "route" not in prepared["artifacts"]
-    worker = runtime._build_worker_memory_snapshot(prepared)
+    worker = domain.worker_memory_snapshot(prepared)
     assert worker["artifacts"]["shops"] == [{"source_id": 10}]
     assert worker["last_route_endpoints"] == memory["last_route_endpoints"]
-    assert runtime._promote_worker_artifacts(parent_memory=memory, worker_memory=worker, turn_index=2) == {}
+    assert domain.promote_worker_artifacts(parent_memory=memory, worker_memory=worker, turn_index=2) == {}
     assert memory["artifact_meta"]["shops"]["turn_index"] == 1
     set_working_memory_artifact(worker, "shops", [], turn_index=2)
-    assert runtime._promote_worker_artifacts(parent_memory=memory, worker_memory=worker, turn_index=2) == {"shops": []}
+    assert domain.promote_worker_artifacts(parent_memory=memory, worker_memory=worker, turn_index=2) == {"shops": []}
 
 def test_online_route_unavailable_does_not_estimate() -> None:
     import pytest
