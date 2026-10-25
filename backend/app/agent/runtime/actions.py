@@ -18,7 +18,7 @@ from app.agent.context.turn_recorder import record_tool_result_turn
 from app.agent.runtime.domain_port import TurnDomain
 from app.agent.runtime.events import publish as publish_event
 from app.agent.runtime.lifecycle import LifecycleContext, LifecyclePhase
-from app.agent.runtime.outcome import RunBudget
+from app.agent.runtime.budget import RunBudget
 from app.agent.runtime.session_state import AgentSessionState
 from app.agent.skills.execution import bind_skill_execution
 from app.agent.subagents.subagent_builder import SubAgentBuilder, SubAgentProfile

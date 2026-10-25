@@ -27,13 +27,7 @@ from app.agent.runtime.lifecycle import (
     StepPolicy,
     StepScope,
 )
-from app.agent.runtime.outcome import (
-    STATUS_COMPLETED,
-    STATUS_FAILED,
-    STATUS_STEP_LIMIT,
-    LoopOutcome,
-    RunBudget,
-)
+from app.agent.runtime.budget import RunBudget
 from app.agent.runtime.session_state import AgentSessionState
 from app.agent.subagents.subagent_builder import SubAgentProfile
 from app.agent.tools.base import CAP_CONCLUDES_TURN
@@ -41,6 +35,31 @@ from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
 from app.infra.observability.logger import get_logger, log_ref
 
 logger = get_logger(__name__)
+
+STATUS_COMPLETED = "completed"
+STATUS_FAILED = "failed"
+STATUS_STEP_LIMIT = "step_limit"
+
+
+@dataclass
+class LoopOutcome:
+    """How one agent loop (main or worker) ended.
+
+    ``text`` is the final text when the loop produced one, even if the status is
+    ``failed`` (a worker that recovered in prose after an unresolved tool error).
+    ``error`` carries ``type``/``message``: the model error, an unresolved tool
+    error, or the step-limit notice. ``pending_tool_error`` is the unresolved
+    tool error still standing when the step budget ran out. ``tool_errors`` is
+    every tool failure seen in the loop, in order, including ones a later
+    success recovered from.
+    """
+
+    status: str
+    text: str | None = None
+    output_id: str | None = None
+    error: dict[str, Any] | None = None
+    pending_tool_error: str | None = None
+    tool_errors: list[str] = field(default_factory=list)
 
 ContextFactory = Callable[..., LifecycleContext]
 LifecycleCall = Callable[[LifecycleContext], Awaitable[None]]

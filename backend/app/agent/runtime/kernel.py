@@ -23,7 +23,7 @@ from app.agent.context.turn_recorder import (
 )
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.actions import ToolActions
-from app.agent.runtime.agent_loop import AgentLoop, LoopSpec
+from app.agent.runtime.agent_loop import STATUS_COMPLETED, STATUS_FAILED, AgentLoop, LoopOutcome, LoopSpec
 from app.agent.runtime.domain_port import BaseTurnDomain, TurnDomain
 from app.agent.runtime.events import (
     bind_run_events,
@@ -44,7 +44,7 @@ from app.agent.runtime.lifecycle import (
     TurnScope,
     WorkerScope,
 )
-from app.agent.runtime.outcome import STATUS_COMPLETED, STATUS_FAILED, LoopOutcome, RunBudget
+from app.agent.runtime.budget import RunBudget
 from app.agent.skills.execution import SkillExecution
 from app.agent.skills.registry import SkillRegistry
 from app.agent.runtime.session_state import (

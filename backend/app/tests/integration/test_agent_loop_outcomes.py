@@ -10,7 +10,7 @@ import pytest
 
 from app.agent.llm.provider_adapter import ModelResponse, ModelToolCall
 from app.agent.runtime.domain_port import BaseTurnDomain
-from app.agent.runtime.outcome import RunBudget
+from app.agent.runtime.budget import RunBudget
 from app.session.events import RunEvent
 from backend.app.tests.integration.test_runtime_kernel_domain import (
     _Provider,
