@@ -506,11 +506,11 @@ class AgentKernel:
         ctx: LifecycleContext,
         budget: RunBudget,
     ) -> LoopOutcome:
-        profile = self._subagent_builder.get("main_agent")
+        node = self._subagent_builder.node("main_agent")
         spec = LoopSpec(
             session_id=session_id,
             state=state,
-            profile=profile,
+            node=node,
             request=turn.request,
             request_payload=turn.request_payload,
             budget=budget,
@@ -533,7 +533,7 @@ class AgentKernel:
         if worker_name not in spawnable or not task:
             return _invalid_worker_envelope(worker_name=worker_name, task=task)
 
-        worker_profile = self._subagent_builder.get(worker_name)
+        worker_node = self._subagent_builder.node(worker_name)
         if self._skill_registry is not None:
             await asyncio.to_thread(self._skill_registry.refresh)
         run_id = f"wrk_{uuid4().hex[:10]}"
@@ -610,7 +610,7 @@ class AgentKernel:
             worker_spec = LoopSpec(
                 session_id=session_id,
                 state=worker_state,
-                profile=worker_profile,
+                node=worker_node,
                 request=turn.request,
                 request_payload=turn.request_payload,
                 budget=budget,

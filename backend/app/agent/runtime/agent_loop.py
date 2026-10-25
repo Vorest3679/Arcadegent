@@ -15,7 +15,8 @@ from uuid import uuid4
 
 from app.agent.context.context_builder import ContextBuilder
 from app.agent.context.turn_recorder import record_model_call
-from app.agent.llm.provider_adapter import ModelResponse, ProviderAdapter, collect_stream
+from app.agent.llm.model_gateway import ThinkRequest, ThinkResult, think
+from app.agent.llm.provider_adapter import ModelResponse, ProviderAdapter
 from app.agent.runtime.domain_port import TurnDomain
 from app.agent.runtime.actions import ToolActions
 from app.agent.runtime.events import publish_assistant_text
@@ -29,6 +30,7 @@ from app.agent.runtime.lifecycle import (
 )
 from app.agent.runtime.budget import RunBudget
 from app.agent.runtime.session_state import AgentSessionState
+from app.agent.subagents.agent_node import AgentNode
 from app.agent.subagents.subagent_builder import SubAgentProfile
 from app.agent.tools.base import CAP_CONCLUDES_TURN
 from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
@@ -75,7 +77,7 @@ class LoopSpec:
 
     session_id: str
     state: AgentSessionState
-    profile: SubAgentProfile
+    node: AgentNode
     request: Any
     request_payload: dict[str, Any]
     budget: RunBudget
@@ -89,6 +91,10 @@ class LoopSpec:
     persist: bool = True
     # Worker: a tool error still unresolved at the end fails the loop.
     fail_on_tool_error: bool = False
+
+    @property
+    def profile(self) -> SubAgentProfile:
+        return self.node.profile
 
     @property
     def kind(self) -> str:
@@ -161,14 +167,19 @@ class AgentLoop:
                     hints["worker_run_id"] = spec.worker_run_id
                 hints["request"] = spec.request_payload
                 hints["memory"] = state.working_memory
-                response, published = await self._call_model(
+                thought = await self._call_model(
                     spec,
                     output_id=step_output_id,
-                    instructions=context.instructions,
-                    messages=context.messages,
-                    tools=await self._tool_registry.tool_definitions(allowed_tools=profile.allowed_tools),
-                    runtime_hints=hints,
+                    request=ThinkRequest(
+                        instructions=context.instructions,
+                        messages=context.messages,
+                        tools=await self._tool_registry.tool_definitions(allowed_tools=profile.allowed_tools),
+                        model=spec.node.model,
+                        reasoning_effort=spec.node.reasoning_effort,
+                        hints=hints,
+                    ),
                 )
+                response, published = thought.response, thought.published
                 text = (response.text or "").strip()
                 # A text response without tool calls becomes the final reply, which
                 # the main agent persists as its own assistant turn. Mark the
@@ -279,31 +290,15 @@ class AgentLoop:
                 reply = candidate.strip()
         return reply
 
-    async def _call_model(self, spec: LoopSpec, *, output_id: str, **request: Any) -> tuple[ModelResponse, bool]:
-        """Run one model call; the main agent publishes its text as one output.
+    async def _call_model(self, spec: LoopSpec, *, output_id: str, request: ThinkRequest) -> ThinkResult:
+        """Run one model call; the main agent publishes its text as one output."""
+        on_text = None
+        if spec.publish_text:
 
-        Returns the response and whether its text was published under ``output_id``.
-        Cancelling the run closes the provider stream through ``collect_stream``.
-        """
-        adapter = self._provider_adapter
-        if not spec.publish_text:
-            return await adapter.complete(**request), False
-        if not adapter.streaming:
-            response = await adapter.complete(**request)
-            text = (response.text or "").strip()
-            if response.error is not None or not text:
-                return response, False
-            publish_assistant_text(text, output_id=output_id, stream_mode="synthetic")
-            return response, True
-        published = False
+            def on_text(text: str, stream_mode: str) -> None:
+                publish_assistant_text(text, output_id=output_id, stream_mode=stream_mode)
 
-        def publish(text: str) -> None:
-            nonlocal published
-            publish_assistant_text(text, output_id=output_id, stream_mode="provider")
-            published = True
-
-        final = await collect_stream(adapter.stream(**request), on_text=publish)
-        return final, published
+        return await think(self._provider_adapter, request, on_text=on_text)
 
     def _log_context(self, spec: LoopSpec, step: int, message_count: int) -> None:
         if spec.worker_run_id:

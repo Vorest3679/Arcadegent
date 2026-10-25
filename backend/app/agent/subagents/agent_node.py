@@ -21,6 +21,6 @@ class AgentNode:
     scope: Literal["conversation", "worker"]
     publish_text: bool
     spawnable: tuple[str, ...] = ()
-    # Reserved for stage 3; None keeps the provider request unchanged.
+    # None keeps the provider request unchanged.
     model: str | None = None
     reasoning_effort: str | None = None

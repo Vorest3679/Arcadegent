@@ -23,3 +23,16 @@ def test_worker_node_cannot_spawn_by_default() -> None:
     assert node.scope == "worker"
     assert node.publish_text is False
     assert node.spawnable == ()
+
+
+def test_yaml_overlay_sets_node_model_and_effort(tmp_path) -> None:
+    (tmp_path / "query.yaml").write_text(
+        "id: query\nsubagent_name: search_worker\nmodel: m-small\nreasoning_effort: low\n",
+        encoding="utf-8",
+    )
+
+    builder = SubAgentBuilder(definitions_dir=tmp_path)
+
+    assert builder.node("search_worker").model == "m-small"
+    assert builder.node("search_worker").reasoning_effort == "low"
+    assert builder.node("main_agent").model is None

@@ -9,7 +9,6 @@ from typing import Any, Literal, cast
 import yaml
 
 from app.agent.subagents.agent_node import AgentNode
-from app.protocol.messages import IntentType
 
 SubAgentName = Literal["main_agent", "search_worker", "navigation_worker"]
 
@@ -21,6 +20,8 @@ class SubAgentProfile:
     name: SubAgentName
     prompt_file: str
     allowed_tools: list[str]
+    model: str | None = None
+    reasoning_effort: str | None = None
 
 
 class SubAgentBuilder:
@@ -85,11 +86,9 @@ class SubAgentBuilder:
             scope="conversation" if is_main else "worker",
             publish_text=is_main,
             spawnable=self.worker_names() if is_main else (),
+            model=profile.model,
+            reasoning_effort=profile.reasoning_effort,
         )
-
-    def resolve_initial(self, intent: IntentType | None) -> SubAgentName:
-        _ = intent
-        return "main_agent"
 
     def _apply_yaml_overlay(self, definitions_dir: Path) -> None:
         mapping: dict[str, SubAgentName] = {
@@ -125,6 +124,8 @@ class SubAgentBuilder:
                 name=profile.name,
                 prompt_file=prompt_file,
                 allowed_tools=allowed_tools,
+                model=self._read_optional_str(payload, "model") or profile.model,
+                reasoning_effort=self._read_optional_str(payload, "reasoning_effort") or profile.reasoning_effort,
             )
 
     def _read_yaml(self, path: Path) -> dict[str, Any] | None:
@@ -137,6 +138,12 @@ class SubAgentBuilder:
         if not isinstance(raw, dict):
             return None
         return raw
+
+    def _read_optional_str(self, payload: dict[str, Any], key: str) -> str | None:
+        raw = payload.get(key)
+        if not isinstance(raw, str):
+            return None
+        return raw.strip() or None
 
     def _read_prompt_file(self, payload: dict[str, Any], *, fallback: str) -> str:
         raw = payload.get("prompt_file")
