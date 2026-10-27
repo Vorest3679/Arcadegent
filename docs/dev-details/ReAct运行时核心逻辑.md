@@ -241,7 +241,7 @@ tool.started
 ```
 
 - `runtime/events.py` 的 `ToolEventHooks` 是默认实现：发布 `tool.started/completed/failed` 并记录 `tool.completed`、`tool.failed` 日志；领域事件与 `completed_fields` 由构造时注入的 `signal` 提供，仍排在 `tool.completed` 之前。
-- `_SpawnAgentHook` 只处理声明了 `spawn_agent` 的已完成结果，把 worker 信封替换为工具结果；它排在事件钩子之前，所以 `worker.started/completed/failed` 仍在 `tool.completed` 之前。派发本身抛出普通异常时，钩子先用 `worker_dispatch_error` 发出配对的 `tool.failed`（错误文本与 `session.failed` 一样压缩空白并截断到 280 字符，避免把长异常原文推给前端），再把原异常继续上抛（`CancelledError` 直接上抛）；worker 异常让本轮失败的生命周期语义不变，只是不再留下只有 `tool.started` 的断头事件。
+- `_SpawnAgentHook` 只处理声明了 `spawn_agent` 的已完成结果，把 worker 信封替换为工具结果；它排在事件钩子之前，所以 `worker.started/completed/failed` 仍在 `tool.completed` 之前。派发本身抛出普通异常时，钩子把它转成 `worker_dispatch_error` 的失败工具结果（错误文本与 `session.failed` 一样压缩空白并截断到 280 字符），主 agent 会照常收到 `tool.failed` 并可在下一步恢复，不会因为一个 worker 异常丢掉整轮；`CancelledError` 直接上抛。worker 自己的 `worker.error → worker.unmounted`、证据/usage 回写已在 `spawn` 内完成。若真正的持久化或事件发布故障导致失败，异常会在记录/发布这个工具结果时再次出现，本轮仍会失败。
 - capability 常量（`spawn_agent`、`concludes_turn`，以及预留的 `background`、`programmatic`）定义在 `tools/execution.py`；`tools` 不 import `runtime`，只认 `ToolLifecycleHooks` 协议与 `runtime_context` 字典。
 
 ### 执行模式

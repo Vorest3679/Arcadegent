@@ -91,27 +91,21 @@ class _SpawnAgentHook:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                # Close the tool span before the failure propagates: a worker
-                # exception still fails the run (existing lifecycle semantics),
-                # but ``tool.started`` gets its matching ``tool.failed``.
+                # A worker failure is a tool failure: the main agent receives a
+                # failed result and can recover instead of losing the turn.
+                # Storage/publisher failures resurface when that result is
+                # recorded and announced, so real infrastructure errors still
+                # fail the run. The worker's lifecycle error/unmount and its
+                # evidence/usage recovery already ran inside ``spawn``.
                 error_message = _dispatch_error_text(exc)
-                try:
-                    await self._next.after(
-                        task,
-                        ToolExecutionResult(
-                            call_id=result.call_id,
-                            tool_name=result.tool_name,
-                            status="failed",
-                            output={"error": {"type": "worker_dispatch_error", "message": error_message}},
-                            error_message=error_message,
-                            capabilities=result.capabilities,
-                        ),
-                    )
-                except Exception as hook_exc:
-                    # The worker exception stays primary; a failing event hook
-                    # is noted on it instead of replacing it.
-                    exc.add_note(f"tool.failed hook raised {type(hook_exc).__name__}")
-                raise
+                result = ToolExecutionResult(
+                    call_id=result.call_id,
+                    tool_name=result.tool_name,
+                    status="failed",
+                    output={"error": {"type": "worker_dispatch_error", "message": error_message}},
+                    error_message=error_message,
+                    capabilities=result.capabilities,
+                )
             else:
                 result = ToolExecutionResult(
                     call_id=result.call_id,

@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from app.agent.llm.provider_adapter import ModelResponse
 from app.agent.runtime.domain_port import BaseTurnDomain, TurnReply
 from app.agent.runtime.lifecycle import (
     AgentEnvironment,
@@ -253,10 +254,14 @@ class _WorkerRaisingProvider:
 
     def __init__(self, error: BaseException) -> None:
         self.error = error
+        self.main_calls = 0
 
     async def complete(self, **kwargs: Any) -> ModelResponse:
         if kwargs["runtime_hints"]["active_subagent"] == "main_agent":
-            return _call("spawn", worker="helper_worker", task="work")
+            self.main_calls += 1
+            if self.main_calls == 1:
+                return _call("spawn", worker="helper_worker", task="work")
+            return _text("main recovered")
         raise self.error
 
 
@@ -265,9 +270,11 @@ def test_lifecycle_worker_exception_unmounts_worker_once(tmp_path: Path) -> None
     store = _Store()
     runtime = _runtime(tmp_path, _WorkerRaisingProvider(RuntimeError("worker boom")), store, domain)
 
-    with pytest.raises(RuntimeError, match="worker boom"):
-        _run(runtime, "go")
+    # A worker exception is a failed tool result; the main agent can recover.
+    result, events = _run(runtime, "go")
 
+    assert result.text == "main recovered"
+    assert RunEvent.TOOL_FAILED in events.names()
     assert domain.calls.count("worker.mount") == 1
     assert domain.calls.count("worker.error") == 1
     assert domain.calls.count("worker.unmounted") == 1
@@ -467,15 +474,25 @@ def test_step_cleanup_covers_start_and_context_failures(
             return super().build(**kwargs)
 
     domain = FailingDomain()
-    script = [("main_agent", _call("spawn", worker="helper_worker", task="work"))] if worker else []
+    script: list[tuple[str, Any]] = []
+    if worker:
+        script = [("main_agent", _call("spawn", worker="helper_worker", task="work"))]
+        if error_type is RuntimeError:
+            # The contained worker failure lets the main agent take another step.
+            script.append(("main_agent", _text("main recovered")))
     runtime = _runtime(tmp_path, _Provider(script), _Store(), domain)
     runtime._context_builder = FailingContext()  # type: ignore[assignment]
 
-    with pytest.raises(error_type) as caught:
-        _run(runtime, "go")
-
-    assert caught.value is error
-    assert domain.calls.count("step.create") == (2 if worker else 1)
+    if worker and error_type is RuntimeError:
+        result, _ = _run(runtime, "go")
+        assert result.text == "main recovered"
+        expected_steps = 3
+    else:
+        with pytest.raises(error_type) as caught:
+            _run(runtime, "go")
+        assert caught.value is error
+        expected_steps = 2 if worker else 1
+    assert domain.calls.count("step.create") == expected_steps
     assert domain.calls.count("step.unmounted") == domain.calls.count("step.create")
     assert domain.calls.count("turn.unmounted") == 1
     assert domain.calls.count("run.unmounted") == 1
