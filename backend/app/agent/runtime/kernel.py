@@ -9,21 +9,16 @@ state and the domain-projected response back to the application facade.
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from app.agent.context.context_builder import ContextBuilder
-from app.agent.context.turn_recorder import (
-    append_turn,
-    merge_usage_totals,
-    persist_worker_evidence_turns,
-)
+from app.agent.context.turn_recorder import append_turn
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.actions import ToolActions
-from app.agent.runtime.agent_loop import STATUS_COMPLETED, STATUS_FAILED, AgentLoop, LoopOutcome, LoopSpec
+from app.agent.runtime.agent_loop import STATUS_COMPLETED, AgentLoop, LoopOutcome, LoopSpec
 from app.agent.runtime.domain_port import BaseTurnDomain, TurnDomain
 from app.agent.runtime.events import (
     bind_run_events,
@@ -42,16 +37,15 @@ from app.agent.runtime.lifecycle import (
     RunScope,
     StateView,
     TurnScope,
-    WorkerScope,
 )
 from app.agent.runtime.budget import RunBudget
+from app.agent.runtime.worker_runner import WorkerRunner
 from app.agent.skills.execution import SkillExecution
 from app.agent.skills.registry import SkillRegistry
 from app.agent.runtime.session_state import (
     AgentSessionState,
     AgentTurn,
     SessionOwnershipError,
-    append_worker_run,
     ensure_working_memory_shape,
     reset_turn_scratch,
 )
@@ -80,26 +74,6 @@ def _short(text: str | None, *, limit: int = 120) -> str:
     if len(compact) <= limit:
         return compact
     return f"{compact[: max(1, limit - 3)].rstrip()}..."
-
-
-def _invalid_worker_envelope(*, worker_name: str, task: str) -> dict[str, Any]:
-    """Failure envelope for a dispatch naming an unknown worker or an empty task."""
-    missing_fields = ["worker", "task"] if not task else ["worker"]
-    return {
-        "worker": worker_name or "unknown_worker",
-        "run_id": f"wrk_{uuid4().hex[:10]}",
-        "status": "failed",
-        "summary": "Worker dispatch payload was incomplete.",
-        "result": {
-            "summary": "Worker dispatch payload was incomplete.",
-            "missing_fields": ["worker", "task"],
-        },
-        "artifacts": {},
-        "missing_fields": missing_fields,
-        "error": "missing worker or task",
-        "task": task,
-        "task_preview": _short(task, limit=120),
-    }
 
 
 def _new_output_id() -> str:
@@ -159,6 +133,19 @@ class AgentKernel:
     def _new_loop(self, turn: TurnInput) -> AgentLoop:
         # Built per run from the current attributes, so replaced collaborators
         # (tests, evaluation wiring) take effect.
+        worker_runner = WorkerRunner(
+            request=turn.request,
+            request_payload=turn.request_payload,
+            domain=self._domain,
+            session_store=self._session_store,
+            subagent_builder=self._subagent_builder,
+            skill_registry=self._skill_registry,
+            new_context=self._lifecycle_context,
+            emit=self._emit,
+            safe_emit=self._safe_emit,
+            run_loop=lambda spec: self._new_loop(turn).run(spec),
+        )
+
         async def spawn_worker(
             *,
             state: AgentSessionState,
@@ -167,9 +154,7 @@ class AgentKernel:
             spawnable: tuple[str, ...],
             budget: RunBudget | None,
         ) -> dict[str, Any]:
-            return await self._run_worker(
-                session_id=state.session_id,
-                turn=turn,
+            return await worker_runner.spawn(
                 state=state,
                 worker_name=worker_name,
                 task=task,
@@ -518,206 +503,6 @@ class AgentKernel:
         )
 
         return await self._new_loop(turn).run(spec)
-
-    async def _run_worker(
-        self,
-        *,
-        session_id: str,
-        turn: TurnInput,
-        state: AgentSessionState,
-        worker_name: str,
-        task: str,
-        spawnable: tuple[str, ...],
-        budget: RunBudget,
-    ) -> dict[str, Any]:
-        if worker_name not in spawnable or not task:
-            return _invalid_worker_envelope(worker_name=worker_name, task=task)
-
-        worker_node = self._subagent_builder.node(worker_name)
-        if self._skill_registry is not None:
-            await asyncio.to_thread(self._skill_registry.refresh)
-        run_id = f"wrk_{uuid4().hex[:10]}"
-        worker_state = AgentSessionState(
-            session_id=state.session_id,
-            turn_index=state.turn_index,
-            active_subagent=worker_name,
-            status="running",
-            turns=[],
-        )
-        worker_scope = WorkerScope(
-            worker_name=worker_name,
-            run_id=run_id,
-            state=StateView(worker_state),
-            parent_state=StateView(state, writable=False),
-        )
-        worker_ctx = self._lifecycle_context(
-            LifecycleScope.WORKER,
-            LifecyclePhase.MOUNT,
-            session_id=session_id,
-            worker_run_id=run_id,
-            worker=worker_scope,
-            turn_index=worker_state.turn_index,
-        )
-        evidence_committed = False
-        finished = False
-
-        def commit_worker_evidence() -> None:
-            # Runs exactly once, on success or on error/cancellation, so usage
-            # and finished tool evidence are never lost or written twice.
-            nonlocal evidence_committed
-            if evidence_committed:
-                return
-            evidence_committed = True
-            merge_usage_totals(
-                parent_memory=state.working_memory,
-                worker_memory=worker_state.working_memory,
-            )
-            persist_worker_evidence_turns(parent_state=state, worker_state=worker_state)
-
-        try:
-            worker_state.working_memory = ensure_working_memory_shape(worker_state.working_memory)
-            await self._emit(worker_ctx)
-            worker_state.turns.append(
-                AgentTurn(
-                    role="user",
-                    content=task,
-                    agent=worker_name,
-                    worker_run_id=run_id,
-                    scope="worker",
-                    payload={"dispatch": True},
-                )
-            )
-
-            previous_agent = state.active_subagent
-            state.active_subagent = worker_name
-            self._session_store.save_session(state)
-            emit_agent_changed(
-                from_agent=previous_agent,
-                to_agent=worker_name,
-                reason="worker.started",
-                worker_run_id=run_id,
-            )
-            publish_event(
-                RunEvent.WORKER_STARTED,
-                {
-                    "worker": worker_name,
-                    "run_id": run_id,
-                    "task_preview": _short(task, limit=160),
-                    "active_subagent": worker_name,
-                },
-            )
-
-            worker_spec = LoopSpec(
-                session_id=session_id,
-                state=worker_state,
-                node=worker_node,
-                request=turn.request,
-                request_payload=turn.request_payload,
-                budget=budget,
-                scope={"worker_run_id": run_id, "worker": worker_scope},
-                worker_run_id=run_id,
-                publish_text=False,
-                persist=False,
-                fail_on_tool_error=True,
-            )
-
-            outcome = await self._new_loop(turn).run(worker_spec)
-            final_text = outcome.text
-            failed_error = self._worker_failed_error(outcome)
-            promoted_artifacts = self._domain.promote_worker_artifacts(
-                parent_memory=state.working_memory,
-                worker_memory=worker_state.working_memory,
-                turn_index=state.turn_index,
-                partial=failed_error is not None,
-            )
-            commit_worker_evidence()
-            envelope = self._domain.build_worker_envelope(
-                worker_name=worker_name,
-                run_id=run_id,
-                task=task,
-                worker_memory=worker_state.working_memory,
-                final_text=final_text,
-                promoted_artifacts=promoted_artifacts,
-                failed_error=failed_error,
-            )
-            envelope["usage"] = deepcopy(worker_state.working_memory.get("usage_totals") or {})
-            append_worker_run(state.working_memory, envelope)
-            if envelope["status"] == "failed":
-                state.last_error = envelope["error"]
-                state.working_memory["last_error"] = {"message": envelope["error"]}
-                publish_event(
-                    RunEvent.WORKER_FAILED,
-                    {
-                        "worker": worker_name,
-                        "run_id": run_id,
-                        "error": envelope["error"],
-                        "active_subagent": worker_name,
-                    },
-                )
-            else:
-                # Error recovery belongs to the batch layer: a successful spawn
-                # must not erase a sibling tool failure from the same batch.
-                publish_event(
-                    RunEvent.WORKER_COMPLETED,
-                    {
-                        "worker": worker_name,
-                        "run_id": run_id,
-                        "status": envelope["status"],
-                        "summary": envelope["summary"],
-                        "active_subagent": worker_name,
-                    },
-                )
-
-            state.active_subagent = "main_agent"
-            state.updated_at = _utc_now_iso()
-            self._session_store.save_session(state)
-            emit_agent_changed(
-                from_agent=worker_name,
-                to_agent="main_agent",
-                reason="worker.completed",
-                worker_run_id=run_id,
-            )
-            finished = True
-        except asyncio.CancelledError as exc:
-            worker_ctx.error = exc
-            worker_ctx.reason = "cancelled"
-            worker_ctx.phase = LifecyclePhase.ERROR
-            await self._safe_emit(worker_ctx)
-            raise
-        except Exception as exc:
-            worker_ctx.error = exc
-            worker_ctx.reason = "failed"
-            worker_ctx.phase = LifecyclePhase.ERROR
-            await self._safe_emit(worker_ctx)
-            raise
-        finally:
-            if not finished:
-                # Error/cancellation: keep finished worker evidence in the
-                # parent, but leave the run status to the run/session layer.
-                commit_worker_evidence()
-                state.active_subagent = "main_agent"
-                state.updated_at = _utc_now_iso()
-                self._session_store.save_session(state)
-                emit_agent_changed(
-                    from_agent=worker_name,
-                    to_agent="main_agent",
-                    reason="worker.unmounted",
-                    worker_run_id=run_id,
-                )
-            worker_ctx.phase = LifecyclePhase.UNMOUNTED
-            await self._safe_emit(worker_ctx)
-        return envelope
-
-    @staticmethod
-    def _worker_failed_error(outcome: LoopOutcome) -> str | None:
-        """Worker failure text: model/tool error first, then the step-limit notice."""
-        if outcome.status == STATUS_COMPLETED:
-            return None
-        if outcome.status == STATUS_FAILED:
-            return _short(str((outcome.error or {}).get("message") or "model call failed"), limit=240)
-        if outcome.pending_tool_error is not None:
-            return _short(outcome.pending_tool_error, limit=240)
-        return str((outcome.error or {}).get("message") or "worker exhausted its step budget")
 
     def _bind_client_scope(self, state: AgentSessionState, client_id: str | None) -> None:
         """Attach a browser-owned client id to new sessions and reject cross-client writes."""

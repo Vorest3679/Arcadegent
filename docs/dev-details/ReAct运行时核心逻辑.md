@@ -223,6 +223,45 @@ domain 进入内核时会被翻译成 core 能理解的概念，但语义由适�
 
 2.7–2.8 已把这些边界显式化：`runtime/lifecycle.py` 提供 dispatcher、`StateView`、保留键检查和 `BaseLifecycleHooks`；`AgentKernel` 在 run/turn/step/worker 边界发事件；`AgentNode.spawnable` 是唯一的 worker 合法名单；`StepPolicy.runtime_hints` 已合并进 provider hints。剩余：model/reasoning_effort 进入 provider 请求（阶段 3）、session scope 事件、多 domain 钩子顺序、并行 worker 父级顺序（阶段 7）、公共 `TurnContext/TurnState/ToolResult` 契约（阶段 5/8）。
 
+## 工具执行与 worker 派发（阶段 4）
+
+### 一次工具调用
+
+`tools/execution.py` 的 `ToolDispatcher` 负责与 runtime 无关的部分：参数准备、参数证据（`raw_arguments`、`parse_error`、`prepared_arguments`、`hydrated_fields`、`preparation_error`）以及真正执行。每个调用在 `submit` 时包成一个 `asyncio.Task`，由 `settle` 收集结果；准备失败也生成一个 `failed` 结果，因此 `tool.started` 与 `tool.failed` 仍然成对。取消一个正在 `settle` 的批次时，`settle` 会 `cancel()` 子任务并等待它结束，不在事件循环里留下悬挂任务。
+
+runtime 侧（`runtime/actions.py`）通过 `ToolLifecycleHooks` 注入行为，执行顺序保持不变：
+
+```text
+tool.started
+  → 参数准备（失败则跳过执行）
+  → 工具执行（可包成 task）
+  → spawn_agent 钩子（派发 worker，worker.* 事件仍在这次调用内）
+  → 领域 tool_result_signal 事件 → tool.completed / tool.failed
+  → 证据回合 → last_error 记账 → step update 生命周期钩子
+```
+
+- `runtime/events.py` 的 `ToolEventHooks` 是默认实现：发布 `tool.started/completed/failed` 并记录 `tool.completed`、`tool.failed` 日志；领域事件与 `completed_fields` 由构造时注入的 `signal` 提供，仍排在 `tool.completed` 之前。
+- `_SpawnAgentHook` 只处理声明了 `spawn_agent` 的已完成结果，把 worker 信封替换为工具结果；它排在事件钩子之前，所以 `worker.started/completed/failed` 仍在 `tool.completed` 之前。
+- capability 常量（`spawn_agent`、`concludes_turn`，以及预留的 `background`、`programmatic`）定义在 `tools/execution.py`；`tools` 不 import `runtime`，只认 `ToolLifecycleHooks` 协议与 `runtime_context` 字典。
+
+### 执行模式
+
+`ToolDescriptor.execution_mode` 是工具自声明的并发属性，默认 `exclusive`；`ToolRegistry.execution_mode(tool_name)` 对未知工具返回 `exclusive`。`BuiltinToolProvider` 从工具 JSON 读取并校验该字段，MCP 工具显式保持 `exclusive`（以后可映射 MCP 的 `readOnlyHint`）。首批声明 `parallel` 的是 `list_skills`、`read_skill`、`invoke_worker`；阶段 4 只声明，`ToolActions` 仍逐个 `settle`，真正的并发由阶段 7 的 supervisor 使用。
+
+### worker：run / commit 两段
+
+`runtime/worker_runner.py` 把原 `_run_worker` 拆成两段，为并行 worker 做准备：
+
+| 段 | 做什么 | 约束 |
+| --- | --- | --- |
+| `run` | 在独立的 `AgentSessionState` 上挂载 worker、发 `worker.started`、跑子循环；`active_subagent` 切到该 worker 用于前端展示 | 不写父记忆（产物、usage、证据、信封） |
+| `commit` | 产物提升（失败时标记 `partial`）、usage 合并、worker 证据回写、构造信封并追加 `worker_runs`、发 `worker.completed/failed`、恢复 `active_subagent` | 只在父循环协程、按模型调用顺序执行；同一 run 幂等 |
+| `spawn` | `prepare → run → commit` 的一次性入口 | `finally` 保证失败/取消时证据与 usage 恰好回写一次并恢复父状态；run 终态仍由 session/run 层记录 |
+
+worker 的合法名单来自当前节点的 `AgentNode.spawnable`；非法派发在 `prepare` 之前返回失败信封，不产生 `worker.started`。
+
+`backend/app/tests/integration/test_worker_runner.py` 覆盖“worker 工具执行中取消后父状态恢复、已完成工具证据只出现一次、无悬挂 task”和“`run` 期间父状态不变、`commit` 幂等”。
+
 ## 配置
 
 `LLM_STREAM`（或 provider profile 的 `stream`）默认 `false`。关闭时 provider 走非流式请求，界面仍按上面的 output_id 规则展示，只是每段文本在调用结束后一次性出现。

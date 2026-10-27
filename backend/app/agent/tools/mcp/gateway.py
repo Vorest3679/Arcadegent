@@ -344,6 +344,9 @@ class MCPToolGateway:
                 input_schema=descriptor.input_schema,
                 output_schema=descriptor.output_schema,
                 capabilities=("mcp", descriptor.server_name),
+                # Remote tools stay exclusive until MCP read-only annotations
+                # (readOnlyHint) are mapped to execution_mode.
+                execution_mode="exclusive",
             )
         return descriptors
 

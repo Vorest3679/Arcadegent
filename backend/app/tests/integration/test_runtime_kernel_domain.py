@@ -31,7 +31,8 @@ from app.agent.runtime.lifecycle import (
 from app.agent.runtime.session_state import AgentSessionState, AgentTurn
 from app.agent.subagents.agent_node import AgentNode
 from app.agent.subagents.subagent_builder import SubAgentProfile
-from app.agent.tools.base import CAP_CONCLUDES_TURN, CAP_SPAWN_AGENT, ProviderExecutionResult, ToolDescriptor
+from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
+from app.agent.tools.execution import CAP_CONCLUDES_TURN, CAP_SPAWN_AGENT
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.protocol.messages import ChatRequest

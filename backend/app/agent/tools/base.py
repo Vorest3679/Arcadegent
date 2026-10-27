@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Literal, Protocol
 
 ToolValidator = Callable[[dict[str, Any]], Any]
 
-# Capabilities the execution kernel acts on. A ``spawn_agent`` tool returns
-# ``{"worker": str, "task": str}`` and the kernel runs that worker; a
-# ``concludes_turn`` tool returns ``{"reply": str}`` and its reply ends the turn.
-CAP_SPAWN_AGENT = "spawn_agent"
-CAP_CONCLUDES_TURN = "concludes_turn"
+# Whether a tool call may overlap a sibling call in the same batch. The kernel
+# supervisor reads this from the registry; unknown tools stay ``exclusive``.
+ExecutionMode = Literal["exclusive", "parallel"]
 
 
 @dataclass(frozen=True)
@@ -37,6 +35,7 @@ class ToolDescriptor:
     output_schema: dict[str, Any] | None = None
     validator: ToolValidator | None = None
     capabilities: tuple[str, ...] = field(default_factory=tuple)
+    execution_mode: ExecutionMode = "exclusive"
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

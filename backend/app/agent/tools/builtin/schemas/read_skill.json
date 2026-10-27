@@ -8,6 +8,7 @@
     "read_only",
     "skills"
   ],
+  "execution_mode": "parallel",
   "input_schema": {
     "type": "object",
     "properties": {

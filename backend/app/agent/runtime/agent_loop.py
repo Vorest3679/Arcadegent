@@ -32,7 +32,7 @@ from app.agent.runtime.budget import RunBudget
 from app.agent.runtime.session_state import AgentSessionState
 from app.agent.subagents.agent_node import AgentNode
 from app.agent.subagents.subagent_builder import SubAgentProfile
-from app.agent.tools.base import CAP_CONCLUDES_TURN
+from app.agent.tools.execution import CAP_CONCLUDES_TURN
 from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
 from app.infra.observability.logger import get_logger, log_ref
 

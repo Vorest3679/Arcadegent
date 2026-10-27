@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import ValidationError
 from pydantic_core import ErrorDetails
 
-from app.agent.tools.base import ToolDescriptor, ToolInputValidationError, ToolProvider
+from app.agent.tools.base import ExecutionMode, ToolDescriptor, ToolInputValidationError, ToolProvider
 from app.agent.tools.builtin.provider import BuiltinToolProvider
 from app.agent.tools.mcp_gateway import MCPToolGateway
 from app.agent.tools.permission import ToolPermissionChecker, ToolPermissionError
@@ -120,6 +120,16 @@ class ToolRegistry:
         for provider in self._providers:
             if provider.provider_name == "mcp":
                 await provider.refresh()
+
+    async def execution_mode(self, tool_name: str) -> ExecutionMode:
+        """Concurrency mode declared by the tool descriptor.
+
+        Unknown tools stay ``exclusive``: a missing descriptor must never turn
+        into an unsafe parallel execution.
+        """
+        tools, _ = await self._collect_tools()
+        descriptor = tools.get(tool_name)
+        return descriptor.execution_mode if descriptor is not None else "exclusive"
 
     def provider_health(self) -> dict[str, Any]:
         return {
