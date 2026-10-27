@@ -9,6 +9,7 @@ lifecycle hook.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -36,6 +37,16 @@ WorkerSpawner = Callable[..., Awaitable[dict[str, Any]]]
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _dispatch_error_text(exc: Exception, *, limit: int = 280) -> str:
+    """Client-visible error text, bounded like the kernel's ``session.failed``."""
+    if not str(exc):
+        return type(exc).__name__
+    compact = " ".join(f"{type(exc).__name__}: {exc}".split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[: limit - 3].rstrip()}..."
 
 
 class _SpawnAgentHook:
@@ -69,21 +80,47 @@ class _SpawnAgentHook:
 
     async def after(self, task: ToolTask, result: ToolExecutionResult) -> ToolExecutionResult:
         if result.status == "completed" and CAP_SPAWN_AGENT in result.capabilities:
-            envelope = await self._spawn_worker(
-                state=self._state,
-                worker_name=str(result.output.get("worker") or "").strip(),
-                task=str(result.output.get("task") or "").strip(),
-                spawnable=self._spawnable,
-                budget=self._budget,
-            )
-            result = ToolExecutionResult(
-                call_id=result.call_id,
-                tool_name=result.tool_name,
-                status="failed" if envelope.get("status") == "failed" else "completed",
-                output=envelope,
-                error_message=envelope.get("error"),
-                capabilities=result.capabilities,
-            )
+            try:
+                envelope = await self._spawn_worker(
+                    state=self._state,
+                    worker_name=str(result.output.get("worker") or "").strip(),
+                    task=str(result.output.get("task") or "").strip(),
+                    spawnable=self._spawnable,
+                    budget=self._budget,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # Close the tool span before the failure propagates: a worker
+                # exception still fails the run (existing lifecycle semantics),
+                # but ``tool.started`` gets its matching ``tool.failed``.
+                error_message = _dispatch_error_text(exc)
+                try:
+                    await self._next.after(
+                        task,
+                        ToolExecutionResult(
+                            call_id=result.call_id,
+                            tool_name=result.tool_name,
+                            status="failed",
+                            output={"error": {"type": "worker_dispatch_error", "message": error_message}},
+                            error_message=error_message,
+                            capabilities=result.capabilities,
+                        ),
+                    )
+                except Exception as hook_exc:
+                    # The worker exception stays primary; a failing event hook
+                    # is noted on it instead of replacing it.
+                    exc.add_note(f"tool.failed hook raised {type(hook_exc).__name__}")
+                raise
+            else:
+                result = ToolExecutionResult(
+                    call_id=result.call_id,
+                    tool_name=result.tool_name,
+                    status="failed" if envelope.get("status") == "failed" else "completed",
+                    output=envelope,
+                    error_message=envelope.get("error"),
+                    capabilities=result.capabilities,
+                )
         return await self._next.after(task, result)
 
 

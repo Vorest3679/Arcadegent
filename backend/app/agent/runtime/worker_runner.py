@@ -176,9 +176,13 @@ class WorkerRunner:
         """Mount the worker and run its loop; no parent memory is merged here.
 
         The worker's ``active_subagent`` transition is the live UI signal and
-        happens here; evidence, usage, artifacts and the envelope wait for
-        ``commit``. Errors and cancellation propagate to the caller, which is
-        responsible for the error lifecycle and ``_recover``.
+        still writes the parent state here (and saves it), so the front end
+        follows the running worker. Evidence, usage, artifacts and the envelope
+        wait for ``commit``. Multi-worker bookkeeping — the nearest running
+        worker while several overlap, restoring ``main_agent`` only after all
+        finish — belongs to the stage 7 supervisor, which is why no tool
+        declares ``parallel`` yet. Errors and cancellation propagate to the
+        caller, which is responsible for the error lifecycle and ``_recover``.
         """
         if self._skill_registry is not None:
             await asyncio.to_thread(self._skill_registry.refresh)

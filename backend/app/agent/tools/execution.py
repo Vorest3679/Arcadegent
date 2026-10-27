@@ -14,7 +14,7 @@ away.
 from __future__ import annotations
 
 import asyncio
-from contextlib import nullcontext, suppress
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
@@ -66,6 +66,8 @@ class ToolTask:
     prepared_args: dict[str, Any] = field(default_factory=dict)
     argument_evidence: dict[str, Any] = field(default_factory=dict)
     preparation_error: str | None = None
+    # Filled from the result for an executed call. A call that failed argument
+    # preparation never ran, so it carries no capabilities.
     capabilities: tuple[str, ...] = ()
     result: ToolExecutionResult | None = None
     task: "asyncio.Task[ToolExecutionResult] | None" = None
@@ -86,7 +88,7 @@ class ToolDispatcher:
         runtime_context: dict[str, Any],
         allowed_tools: list[str],
         agent_name: str = "",
-        skill_execution: SkillExecution | None = None,
+        skill_execution: SkillExecution,
     ) -> ToolExecutionResult:
         """Run one call to completion and return its final result."""
         task = await self.submit(
@@ -97,7 +99,7 @@ class ToolDispatcher:
             agent_name=agent_name,
             skill_execution=skill_execution,
         )
-        return await self.settle(task) # submit执行完生命钩子并返回async任务后，开始真正执行
+        return await self.settle(task)
 
     async def submit(
         self,
@@ -107,7 +109,7 @@ class ToolDispatcher:
         runtime_context: dict[str, Any],
         allowed_tools: list[str],
         agent_name: str = "",
-        skill_execution: SkillExecution | None = None,
+        skill_execution: SkillExecution,
     ) -> ToolTask:
         """Start one call as a task; ``settle`` collects its result.
 
@@ -152,11 +154,10 @@ class ToolDispatcher:
         runtime_context: dict[str, Any],
         allowed_tools: list[str],
         agent_name: str,
-        skill_execution: SkillExecution | None,
+        skill_execution: SkillExecution,
     ) -> ToolExecutionResult:
         await self._prepare(task, session_id=session_id, runtime_context=runtime_context)
         call = task.call
-        # result will be defined in if/else, and share in _run().
         if task.preparation_error is not None:
             result = ToolExecutionResult(
                 call_id=call.call_id,
@@ -171,12 +172,7 @@ class ToolDispatcher:
                 error_message=task.preparation_error,
             )
         else:
-            scope = (
-                bind_skill_execution(agent_name, skill_execution)
-                if skill_execution is not None
-                else nullcontext()
-            )
-            with scope:
+            with bind_skill_execution(agent_name, skill_execution):
                 result = await self._tool_registry.execute(
                     call_id=call.call_id,
                     tool_name=call.name,

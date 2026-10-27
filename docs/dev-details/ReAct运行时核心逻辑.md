@@ -241,12 +241,17 @@ tool.started
 ```
 
 - `runtime/events.py` 的 `ToolEventHooks` 是默认实现：发布 `tool.started/completed/failed` 并记录 `tool.completed`、`tool.failed` 日志；领域事件与 `completed_fields` 由构造时注入的 `signal` 提供，仍排在 `tool.completed` 之前。
-- `_SpawnAgentHook` 只处理声明了 `spawn_agent` 的已完成结果，把 worker 信封替换为工具结果；它排在事件钩子之前，所以 `worker.started/completed/failed` 仍在 `tool.completed` 之前。
+- `_SpawnAgentHook` 只处理声明了 `spawn_agent` 的已完成结果，把 worker 信封替换为工具结果；它排在事件钩子之前，所以 `worker.started/completed/failed` 仍在 `tool.completed` 之前。派发本身抛出普通异常时，钩子先用 `worker_dispatch_error` 发出配对的 `tool.failed`（错误文本与 `session.failed` 一样压缩空白并截断到 280 字符，避免把长异常原文推给前端），再把原异常继续上抛（`CancelledError` 直接上抛）；worker 异常让本轮失败的生命周期语义不变，只是不再留下只有 `tool.started` 的断头事件。
 - capability 常量（`spawn_agent`、`concludes_turn`，以及预留的 `background`、`programmatic`）定义在 `tools/execution.py`；`tools` 不 import `runtime`，只认 `ToolLifecycleHooks` 协议与 `runtime_context` 字典。
 
 ### 执行模式
 
-`ToolDescriptor.execution_mode` 是工具自声明的并发属性，默认 `exclusive`；`ToolRegistry.execution_mode(tool_name)` 对未知工具返回 `exclusive`。`BuiltinToolProvider` 从工具 JSON 读取并校验该字段，MCP 工具显式保持 `exclusive`（以后可映射 MCP 的 `readOnlyHint`）。首批声明 `parallel` 的是 `list_skills`、`read_skill`、`invoke_worker`；阶段 4 只声明，`ToolActions` 仍逐个 `settle`，真正的并发由阶段 7 的 supervisor 使用。
+`ToolDescriptor.execution_mode` 是工具自声明的并发属性，默认 `exclusive`；`ToolRegistry.execution_mode(tool_name)` 对未知工具返回 `exclusive`。`BuiltinToolProvider` 从工具 JSON 读取并校验该字段，MCP 工具显式保持 `exclusive`（以后可映射 MCP 的 `readOnlyHint`）。阶段 4 只落地声明机制，**所有内置工具仍为 `exclusive`**，`ToolActions` 仍逐个 `settle`；`execution_mode` 也只是被查询，尚未进入执行路径。
+
+`list_skills`、`read_skill`、`invoke_worker` 原计划作为首批 `parallel`，审查后暂缓到阶段 7，前置条件是：
+
+- `read_skill` / `list_skills` 的 executor 经 `asyncio.to_thread` 执行；`SkillExecution.load` 的“检查 `loaded_bytes` → 累加”没有锁，并发会绕过 `max_loaded_bytes` 或重复加载同一资源，`list_skills` 还会在线程里刷新同一个 registry。需要加锁或改成纯 async。
+- `WorkerRunner.run` 仍会写父状态 `active_subagent` 并 `save_session`；多个 worker 并发时，先结束者的 `commit` 会把父状态改回 `main_agent`。阶段 7 要先实现“有 worker 在跑时取最近启动者、全部结束后才恢复 `main_agent`”，并把提交严格放到父循环协程里。
 
 ### worker：run / commit 两段
 
@@ -254,13 +259,15 @@ tool.started
 
 | 段 | 做什么 | 约束 |
 | --- | --- | --- |
-| `run` | 在独立的 `AgentSessionState` 上挂载 worker、发 `worker.started`、跑子循环；`active_subagent` 切到该 worker 用于前端展示 | 不写父记忆（产物、usage、证据、信封） |
-| `commit` | 产物提升（失败时标记 `partial`）、usage 合并、worker 证据回写、构造信封并追加 `worker_runs`、发 `worker.completed/failed`、恢复 `active_subagent` | 只在父循环协程、按模型调用顺序执行；同一 run 幂等 |
+| `run` | 在独立的 `AgentSessionState` 上挂载 worker、发 `worker.started`、跑子循环 | 只写父状态的 `active_subagent`（前端实时信号）并保存；不合并父记忆（产物、usage、证据、信封） |
+| `commit` | 产物提升（失败时标记 `partial`）、usage 合并、worker 证据回写、构造信封并追加 `worker_runs`、发 `worker.completed/failed`、恢复 `active_subagent` | 只应在父循环协程、按模型调用顺序执行；同一 run 幂等 |
 | `spawn` | `prepare → run → commit` 的一次性入口 | `finally` 保证失败/取消时证据与 usage 恰好回写一次并恢复父状态；run 终态仍由 session/run 层记录 |
+
+当前 `ToolActions` 串行调用，`spawn` 内的 `run + commit` 顺序天然成立；并发后必须由 supervisor 拆开两者，按模型调用顺序调用 `commit`。
 
 worker 的合法名单来自当前节点的 `AgentNode.spawnable`；非法派发在 `prepare` 之前返回失败信封，不产生 `worker.started`。
 
-`backend/app/tests/integration/test_worker_runner.py` 覆盖“worker 工具执行中取消后父状态恢复、已完成工具证据只出现一次、无悬挂 task”和“`run` 期间父状态不变、`commit` 幂等”。
+`backend/app/tests/integration/test_worker_runner.py` 覆盖“worker 工具执行中取消后父状态恢复、已完成工具证据只出现一次、无悬挂 task”“`run` 期间不合并父记忆、`commit` 幂等”和“派发异常转成失败工具结果”。共享的测试替身放在 `_runtime_kernel_test_support.py`。
 
 ## 配置
 

@@ -12,7 +12,7 @@ from app.agent.llm.provider_adapter import ModelResponse, ModelToolCall
 from app.agent.runtime.domain_port import BaseTurnDomain
 from app.agent.runtime.budget import RunBudget
 from app.session.events import RunEvent
-from backend.app.tests.integration.test_runtime_kernel_domain import (
+from backend.app.tests.integration._runtime_kernel_test_support import (
     _Provider,
     _Store,
     _call,

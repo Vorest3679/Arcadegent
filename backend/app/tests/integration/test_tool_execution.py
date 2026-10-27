@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from app.agent.llm.provider_adapter import ModelToolCall
+from app.agent.skills.execution import SkillExecution
 from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
 from app.agent.tools.builtin import BuiltinToolProvider
 from app.agent.tools.execution import ToolDispatcher, ToolTask
@@ -99,6 +100,7 @@ def test_dispatcher_settles_each_call_as_a_task_and_keeps_evidence(tmp_path: Pat
             runtime_context={"k": 1},
             allowed_tools=["echo"],
             agent_name="main_agent",
+            skill_execution=SkillExecution(),
         )
     )
 
@@ -131,6 +133,7 @@ def test_dispatcher_reports_preparation_failure_as_a_failed_result(tmp_path: Pat
             runtime_context={},
             allowed_tools=["echo"],
             agent_name="main_agent",
+            skill_execution=SkillExecution(),
         )
     )
 
@@ -153,6 +156,7 @@ def test_cancelling_a_settled_call_cancels_the_running_tool_task(tmp_path: Path)
             runtime_context={},
             allowed_tools=["slow"],
             agent_name="main_agent",
+            skill_execution=SkillExecution(),
         )
         settle = asyncio.create_task(dispatcher.settle(task))
         await asyncio.wait_for(provider.started.wait(), timeout=5)
@@ -182,14 +186,36 @@ def test_registry_reports_declared_execution_mode(tmp_path: Path) -> None:
     assert asyncio.run(modes()) == ("exclusive", "parallel", "exclusive")
 
 
-def test_builtin_tools_declare_the_first_parallel_batch() -> None:
+def test_builtin_tools_stay_exclusive_until_the_supervisor() -> None:
     tools = asyncio.run(BuiltinToolProvider().get_tools())
 
-    assert tools["list_skills"].execution_mode == "parallel"
-    assert tools["read_skill"].execution_mode == "parallel"
-    assert tools["invoke_worker"].execution_mode == "parallel"
+    # Stage 4 only lands the declaration mechanism. ``read_skill``/``list_skills``
+    # run in worker threads against an unlocked ``SkillExecution`` registry, and
+    # concurrent workers still share the parent's ``active_subagent``; both are
+    # stage 7 prerequisites, so no builtin tool promises ``parallel`` yet.
+    assert {name for name, tool in tools.items() if tool.execution_mode == "parallel"} == set()
     assert tools["db_query_tool"].execution_mode == "exclusive"
     assert tools["summary_tool"].execution_mode == "exclusive"
+
+
+def test_builtin_provider_reads_a_declared_parallel_mode(tmp_path: Path) -> None:
+    tool = {
+        "name": "list_skills",
+        "description": "list skills",
+        "executor": "app.agent.tools.builtin.executors.skills:list_skills",
+        "input_schema": {"type": "object"},
+        "execution_mode": "parallel",
+    }
+    (tmp_path / "list_skills.json").write_text(json.dumps(tool), encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["list_skills.json"]}), encoding="utf-8")
+    provider = BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
+    registry = ToolRegistry(
+        providers=[provider],
+        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+    )
+
+    assert asyncio.run(provider.get_tools())["list_skills"].execution_mode == "parallel"
+    assert asyncio.run(registry.execution_mode("list_skills")) == "parallel"
 
 
 def test_tool_descriptor_defaults_to_exclusive() -> None:

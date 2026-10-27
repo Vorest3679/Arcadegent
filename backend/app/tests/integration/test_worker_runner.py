@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-from app.agent.llm.provider_adapter import ModelResponse, ModelToolCall
 from app.agent.runtime.agent_loop import LoopOutcome, LoopSpec
 from app.agent.runtime.budget import RunBudget
 from app.agent.runtime.domain_port import BaseTurnDomain
@@ -23,8 +22,15 @@ from app.agent.tools.execution import CAP_SPAWN_AGENT
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.protocol.messages import ChatRequest
+from app.session.events import RunEvent
 from app.session.injector import CollectingPublisher
-from backend.app.tests.integration.test_runtime_kernel_domain import _ContextBuilder, _Provider, _Store
+from backend.app.tests.integration._runtime_kernel_test_support import (
+    _ContextBuilder,
+    _Provider,
+    _Store,
+    _call,
+    _text,
+)
 
 _TOOLS = ("spawn", "echo", "block")
 
@@ -221,11 +227,35 @@ def test_worker_runner_keeps_the_parent_clean_until_commit(tmp_path: Path) -> No
     asyncio.run(scenario())
 
 
-def _call(name: str, **arguments: Any) -> ModelResponse:
-    return ModelResponse(
-        text=None,
-        status="completed",
-        protocol="chat_completions",
-        reported_model="stub",
-        tool_calls=[ModelToolCall(call_id=f"call_{name}", name=name, arguments=arguments)],
-    )
+class _FailingPromotionDomain(BaseTurnDomain):
+    def promote_worker_artifacts(self, *, parent_memory, worker_memory, turn_index, partial=False):  # type: ignore[no-untyped-def]
+        # Long enough to prove the client-visible ``tool.failed`` text is bounded.
+        raise RuntimeError("promotion boom " + "x" * 500)
+
+
+def test_worker_dispatch_exception_closes_the_tool_span(tmp_path: Path) -> None:
+    async def scenario() -> tuple[_Store, CollectingPublisher]:
+        store = _Store()
+        provider = _Provider([
+            ("main_agent", _call("spawn", worker="helper_worker", task="do it")),
+            ("helper_worker", _text("worker text")),
+        ])
+        kernel = _kernel(tmp_path, provider, store, _Tools())
+        kernel._domain = _FailingPromotionDomain()
+        events = CollectingPublisher()
+        with pytest.raises(RuntimeError, match="promotion boom"):
+            await kernel.run_turn(_turn("go", session_id="s_dispatch"), events=events)
+        return store, events
+
+    store, events = asyncio.run(scenario())
+
+    # A worker exception still fails the run, but the tool span is closed.
+    assert RunEvent.TOOL_FAILED in events.names()
+    assert RunEvent.WORKER_COMPLETED not in events.names()
+    failed = next(data for name, data, _output_id in events.events if name == RunEvent.TOOL_FAILED)
+    assert failed["tool"] == "spawn"
+    assert failed["error"].startswith("RuntimeError: promotion boom")
+    assert len(failed["error"]) <= 280 and failed["error"].endswith("...")
+    saved = store.states["s_dispatch"]
+    assert saved.status == "failed"
+    assert saved.active_subagent == "main_agent"

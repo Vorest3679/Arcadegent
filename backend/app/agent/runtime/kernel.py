@@ -133,19 +133,6 @@ class AgentKernel:
     def _new_loop(self, turn: TurnInput) -> AgentLoop:
         # Built per run from the current attributes, so replaced collaborators
         # (tests, evaluation wiring) take effect.
-        worker_runner = WorkerRunner(
-            request=turn.request,
-            request_payload=turn.request_payload,
-            domain=self._domain,
-            session_store=self._session_store,
-            subagent_builder=self._subagent_builder,
-            skill_registry=self._skill_registry,
-            new_context=self._lifecycle_context,
-            emit=self._emit,
-            safe_emit=self._safe_emit,
-            run_loop=lambda spec: self._new_loop(turn).run(spec),
-        )
-
         async def spawn_worker(
             *,
             state: AgentSessionState,
@@ -154,7 +141,21 @@ class AgentKernel:
             spawnable: tuple[str, ...],
             budget: RunBudget | None,
         ) -> dict[str, Any]:
-            return await worker_runner.spawn(
+            # One runner per dispatch; a loop that never spawns (including the
+            # worker loops) does not allocate one.
+            runner = WorkerRunner(
+                request=turn.request,
+                request_payload=turn.request_payload,
+                domain=self._domain,
+                session_store=self._session_store,
+                subagent_builder=self._subagent_builder,
+                skill_registry=self._skill_registry,
+                new_context=self._lifecycle_context,
+                emit=self._emit,
+                safe_emit=self._safe_emit,
+                run_loop=lambda spec: self._new_loop(turn).run(spec),
+            )
+            return await runner.spawn(
                 state=state,
                 worker_name=worker_name,
                 task=task,

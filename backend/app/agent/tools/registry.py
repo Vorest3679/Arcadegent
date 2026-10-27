@@ -125,7 +125,9 @@ class ToolRegistry:
         """Concurrency mode declared by the tool descriptor.
 
         Unknown tools stay ``exclusive``: a missing descriptor must never turn
-        into an unsafe parallel execution.
+        into an unsafe parallel execution. Descriptors are collected per call;
+        the stage 7 supervisor should read modes once per batch (and may cache
+        them) rather than asking per tool call.
         """
         tools, _ = await self._collect_tools()
         descriptor = tools.get(tool_name)
