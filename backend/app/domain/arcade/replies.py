@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 from typing import Any
 
+from app.agent.artifacts.sink import ArtifactSink
 from app.agent.runtime.session_state import AgentSessionState, get_working_memory_artifact
+from app.domain.arcade.display import ArcadeDisplay
 from app.domain.arcade.intent import IntentPolicy
 from app.protocol.messages import ChatRequest, ChatResponse
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
+
+_MISSING = object()
 
 
 def memory_shops(memory: dict[str, Any]) -> list[dict[str, Any]]:
@@ -40,33 +43,104 @@ def display_shops(memory: dict[str, Any]) -> list[dict[str, Any]]:
     return memory_shops(memory)
 
 
-def snapshot_turn_map_artifacts(state: AgentSessionState) -> dict[str, Any] | None:
-    """Archive only map artifacts produced by the current conversation turn."""
-    memory = state.working_memory
-    meta = memory.get("artifact_meta")
-    if not isinstance(meta, dict):
-        return None
-    display_keys = ("shop", "shops", "selected_shops", "route", "destination", "view_payload")
-    has_fresh_display_artifact = any(
-        isinstance(meta.get(key), dict) and meta[key].get("turn_index") == state.turn_index
-        for key in display_keys
-    )
-    if not has_fresh_display_artifact:
-        return None
+def snapshot_shops(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project the displayed cards from an artifact snapshot."""
+    selected = snapshot.get("selected_shops", _MISSING)
+    if isinstance(selected, list):
+        return [item for item in selected if isinstance(item, dict)]
+    shops: list[dict[str, Any]] = []
+    shops_artifact = snapshot.get("shops")
+    if isinstance(shops_artifact, list):
+        shops.extend(item for item in shops_artifact if isinstance(item, dict))
+    shop_artifact = snapshot.get("shop")
+    if isinstance(shop_artifact, dict):
+        source_id = shop_artifact.get("source_id")
+        if not any(item.get("source_id") == source_id for item in shops):
+            shops.append(shop_artifact)
+    return shops
 
+
+def map_artifacts_from_snapshot(
+    snapshot: dict[str, Any],
+    memory: dict[str, Any] | None = None,
+) -> ArcadeDisplay:
+    """Turn display artifacts into the typed projection used by responses.
+
+    ``client_location`` is a map input rather than display content, so it is
+    read from memory instead of requiring a display flag.
+    """
+    shops = snapshot_shops(snapshot)
+    route = snapshot.get("route") if isinstance(snapshot.get("route"), dict) else None
+    destination = snapshot.get("destination")
+    if not isinstance(destination, dict):
+        destination = snapshot.get("shop")
+    if not isinstance(destination, dict) and route is not None and shops:
+        destination = shops[0]
+    client_location = snapshot.get("client_location")
+    if not isinstance(client_location, dict) and memory is not None:
+        client_location = get_working_memory_artifact(memory, "client_location")
+    view_payload = snapshot.get("view_payload")
+    return ArcadeDisplay(
+        shops=tuple(shops),
+        route=route,
+        client_location=client_location if isinstance(client_location, dict) else None,
+        destination=destination if isinstance(destination, dict) else None,
+        view_payload=view_payload if isinstance(view_payload, dict) else None,
+    )
+
+
+def legacy_map_artifacts(memory: dict[str, Any]) -> ArcadeDisplay:
+    """Projection for sessions persisted before display metadata existed."""
+    shops = display_shops(memory)
+    route = get_working_memory_artifact(memory, "route")
+    route_value = route if isinstance(route, dict) else None
     destination = get_working_memory_artifact(memory, "destination")
     if not isinstance(destination, dict):
         destination = get_working_memory_artifact(memory, "shop")
-    route = get_working_memory_artifact(memory, "route")
+    if not isinstance(destination, dict) and route_value is not None and shops:
+        destination = shops[0]
     client_location = get_working_memory_artifact(memory, "client_location")
     view_payload = get_working_memory_artifact(memory, "view_payload")
-    return deepcopy({
-        "shops": display_shops(memory),
-        "route": route if isinstance(route, dict) else None,
-        "client_location": client_location if isinstance(client_location, dict) else None,
-        "destination": destination if isinstance(destination, dict) else None,
-        "view_payload": view_payload if isinstance(view_payload, dict) else None,
-    })
+    return ArcadeDisplay(
+        shops=tuple(shops),
+        route=route_value,
+        client_location=client_location if isinstance(client_location, dict) else None,
+        destination=destination if isinstance(destination, dict) else None,
+        view_payload=view_payload if isinstance(view_payload, dict) else None,
+    )
+
+
+def display_artifacts(
+    state: AgentSessionState,
+    *,
+    artifact_sink: ArtifactSink,
+) -> ArcadeDisplay:
+    """Current session display used by both the response and the session detail."""
+    snapshot = artifact_sink.display_snapshot(state)
+    if snapshot is None:
+        return legacy_map_artifacts(state.working_memory)
+    return map_artifacts_from_snapshot(snapshot, state.working_memory)
+
+
+def turn_display(
+    state: AgentSessionState,
+    *,
+    artifact_sink: ArtifactSink,
+) -> ArcadeDisplay | None:
+    """Display projection for the final assistant turn, if it added a map."""
+    snapshot = artifact_sink.turn_snapshot(state)
+    if snapshot is None:
+        return None
+    return map_artifacts_from_snapshot(snapshot, state.working_memory)
+
+
+def turn_display_snapshot(
+    state: AgentSessionState,
+    *,
+    artifact_sink: ArtifactSink,
+) -> dict[str, Any] | None:
+    display = turn_display(state, artifact_sink=artifact_sink)
+    return None if display is None else display.as_payload()
 
 
 def fallback_reply(
@@ -74,20 +148,22 @@ def fallback_reply(
     request: ChatRequest,
     *,
     intent_policy: IntentPolicy,
+    artifact_sink: ArtifactSink,
 ) -> str:
     """Fallback reply to guarantee API always returns text."""
     reply = state.working_memory.get("reply")
     if isinstance(reply, str) and reply.strip():
         return reply.strip()
 
+    projection = display_artifacts(state, artifact_sink=artifact_sink)
     if intent_policy.normalize(state.intent) == "navigate":
-        if get_working_memory_artifact(state.working_memory, "route"):
+        if projection.route:
             return "路线已经准备好了，但总结环节没有产出完整文本，请重试一次。"
         if request.shop_id is None and state.working_memory.get("last_shop_id") is None:
             return "请再明确一下起点和目标地点，我会继续规划路线。"
         return "导航流程还没有完成，请再试一次。"
 
-    shops_payload = display_shops(state.working_memory)
+    shops_payload = list(projection.shops)
     if shops_payload:
         top = shops_payload[0]
         return f"我已经找到匹配机厅，先看 {top.get('name') or 'unknown arcade'}。"
@@ -109,15 +185,15 @@ async def build_response(
     state: AgentSessionState,
     final_text: str,
     intent_policy: IntentPolicy,
+    artifact_sink: ArtifactSink,
 ) -> ChatResponse:
-    """Build API response from memory-level shop and route payloads."""
+    """Build API response from the same display projection as the session detail."""
     if payload_mapper is None:
         raise RuntimeError("arcade payload mapper is not configured")
-    raw_shops = display_shops(state.working_memory)[:20]
+    projection = display_artifacts(state, artifact_sink=artifact_sink)
+    raw_shops = list(projection.shops)[:20]
     shops = await asyncio.to_thread(payload_mapper.summaries_from_rows, raw_shops)
-    route_obj = payload_mapper.route_from_payload(
-        get_working_memory_artifact(state.working_memory, "route")
-    )
+    route_obj = payload_mapper.route_from_payload(projection.route)
 
     intent = intent_policy.normalize(state.intent)
     if route_obj is not None:

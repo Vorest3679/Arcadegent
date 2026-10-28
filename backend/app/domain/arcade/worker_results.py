@@ -12,7 +12,18 @@ from app.agent.runtime.session_state import (
 )
 from app.domain.arcade.replies import display_shops, memory_shops
 
-_PROMOTABLE_KEYS = (
+# Artifacts copied into a worker at mount time. Route/destination/view_payload
+# are deliberately absent: a worker must plan them itself.
+_WORKER_SNAPSHOT_KEYS = (
+    "shop",
+    "shops",
+    "selected_shops",
+    "total",
+    "resolved_locations",
+    "client_location",
+)
+# Stable key order in the worker envelope used by the model.
+_ENVELOPE_ARTIFACT_ORDER = (
     "shop",
     "shops",
     "selected_shops",
@@ -41,49 +52,40 @@ def worker_memory_snapshot(parent_memory: dict[str, Any]) -> dict[str, Any]:
     for key in ("last_request", "last_shop_id", "keyword", "last_db_query", "provider", "last_route_endpoints"):
         if key in parent_memory:
             memory[key] = deepcopy(parent_memory[key])
-    for key in _PROMOTABLE_KEYS:
+    for key in _WORKER_SNAPSHOT_KEYS:
         value = get_working_memory_artifact(parent_memory, key)
         if value is not None:
             set_working_memory_artifact(memory, key, value)
-    for key in ("route", "destination", "view_payload"):
-        memory["artifacts"].pop(key, None)
     return memory
 
 
-def promote_worker_artifacts(
-    *,
-    parent_memory: dict[str, Any],
-    worker_memory: dict[str, Any],
-    turn_index: int,
-    partial: bool = False,
-) -> dict[str, Any]:
-    """Merge a finished worker's artifacts and supporting memory into the parent.
+def worker_memory_promotions(worker_memory: dict[str, Any]) -> dict[str, Any]:
+    """Non-artifact worker fields that should reach the parent.
 
-    A failed worker's artifacts are still promoted but flagged ``partial`` in
-    ``artifact_meta`` so readers can tell them from a complete result.
+    Artifact values are merged generically by ``ArtifactSink`` from their
+    metadata; these scalar/bookkeeping fields are arcade memory and stay here.
     """
     promoted: dict[str, Any] = {}
-    for key in _PROMOTABLE_KEYS:
-        value = get_working_memory_artifact(worker_memory, key)
-        if key not in worker_memory.get("artifact_meta", {}):
-            continue
-        if value is None:
-            continue
-        set_working_memory_artifact(parent_memory, key, value, turn_index=turn_index)
-        if partial:
-            parent_memory["artifact_meta"][key]["status"] = "partial"
-        promoted[key] = deepcopy(value)
     if isinstance(worker_memory.get("last_db_query"), dict):
-        parent_memory["last_db_query"] = deepcopy(worker_memory["last_db_query"])
+        promoted["last_db_query"] = deepcopy(worker_memory["last_db_query"])
     if isinstance(worker_memory.get("provider"), str):
-        parent_memory["provider"] = worker_memory["provider"]
+        promoted["provider"] = worker_memory["provider"]
     if isinstance(worker_memory.get("last_route_endpoints"), dict):
-        parent_memory["last_route_endpoints"] = deepcopy(worker_memory["last_route_endpoints"])
+        promoted["last_route_endpoints"] = deepcopy(worker_memory["last_route_endpoints"])
     if isinstance(worker_memory.get("keyword"), str):
-        parent_memory["keyword"] = worker_memory["keyword"]
+        promoted["keyword"] = worker_memory["keyword"]
     if isinstance(worker_memory.get("last_mcp_result"), dict):
-        parent_memory["last_mcp_result"] = deepcopy(worker_memory["last_mcp_result"])
+        promoted["last_mcp_result"] = deepcopy(worker_memory["last_mcp_result"])
     return promoted
+
+
+def _ordered_promoted(promoted_artifacts: dict[str, Any]) -> dict[str, Any]:
+    """Keep the historical envelope key order regardless of promotion order."""
+    ordered = {key: promoted_artifacts[key] for key in _ENVELOPE_ARTIFACT_ORDER if key in promoted_artifacts}
+    for key, value in promoted_artifacts.items():
+        if key not in ordered:
+            ordered[key] = value
+    return ordered
 
 
 def build_worker_envelope(
@@ -97,6 +99,7 @@ def build_worker_envelope(
     failed_error: str | None,
 ) -> dict[str, Any]:
     """Build the worker result envelope consumed by the parent agent."""
+    promoted_artifacts = _ordered_promoted(promoted_artifacts)
     if worker_name == "navigation_worker":
         destination = get_working_memory_artifact(worker_memory, "shop")
         if not isinstance(destination, dict):

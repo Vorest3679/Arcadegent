@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import cast
 
+from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.context_builder import ContextBuilder
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.domain_port import TurnDomain
@@ -35,6 +36,7 @@ class ReactRuntime(AgentKernel):
         max_steps: int,
         skill_registry: SkillRegistry | None = None,
         domain: TurnDomain | None = None,
+        artifacts: ArtifactSink | None = None,
     ) -> None:
         super().__init__(
             context_builder=context_builder,
@@ -45,6 +47,7 @@ class ReactRuntime(AgentKernel):
             max_steps=max_steps,
             skill_registry=skill_registry,
             domain=domain,
+            artifacts=artifacts,
         )
 
     async def run_chat(self, request: ChatRequest, *, events: RunPublisher) -> ChatResponse:

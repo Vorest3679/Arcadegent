@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.context_builder import ContextBuilder
 from app.agent.context.turn_recorder import append_turn
 from app.agent.llm.provider_adapter import ProviderAdapter
@@ -119,6 +120,7 @@ class AgentKernel:
         max_steps: int,
         skill_registry: SkillRegistry | None = None,
         domain: TurnDomain | None = None,
+        artifacts: ArtifactSink | None = None,
     ) -> None:
         self._context_builder = context_builder
         self._subagent_builder = subagent_builder
@@ -129,6 +131,7 @@ class AgentKernel:
         self._skill_registry = skill_registry
         self._domain: TurnDomain = domain or BaseTurnDomain()
         self._lifecycle = LifecycleDispatcher(self._domain)
+        self._artifacts = artifacts or ArtifactSink()
 
     def _new_loop(self, turn: TurnInput) -> AgentLoop:
         # Built per run from the current attributes, so replaced collaborators
@@ -147,6 +150,7 @@ class AgentKernel:
                 request=turn.request,
                 request_payload=turn.request_payload,
                 domain=self._domain,
+                artifacts=self._artifacts,
                 session_store=self._session_store,
                 subagent_builder=self._subagent_builder,
                 skill_registry=self._skill_registry,
@@ -166,6 +170,7 @@ class AgentKernel:
         actions = ToolActions(
             tool_registry=self._tool_registry,
             domain=self._domain,
+            artifacts=self._artifacts,
             session_store=self._session_store,
             subagent_builder=self._subagent_builder,
             emit=self._emit,

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.agent.artifacts.model import Artifact
+from app.agent.artifacts.sink import ArtifactSink
 from app.agent.runtime.domain_port import BaseTurnDomain, ToolResultSignal
 from app.agent.runtime.lifecycle import LifecycleContext
 from app.agent.runtime.session_state import (
@@ -12,6 +14,7 @@ from app.agent.runtime.session_state import (
 )
 from app.agent.tools.registry import ToolExecutionResult
 from app.domain.arcade import observations, replies, worker_results
+from app.domain.arcade.display import ArcadeDisplay
 from app.domain.arcade.intent import IntentPolicy
 from app.protocol.messages import ChatRequest, ChatResponse
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
@@ -25,9 +28,11 @@ class ArcadeTurnDomain(BaseTurnDomain):
         *,
         payload_mapper: ArcadePayloadMapper | None = None,
         intent_policy: IntentPolicy | None = None,
+        artifact_sink: ArtifactSink | None = None,
     ) -> None:
         self.payload_mapper = payload_mapper
         self.intent_policy = intent_policy or IntentPolicy()
+        self.artifact_sink = artifact_sink or ArtifactSink()
 
     # Lifecycle hooks: where the arcade domain changes its memory and intent.
 
@@ -37,7 +42,10 @@ class ArcadeTurnDomain(BaseTurnDomain):
         state = ctx.turn.state
         request: ChatRequest = ctx.turn.request
         self.intent_policy.classify(state, request)
-        memory = observations.prepare_turn_memory(state.working_memory)
+        memory = observations.prepare_turn_memory(
+            state.working_memory,
+            artifact_sink=self.artifact_sink,
+        )
 
         memory["last_request"] = request.model_dump(mode="json")
         if request.location is not None:
@@ -46,6 +54,9 @@ class ArcadeTurnDomain(BaseTurnDomain):
                 "client_location",
                 request.location.model_dump(mode="json", exclude_none=True),
                 turn_index=state.turn_index,
+                display=False,
+                scope="session",
+                promote=False,
             )
         if request.shop_id is not None:
             memory["last_shop_id"] = request.shop_id
@@ -59,6 +70,7 @@ class ArcadeTurnDomain(BaseTurnDomain):
             result=ctx.tool_result,
             intent_policy=self.intent_policy,
         )
+        self.intent_policy.finalize(ctx.state)
 
     async def on_worker_mount(self, ctx: LifecycleContext) -> None:
         if ctx.worker is None:
@@ -79,23 +91,27 @@ class ArcadeTurnDomain(BaseTurnDomain):
         _ = state
         return observations.tool_result_signal(result)
 
-    def turn_display_snapshot(self, state: AgentSessionState) -> dict[str, Any] | None:
-        return replies.snapshot_turn_map_artifacts(state)
-
-    def promote_worker_artifacts(
+    def artifacts_from_result(
         self,
         *,
-        parent_memory: dict[str, Any],
-        worker_memory: dict[str, Any],
-        turn_index: int,
-        partial: bool = False,
-    ) -> dict[str, Any]:
-        return worker_results.promote_worker_artifacts(
-            parent_memory=parent_memory,
-            worker_memory=worker_memory,
-            turn_index=turn_index,
-            partial=partial,
-        )
+        state: AgentSessionState,
+        result: ToolExecutionResult,
+    ) -> tuple[Artifact, ...]:
+        return observations.artifacts_from_result(state=state, result=result)
+
+    def session_display(self, state: AgentSessionState) -> ArcadeDisplay:
+        """Current display projection shared by the response and session detail.
+
+        Arcade-specific, so it is not part of the kernel's ``TurnPresenter``;
+        ``ChatSessionDetailService`` reaches it through its own narrow protocol.
+        """
+        return replies.display_artifacts(state, artifact_sink=self.artifact_sink)
+
+    def turn_display_snapshot(self, state: AgentSessionState) -> dict[str, Any] | None:
+        return replies.turn_display_snapshot(state, artifact_sink=self.artifact_sink)
+
+    def worker_memory_promotions(self, worker_memory: dict[str, Any]) -> dict[str, Any]:
+        return worker_results.worker_memory_promotions(worker_memory)
 
     def build_worker_envelope(
         self,
@@ -119,7 +135,12 @@ class ArcadeTurnDomain(BaseTurnDomain):
         )
 
     def fallback_reply(self, state: AgentSessionState, request: ChatRequest) -> str:
-        return replies.fallback_reply(state, request, intent_policy=self.intent_policy)
+        return replies.fallback_reply(
+            state,
+            request,
+            intent_policy=self.intent_policy,
+            artifact_sink=self.artifact_sink,
+        )
 
     async def build_response(
         self,
@@ -134,6 +155,7 @@ class ArcadeTurnDomain(BaseTurnDomain):
             state=state,
             final_text=final_text,
             intent_policy=self.intent_policy,
+            artifact_sink=self.artifact_sink,
         )
 
     def turn_summary(self, state: AgentSessionState) -> str:
@@ -141,7 +163,7 @@ class ArcadeTurnDomain(BaseTurnDomain):
 
     # Test/transition helpers keep domain assertions close to the implementation.
     def prepare_turn_memory(self, memory: dict[str, Any]) -> dict[str, Any]:
-        return observations.prepare_turn_memory(memory)
+        return observations.prepare_turn_memory(memory, artifact_sink=self.artifact_sink)
 
     def display_shops(self, memory: dict[str, Any]) -> list[dict[str, Any]]:
         return replies.display_shops(memory)

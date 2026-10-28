@@ -109,7 +109,19 @@ def set_working_memory_artifact(
     value: Any,
     *,
     turn_index: int | None = None,
+    display: bool | None = None,
+    scope: str | None = None,
+    promote: bool | None = None,
+    status: str | None = None,
+    invalidates: tuple[str, ...] | None = None,
 ) -> None:
+    """Write one artifact and, when a turn is given, its display metadata.
+
+    ``display``/``scope``/``promote``/``invalidates`` are optional so direct
+    domain writes keep the flags an earlier :class:`ArtifactSink` application
+    recorded. Passing ``status=None`` clears a previous ``partial`` mark;
+    workers set it when promotion happens before they fail.
+    """
     normalized = ensure_working_memory_shape(memory)
     normalized["artifacts"][key] = deepcopy(value)
     if turn_index is not None:
@@ -117,7 +129,26 @@ def set_working_memory_artifact(
         if not isinstance(meta, dict):
             meta = {}
             normalized["artifact_meta"] = meta
-        meta[key] = {"turn_index": turn_index, "updated_at": _utc_now_iso()}
+        previous = meta.get(key) if isinstance(meta.get(key), dict) else {}
+        entry = dict(previous)
+        entry["turn_index"] = turn_index
+        entry["updated_at"] = _utc_now_iso()
+        if display is not None:
+            entry["display"] = display
+        if scope is not None:
+            entry["scope"] = scope
+        if promote is not None:
+            entry["promote"] = promote
+        if status is None:
+            entry.pop("status", None)
+        else:
+            entry["status"] = status
+        if invalidates is not None:
+            if invalidates:
+                entry["invalidates"] = list(invalidates)
+            else:
+                entry.pop("invalidates", None)
+        meta[key] = entry
 
 
 def append_worker_run(memory: dict[str, Any] | None, run: dict[str, Any], *, max_entries: int = 20) -> None:

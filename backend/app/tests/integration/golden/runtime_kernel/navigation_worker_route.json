@@ -1798,14 +1798,27 @@
     "working_memory": {
       "artifact_meta": {
         "destination": {
+          "display": true,
+          "promote": true,
+          "scope": "turn",
           "turn_index": 1,
           "updated_at": "<volatile>"
         },
         "route": {
+          "display": true,
+          "promote": true,
+          "scope": "turn",
           "turn_index": 1,
           "updated_at": "<volatile>"
         },
         "shop": {
+          "display": true,
+          "invalidates": [
+            "selected_shops",
+            "destination"
+          ],
+          "promote": true,
+          "scope": "turn",
           "turn_index": 1,
           "updated_at": "<volatile>"
         }

@@ -12,7 +12,12 @@ import os
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, cast
 
-from app.agent.tools.base import ExecutionMode, ProviderExecutionResult, ToolDescriptor
+from app.agent.tools.base import (
+    ExecutionMode,
+    ProviderExecutionResult,
+    ToolDescriptor,
+    ToolOutcome,
+)
 from app.agent.tools.schemas import build_json_schema_validator, load_json_schema
 
 _DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -57,7 +62,7 @@ class BuiltinToolContext:
 
 BuiltinToolExecutor = Callable[
     [BuiltinToolContext, dict[str, Any]],
-    dict[str, Any] | Awaitable[dict[str, Any]],
+    dict[str, Any] | ToolOutcome | Awaitable[dict[str, Any] | ToolOutcome],
 ]
 BuiltinToolArgumentPreparer = Callable[
     [dict[str, Any], dict[str, Any]],
@@ -137,10 +142,18 @@ class BuiltinToolProvider:
             raise ValueError(f"unknown_tool:{tool_name}")
         payload = validated_arguments if isinstance(validated_arguments, dict) else raw_arguments
         if inspect.iscoroutinefunction(binding.executor):
-            output = await binding.executor(self._context, payload)
+            raw_output = await binding.executor(self._context, payload)
         else:
-            output = await asyncio.to_thread(binding.executor, self._context, payload)
-        return ProviderExecutionResult(status="completed", output=output)
+            raw_output = await asyncio.to_thread(binding.executor, self._context, payload)
+        if isinstance(raw_output, ToolOutcome):
+            return ProviderExecutionResult(
+                status="completed",
+                output=raw_output.output,
+                artifacts=raw_output.artifacts,
+            )
+        if not isinstance(raw_output, dict):
+            raise ValueError(f"invalid_builtin_tool_output:{tool_name}")
+        return ProviderExecutionResult(status="completed", output=raw_output)
 
     def prepare_arguments(
         self,

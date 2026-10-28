@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Protocol
 
+from app.agent.artifacts.model import Artifact
+
 ToolValidator = Callable[[dict[str, Any]], Any]
 
 # Whether a tool call may overlap a sibling call in the same batch. The kernel
@@ -46,6 +48,20 @@ class ProviderExecutionResult:
     status: str
     output: dict[str, Any]
     error_message: str | None = None
+    artifacts: tuple[Artifact, ...] = ()
+
+
+@dataclass(frozen=True)
+class ToolOutcome:
+    """Optional executor return type: model-facing output plus artifacts.
+
+    Executors that only return a dict keep working; returning a ``ToolOutcome``
+    lets a tool describe the opaque values it contributes without teaching the
+    provider about any particular tool.
+    """
+
+    output: dict[str, Any]
+    artifacts: tuple[Artifact, ...] = ()
 
 
 class ToolProvider(Protocol):

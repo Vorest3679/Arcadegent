@@ -128,11 +128,38 @@ publish("assistant.completed" or "session.failed", {"reply": final_text, ...}, o
 | 协议 | 方法 | 默认行为 |
 | --- | --- | --- |
 | `TurnMetadata` | `runtime_hints`、`session_event_fields`、`turn_summary` | 无附加字段 |
-| `ToolObserver` | `tool_result_signal`（返回的事件排在 `tool.completed` 之前） | 无事件 |
-| `WorkerPolicy` | `promote_worker_artifacts`、`build_worker_envelope` | 不提升产物、通用信封 |
+| `ToolObserver` | `tool_result_signal`（返回的事件排在 `tool.completed` 之前）、`artifacts_from_result`（工具未自带 artifacts 时的过渡映射） | 无事件、无 artifacts |
+| `WorkerPolicy` | `worker_memory_promotions`（非 artifact 字段）、`build_worker_envelope` | 不提升额外字段、通用信封；artifact 由 `ArtifactSink` 提升 |
 | `TurnPresenter` | `fallback_reply`、`turn_display_snapshot`、`build_response` | 通用兜底文本、无展示快照、`TurnReply` |
 
 `backend/app/tests/integration/test_runtime_kernel_domain.py` 直接使用 `AgentKernel.run_turn`，以 `BaseTurnDomain` 和一个最小的非机厅领域验证上述约定。
+
+## Artifacts（阶段 6）
+
+`backend/app/agent/artifacts/` 把“工具产出了什么”和“怎么展示/提升”拆开。`Artifact{key, value, memory, display, scope, promote, append, append_key, invalidates}` 只携带策略，值本身对内核不透明；`ArtifactSink` 是唯一把策略写成 `working_memory["artifact_meta"]` 的地方：
+
+| 字段 | 写入元数据 | 作用 |
+| --- | --- | --- |
+| `display` | `display` | 是否参与展示快照；响应与会话详情都读它，不再维护 `display_keys` 清单 |
+| `scope` | `scope` | `turn` 在下一轮开始时由 `begin_turn` 删除；`session` 保留到同名 artifact 被替换或显式删除 |
+| `promote` | `promote` | 是否允许 worker 的结果覆盖父状态；候选列表这类 worker 局部值设为 false |
+| `invalidates` | `invalidates` | 新值会让哪些旧值失效（例如新搜索清掉上一轮 `selected_shops`/`shop`/`destination`）；worker 提升时同样生效 |
+| `append` / `append_key` | — | 列表追加；`append_key` 由生产者提供（搜索候选传 `source_id`），内核不硬编码业务字段 |
+
+`memory=False` 目前不支持 display-only 存储，`apply` 会直接报错，避免静默丢数据。
+
+`ArtifactSink` 的时机：
+
+- `begin_turn`：按 `scope="turn"` 统一清理上一轮的值；没有 `scope` 元数据的老会话由领域提供 `legacy_keys` 兜底。
+- `apply`：工具/领域结果写入当前状态，记录 `turn_index`、`display`、`scope`、`promote`、`invalidates`；同一批 artifact 中产生的 key 不会被同批的 `invalidates` 删除。
+- `promote`：只提升 worker 自己产生过（有元数据）的 artifact；失败 worker 的提升结果带 `status="partial"`，worker 从父状态复制的值不会被提升。父状态里被提升 artifact 声明为失效的旧值同时被删除，所以 worker 搜索没有选择新店时不会显示父状态上一轮的 `selected_shops`。非 artifact 的标量字段由 `TurnDomain.worker_memory_promotions` 返回。
+- `display_snapshot` / `turn_snapshot`：前者给即时响应与会话详情（session scope 常驻，turn scope 取最近一次展示轮），后者给最终 assistant 回合的 `map_artifacts`（只有本轮确实更新过展示 artifact 才归档）。领域把两者投影成机厅自有的 `ArcadeDisplay`（`domain/arcade/display.py`），由 `ArcadeTurnDomain.session_display` 提供；该方法不属于内核端口，内核只经 `turn_display_snapshot` 拿到不透明 dict。没有 `display` 元数据的老会话按“展示 + session”兼容，不会被新 artifact 挤掉。
+
+工具自带 artifacts 时，`ToolExecutionResult.artifacts` 优先；否则才调用 `TurnDomain.artifacts_from_result`。当前 `db_query_tool`、`result_selection_tool`、`route_plan_tool` 通过 `ToolOutcome` 自带 artifacts，过渡映射只剩 MCP 结果；worker 的结果由 `ArtifactSink.promote` 提升，不再从 `invoke_worker` 信封二次写入。`ProviderExecutionResult` 与 `MCPExecutionResult` 都携带 artifacts，`BuiltinToolProvider` 接受 `ToolOutcome` 或纯 dict（旧执行器无需改动）。
+
+intent 在阶段 6 改为每轮推导：`IntentPolicy.classify` 先看显式 intent 与导航/附近信号；上一轮是 `navigate` 且还没有 route（典型是 worker 返回 `needs_input` 等起点）时，普通补充信息（“我在人民广场”）保留 `navigate`；一旦已有 route，普通追问回到 `search`，不再继承旧导航。`on_step_update` 末尾的 `IntentPolicy.finalize` 仍只在本轮产生 route artifact 时把标签改为 `navigate`。
+
+会话详情不再由 API 直接读领域：`services/chat_session_detail.py` 声明窄协议 `ArcadeDisplaySource`（只有 `session_display`），由 container 注入 `ArcadeTurnDomain`，拿到 `ArcadeDisplay` 后统一映射 `ChatTurnMapArtifactsDto`/`ChatSessionDetailDto`；`api/http/chat.py` 只传 run 状态并调用该服务。v2 的“管理外壳 + 业务 `data`”仍见 `docs/plans/二级计划4-ReactRuntime执行内核重构.md` 第 9 节。
 
 ## 生命周期与作用域（阶段 2.7 设计）
 
@@ -190,7 +217,7 @@ ctx.response  before_unmount 时为已投影的响应（只读通知）
 这是设计讨论里最容易混淆的地方，单独记下：
 
 - **`spawnable_workers` 不是 config，是拓扑。** 它表示“当前 agent 节点能派发哪些 worker”，应放到 `AgentNode.spawnable`；全局“存在哪些 worker”仍由 `SubAgentBuilder` 维护。2.7 起 `_run_worker` 只按当前节点的 `AgentNode.spawnable` 校验。若本轮要临时收紧，放 `StepPolicy`，不要放 `TurnConfig`。
-- **`payload_mapper` 不是 config，是领域依赖。** `ArcadePayloadMapper` 带 geo resolver、缓存和 HTTP 配置，是长生命周期服务，只在 `ArcadeTurnDomain.build_response` 使用；应留在 `ArcadeTurnDomain` 构造注入，不能塞进通用 `TurnConfig`。否则内核被迫知道“payload mapper”这个机厅概念，每轮 config 还会携带服务对象。
+- **`payload_mapper` 不是 config，是领域依赖。** `ArcadePayloadMapper` 带 geo resolver、缓存和 HTTP 配置，是长生命周期服务，只在 `ArcadeTurnDomain.build_response` 与 `ChatSessionDetailService` 的 DTO 映射中使用；应留在 `ArcadeTurnDomain` 构造注入，不能塞进通用 `TurnConfig`。否则内核被迫知道“payload mapper”这个机厅概念，每轮 config 还会携带服务对象。
 
 ### domain 如何进入内核
 

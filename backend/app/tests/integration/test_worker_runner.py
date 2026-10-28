@@ -10,6 +10,7 @@ import pytest
 
 from app.agent.runtime.agent_loop import LoopOutcome, LoopSpec
 from app.agent.runtime.budget import RunBudget
+from app.agent.artifacts.sink import ArtifactSink
 from app.agent.runtime.domain_port import BaseTurnDomain
 from app.agent.runtime.kernel import AgentKernel, TurnInput
 from app.agent.runtime.lifecycle import AgentEnvironment, LifecycleContext
@@ -228,8 +229,8 @@ def test_worker_runner_keeps_the_parent_clean_until_commit(tmp_path: Path) -> No
     asyncio.run(scenario())
 
 
-class _FailingPromotionDomain(BaseTurnDomain):
-    def promote_worker_artifacts(self, *, parent_memory, worker_memory, turn_index, partial=False):  # type: ignore[no-untyped-def]
+class _FailingPromotionSink(ArtifactSink):
+    def promote(self, **kwargs):  # type: ignore[no-untyped-def]
         # Long enough to prove the client-visible ``tool.failed`` text is bounded.
         raise RuntimeError("promotion boom " + "x" * 500)
 
@@ -242,7 +243,7 @@ def test_worker_dispatch_exception_becomes_a_failed_tool_result(tmp_path: Path) 
         ("main_agent", _text("handled")),
     ])
     kernel = _kernel(tmp_path, provider, store, _Tools())
-    kernel._domain = _FailingPromotionDomain()
+    kernel._artifacts = _FailingPromotionSink()
 
     result, events = _run(kernel, "go")
 

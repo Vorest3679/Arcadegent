@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.agent.artifacts.model import Artifact
+from app.agent.tools.base import ToolOutcome
 from app.agent.tools.builtin.executor_utils import as_region_code_or_name
 from app.agent.tools.builtin.geo_outlier_filter import filter_geo_outliers, row_coordinates
 from app.agent.tools.builtin.provider import BuiltinToolContext
@@ -156,13 +158,33 @@ def _apply_geo_outlier_filter(
     return filter_geo_outliers(rows)
 
 
-def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]:
+def execute(context: BuiltinToolContext, args: dict[str, Any]) -> ToolOutcome:
     """Normalize region filters and execute the store-backed shop query."""
     tool = context.require("db_query_tool")
 
     shop_id = args.get("shop_id")
     if shop_id is not None:
-        return {"shop": tool.get_shop(shop_id)}
+        shop = tool.get_shop(shop_id)
+        artifacts = ()
+        if isinstance(shop, dict):
+            artifacts = (
+                Artifact(
+                    "shop",
+                    shop,
+                    display=True,
+                    scope="turn",
+                    invalidates=("selected_shops", "destination"),
+                ),
+                Artifact(
+                    "search_candidates",
+                    [shop],
+                    scope="turn",
+                    promote=False,
+                    append=True,
+                    append_key="source_id",
+                ),
+            )
+        return ToolOutcome(output={"shop": shop}, artifacts=artifacts)
 
     province_code, province_name = as_region_code_or_name(
         args.get("province_code"),
@@ -236,28 +258,48 @@ def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]
             len(removed_outliers),
             sample,
         )
-    return {
-        "shops": rows,
-        "total": total,
-        "geo_outliers_removed": len(removed_outliers),
-        "query": {
-            "keyword": args.get("keyword"),
-            "shop_name": args.get("shop_name"),
-            "title_name": args.get("title_name"),
-            "province_code": province_code,
-            "city_code": city_code,
-            "county_code": county_code,
-            "province_name": province_name,
-            "city_name": city_name,
-            "county_name": county_name,
-            "has_arcades": args.get("has_arcades"),
-            "sort_by": sort_by,
-            "sort_order": sort_order,
-            "sort_title_name": sort_title_name,
-            "origin_lng": origin_lng,
-            "origin_lat": origin_lat,
-            "origin_coord_system": origin_coord_system,
-            "page": args["page"],
-            "page_size": args["page_size"],
+    return ToolOutcome(
+        output={
+            "shops": rows,
+            "total": total,
+            "geo_outliers_removed": len(removed_outliers),
+            "query": {
+                "keyword": args.get("keyword"),
+                "shop_name": args.get("shop_name"),
+                "title_name": args.get("title_name"),
+                "province_code": province_code,
+                "city_code": city_code,
+                "county_code": county_code,
+                "province_name": province_name,
+                "city_name": city_name,
+                "county_name": county_name,
+                "has_arcades": args.get("has_arcades"),
+                "sort_by": sort_by,
+                "sort_order": sort_order,
+                "sort_title_name": sort_title_name,
+                "origin_lng": origin_lng,
+                "origin_lat": origin_lat,
+                "origin_coord_system": origin_coord_system,
+                "page": args["page"],
+                "page_size": args["page_size"],
+            },
         },
-    }
+        artifacts=(
+            Artifact(
+                "shops",
+                rows,
+                display=True,
+                scope="session",
+                invalidates=("selected_shops", "shop", "destination"),
+            ),
+            Artifact(
+                "search_candidates",
+                rows,
+                scope="turn",
+                promote=False,
+                append=True,
+                append_key="source_id",
+            ),
+            Artifact("total", total, scope="session"),
+        ),
+    )

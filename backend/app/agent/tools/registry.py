@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import ValidationError
 from pydantic_core import ErrorDetails
 
+from app.agent.artifacts.model import Artifact
 from app.agent.tools.base import ExecutionMode, ToolDescriptor, ToolInputValidationError, ToolProvider
 from app.agent.tools.builtin.provider import BuiltinToolProvider
 from app.agent.tools.mcp_gateway import MCPToolGateway
@@ -54,6 +55,7 @@ class ToolExecutionResult:
     output: dict[str, Any]
     error_message: str | None = None
     capabilities: tuple[str, ...] = ()
+    artifacts: tuple[Artifact, ...] = ()
 
 
 class ToolRegistry:
@@ -182,6 +184,7 @@ class ToolRegistry:
                 output=result.output,
                 error_message=result.error_message,
                 capabilities=descriptor.capabilities,
+                artifacts=result.artifacts,
             )
         except ToolPermissionError as exc:
             return self._failed(

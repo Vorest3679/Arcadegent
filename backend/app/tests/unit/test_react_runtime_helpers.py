@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.agent.artifacts.model import Artifact
 from app.agent.tools.builtin.executors import db_query as db_query_executor
 from app.agent.tools.builtin.executors import summary as summary_executor
 from app.agent.tools.builtin.executors import result_selection as result_selection_executor
@@ -49,11 +50,13 @@ def test_result_selection_commits_only_ordered_current_candidates() -> None:
     args, hydrated = result_selection_executor.prepare_arguments(
         {"selected_shop_ids": [2, 1]}, state.working_memory
     )
-    output = result_selection_executor.execute(None, args)  # type: ignore[arg-type]
+    outcome = result_selection_executor.execute(None, args)  # type: ignore[arg-type]
 
     assert hydrated == ["selected_shops"]
-    assert output["selected_shop_ids"] == [2, 1]
-    assert [shop["source_id"] for shop in output["shops"]] == [2, 1]
+    assert outcome.output["selected_shop_ids"] == [2, 1]
+    assert [shop["source_id"] for shop in outcome.output["shops"]] == [2, 1]
+    assert outcome.artifacts[0].key == "selected_shops"
+    assert outcome.artifacts[0].display is True
 
 
 def test_result_selection_rejects_stale_or_duplicate_ids_and_allows_empty() -> None:
@@ -66,7 +69,7 @@ def test_result_selection_rejects_stale_or_duplicate_ids_and_allows_empty() -> N
     with pytest.raises(ValueError, match="duplicates"):
         result_selection_executor.prepare_arguments({"selected_shop_ids": [1, 1]}, state.working_memory)
     args, _ = result_selection_executor.prepare_arguments({"selected_shop_ids": []}, state.working_memory)
-    assert result_selection_executor.execute(None, args)["shops"] == []  # type: ignore[arg-type]
+    assert result_selection_executor.execute(None, args).output["shops"] == []  # type: ignore[arg-type]
 
 
 def test_explicit_selection_overrides_candidates_and_detail_for_display() -> None:
@@ -82,24 +85,48 @@ def test_explicit_selection_overrides_candidates_and_detail_for_display() -> Non
 def test_query_replaces_old_selection_and_selection_commits_new_cards() -> None:
     domain = _domain()
     state = AgentSessionState(session_id="s_new_query")
-    set_working_memory_artifact(state.working_memory, "selected_shops", [{"source_id": 99}], turn_index=1)
+    domain.artifact_sink.apply(
+        state,
+        [Artifact("selected_shops", [{"source_id": 99}], display=True, scope="session")],
+    )
     state.turn_index = 2
+    rows = [{"source_id": 1}, {"source_id": 2}, {"source_id": 3}]
+    domain.artifact_sink.apply(
+        state,
+        [
+            Artifact(
+                "shops",
+                rows,
+                display=True,
+                scope="session",
+                invalidates=("selected_shops", "shop", "destination"),
+            ),
+            Artifact("search_candidates", rows, promote=False, append=True, append_key="source_id"),
+            Artifact("total", 3, scope="session"),
+        ],
+    )
     observations.apply_tool_result(
         intent_policy=domain.intent_policy,
         state=state,
         result=ToolExecutionResult(call_id="query", tool_name="db_query_tool", status="completed", output={
-            "shops": [{"source_id": 1}, {"source_id": 2}, {"source_id": 3}], "total": 3,
+            "shops": rows, "total": 3,
         }),
     )
     assert get_working_memory_artifact(state.working_memory, "selected_shops") is None
+    selected = [{"source_id": 2}, {"source_id": 1}]
+    domain.artifact_sink.apply(
+        state,
+        [Artifact("selected_shops", selected, display=True, scope="session")],
+    )
     observations.apply_tool_result(
         intent_policy=domain.intent_policy,
         state=state,
         result=ToolExecutionResult(call_id="select", tool_name="result_selection_tool", status="completed", output={
-            "selected_shop_ids": [2, 1], "shops": [{"source_id": 2}, {"source_id": 1}],
+            "selected_shop_ids": [2, 1], "shops": selected,
         }),
     )
     assert [row["source_id"] for row in domain.display_shops(state.working_memory)] == [2, 1]
+    assert [row["source_id"] for row in domain.session_display(state).shops] == [2, 1]
 
 
 def test_prepare_tool_arguments_hydrates_navigation_summary_from_memory() -> None:
@@ -229,30 +256,32 @@ def test_apply_tool_memory_keeps_mcp_resolved_locations() -> None:
     domain = _domain()
     state = AgentSessionState(session_id="s_mcp_geo")
 
+    result = ToolExecutionResult(
+        call_id="call_geo",
+        tool_name="mcp__amap__maps_geo",
+        status="completed",
+        output={
+            "server": "amap",
+            "tool": "maps_geo",
+            "data": {
+                "locations": [
+                    {"name": "鲁迅公园", "lng": 121.48819, "lat": 31.27687},
+                ]
+            },
+        },
+    )
+    domain.artifact_sink.apply(state, domain.artifacts_from_result(state=state, result=result))
     observations.apply_tool_result(
         intent_policy=domain.intent_policy,
         state=state,
-        result=ToolExecutionResult(
-            call_id="call_geo",
-            tool_name="mcp__amap__maps_geo",
-            status="completed",
-            output={
-                "server": "amap",
-                "tool": "maps_geo",
-                "data": {
-                    "locations": [
-                        {"name": "鲁迅公园", "lng": 121.48819, "lat": 31.27687},
-                    ]
-                },
-            },
-        ),
+        result=result,
     )
 
     assert get_working_memory_artifact(state.working_memory, "resolved_locations")[0]["name"] == "鲁迅公园"
     assert state.working_memory["last_mcp_result"]["tool"] == "maps_geo"
 
 
-def test_promote_worker_artifacts_keeps_last_mcp_result() -> None:
+def test_worker_promotions_keep_last_mcp_result() -> None:
     domain = _domain()
     parent_state = AgentSessionState(session_id="s_parent")
     worker_state = AgentSessionState(session_id="s_worker")
@@ -266,11 +295,7 @@ def test_promote_worker_artifacts_keeps_last_mcp_result() -> None:
         },
     }
 
-    domain.promote_worker_artifacts(
-        parent_memory=parent_state.working_memory,
-        worker_memory=worker_state.working_memory,
-        turn_index=parent_state.turn_index,
-    )
+    parent_state.working_memory.update(domain.worker_memory_promotions(worker_state.working_memory))
 
     assert parent_state.working_memory["last_mcp_result"]["tool"] == "maps_geo"
 

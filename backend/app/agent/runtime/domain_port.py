@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.agent.artifacts.model import Artifact
 from app.agent.runtime.lifecycle import BaseLifecycleHooks
 from app.agent.runtime.session_state import AgentSessionState
 from app.agent.tools.registry import ToolExecutionResult
@@ -58,20 +59,25 @@ class ToolObserver(Protocol):
     def tool_result_signal(self, *, state: AgentSessionState, result: ToolExecutionResult) -> ToolResultSignal:
         """Events and fields a completed tool result contributes."""
 
-
-class WorkerPolicy(Protocol):
-    def promote_worker_artifacts(
+    def artifacts_from_result(
         self,
         *,
-        parent_memory: dict[str, Any],
-        worker_memory: dict[str, Any],
-        turn_index: int,
-        partial: bool = False,
-    ) -> dict[str, Any]:
-        """Merge a finished worker's artifacts into the parent memory.
+        state: AgentSessionState,
+        result: ToolExecutionResult,
+    ) -> tuple[Artifact, ...]:
+        """Transitional mapping from a tool output to artifacts.
 
-        ``partial`` is True when the worker failed: the promoted artifacts are
-        whatever it produced before failing and should be marked as such.
+        Called only when the tool itself returned no artifacts. Domains use it
+        for results whose executors do not describe their artifacts yet.
+        """
+
+
+class WorkerPolicy(Protocol):
+    def worker_memory_promotions(self, worker_memory: dict[str, Any]) -> dict[str, Any]:
+        """Non-artifact memory fields a finished worker contributes to the parent.
+
+        Artifact values are merged by ``ArtifactSink`` from their metadata; this
+        method covers scalar/bookkeeping fields that are not artifacts.
         """
 
     def build_worker_envelope(
@@ -134,14 +140,15 @@ class BaseTurnDomain(BaseLifecycleHooks):
     def tool_result_signal(self, *, state: AgentSessionState, result: ToolExecutionResult) -> ToolResultSignal:
         return ToolResultSignal()
 
-    def promote_worker_artifacts(
+    def artifacts_from_result(
         self,
         *,
-        parent_memory: dict[str, Any],
-        worker_memory: dict[str, Any],
-        turn_index: int,
-        partial: bool = False,
-    ) -> dict[str, Any]:
+        state: AgentSessionState,
+        result: ToolExecutionResult,
+    ) -> tuple[Artifact, ...]:
+        return ()
+
+    def worker_memory_promotions(self, worker_memory: dict[str, Any]) -> dict[str, Any]:
         return {}
 
     def build_worker_envelope(

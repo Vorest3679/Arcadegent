@@ -352,10 +352,14 @@ def test_previous_route_is_not_promoted_as_new_result() -> None:
     worker = domain.worker_memory_snapshot(prepared)
     assert worker["artifacts"]["shops"] == [{"source_id": 10}]
     assert worker["last_route_endpoints"] == memory["last_route_endpoints"]
-    assert domain.promote_worker_artifacts(parent_memory=memory, worker_memory=worker, turn_index=2) == {}
+    assert domain.artifact_sink.promote(
+        child_memory=worker, parent_memory=memory, turn_index=2
+    ) == {}
     assert memory["artifact_meta"]["shops"]["turn_index"] == 1
     set_working_memory_artifact(worker, "shops", [], turn_index=2)
-    assert domain.promote_worker_artifacts(parent_memory=memory, worker_memory=worker, turn_index=2) == {"shops": []}
+    assert domain.artifact_sink.promote(
+        child_memory=worker, parent_memory=memory, turn_index=2
+    ) == {"shops": []}
 
 def test_online_route_unavailable_does_not_estimate() -> None:
     import pytest

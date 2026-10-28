@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from app.agent.llm.provider_adapter import ModelResponse, ModelToolCall
-from app.agent.runtime.domain_port import BaseTurnDomain
+from app.agent.artifacts.sink import ArtifactSink
 from app.agent.runtime.budget import RunBudget
 from app.session.events import RunEvent
 from backend.app.tests.integration._runtime_kernel_test_support import (
@@ -167,60 +167,68 @@ def test_blank_worker_text_does_not_complete_the_worker(tmp_path: Path) -> None:
     assert run["summary"] == "worker text"
 
 
-class _PromotionRecorder(BaseTurnDomain):
-    def __init__(self) -> None:
-        self.partial: list[bool] = []
+class _PromotionRecorder(ArtifactSink):
+    """Record the status the worker runner hands to artifact promotion."""
 
-    def promote_worker_artifacts(self, *, parent_memory, worker_memory, turn_index, partial=False):  # type: ignore[no-untyped-def]
-        self.partial.append(partial)
-        return {}
+    def __init__(self) -> None:
+        self.statuses: list[str] = []
+
+    def promote(self, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
+        self.statuses.append(kwargs["status"])
+        return super().promote(**kwargs)
 
 
 @pytest.mark.parametrize(("worker_step", "expected"), [(_batch("boom"), True), (_text("fine"), False)])
 def test_promotion_is_flagged_partial_only_for_failed_workers(
     tmp_path: Path, worker_step: ModelResponse, expected: bool
 ) -> None:
-    domain = _PromotionRecorder()
+    recorder = _PromotionRecorder()
     provider = _Provider([
         ("main_agent", _call("spawn", worker="helper_worker", task="do it")),
         ("helper_worker", worker_step),
         *([("helper_worker", _text("gave up"))] if expected else []),
         ("main_agent", _text("main done")),
     ])
-    _run(_runtime(tmp_path, provider, _Store(), domain), "go")
+    kernel = _runtime(tmp_path, provider, _Store())
+    kernel._artifacts = recorder
+    _run(kernel, "go")
 
-    assert domain.partial == [expected]
+    assert recorder.statuses == ["failed" if expected else "completed"]
 
 
 def test_concluding_tool_does_not_hide_a_same_batch_failure(tmp_path: Path) -> None:
     store = _Store()
-    domain = _PromotionRecorder()
+    recorder = _PromotionRecorder()
     provider = _Provider([
         ("main_agent", _call("spawn", worker="helper_worker", task="do it")),
         ("helper_worker", _calls(("boom", {}), ("finish", {"reply": "looks done"}))),
         ("main_agent", _text("main done")),
     ])
-    _run(_runtime(tmp_path, provider, store, domain), "go")
+    kernel = _runtime(tmp_path, provider, store)
+    kernel._artifacts = recorder
+    _run(kernel, "go")
 
     run = _worker_run(store)
     assert run["status"] == "failed"
     assert "boom" in run["error"]
-    assert domain.partial == [True]
+    assert recorder.statuses == ["failed"]
 
 
 def test_concluding_tool_after_a_later_success_recovers_the_worker(tmp_path: Path) -> None:
     store = _Store()
-    domain = _PromotionRecorder()
+    recorder = _PromotionRecorder()
     provider = _Provider([
         ("main_agent", _call("spawn", worker="helper_worker", task="do it")),
         ("helper_worker", _batch("boom")),
         ("helper_worker", _call("finish", reply="recovered")),
         ("main_agent", _text("main done")),
     ])
-    _run(_runtime(tmp_path, provider, store, domain), "go")
+    kernel = _runtime(tmp_path, provider, store)
+    kernel._artifacts = recorder
+    _run(kernel, "go")
 
     assert _worker_run(store)["status"] == "completed"
-    assert domain.partial == [False]
+    assert recorder.statuses == ["completed"]
 
 
 def test_workers_draw_from_the_turn_budget(tmp_path: Path) -> None:
@@ -250,14 +258,15 @@ def test_child_budget_has_its_own_cap_and_shares_the_pool() -> None:
         root.next()
 
 
-def test_arcade_promotion_marks_partial_artifacts_in_meta() -> None:
+def test_artifact_promotion_marks_partial_artifacts_in_meta() -> None:
     from app.agent.runtime.session_state import ensure_working_memory_shape, set_working_memory_artifact
-    from app.domain.arcade.worker_results import promote_worker_artifacts
 
     worker = ensure_working_memory_shape({})
-    set_working_memory_artifact(worker, "shops", [{"id": 1}], turn_index=1)
-    for partial, expected in ((True, "partial"), (False, None)):
+    set_working_memory_artifact(worker, "shops", [{"id": 1}], turn_index=1, display=True, scope="session")
+    for status, expected in (("failed", "partial"), ("completed", None)):
         parent = ensure_working_memory_shape({})
-        promoted = promote_worker_artifacts(parent_memory=parent, worker_memory=worker, turn_index=1, partial=partial)
+        promoted = ArtifactSink().promote(
+            child_memory=worker, parent_memory=parent, turn_index=1, status=status
+        )
         assert "shops" in promoted
         assert parent["artifact_meta"]["shops"].get("status") == expected

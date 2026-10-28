@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.turn_recorder import merge_usage_totals, persist_worker_evidence_turns
 from app.agent.runtime.agent_loop import STATUS_COMPLETED, STATUS_FAILED, LoopOutcome, LoopSpec
 from app.agent.runtime.domain_port import TurnDomain
@@ -117,10 +118,12 @@ class WorkerRunner:
         emit: LifecycleCall,
         safe_emit: LifecycleCall,
         run_loop: LoopRunner,
+        artifacts: ArtifactSink | None = None,
     ) -> None:
         self._request = request
         self._request_payload = request_payload
         self._domain = domain
+        self._artifacts = artifacts or ArtifactSink()
         self._session_store = session_store
         self._subagent_builder = subagent_builder
         self._skill_registry = skill_registry
@@ -247,11 +250,14 @@ class WorkerRunner:
         if run.committed and run.envelope is not None:
             return run.envelope
         parent = run.parent_state
-        promoted_artifacts = self._domain.promote_worker_artifacts(
+        promoted_artifacts = self._artifacts.promote(
+            child_memory=run.state.working_memory,
             parent_memory=parent.working_memory,
-            worker_memory=run.state.working_memory,
             turn_index=parent.turn_index,
-            partial=run.failed_error is not None,
+            status="failed" if run.failed_error is not None else "completed",
+        )
+        parent.working_memory.update(
+            deepcopy(self._domain.worker_memory_promotions(run.state.working_memory))
         )
         self._commit_evidence(run)
         envelope = self._domain.build_worker_envelope(

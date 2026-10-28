@@ -945,18 +945,35 @@
     "working_memory": {
       "artifact_meta": {
         "search_candidates": {
+          "display": false,
+          "promote": false,
+          "scope": "turn",
           "turn_index": 1,
           "updated_at": "<volatile>"
         },
         "selected_shops": {
+          "display": true,
+          "promote": true,
+          "scope": "session",
           "turn_index": 1,
           "updated_at": "<volatile>"
         },
         "shops": {
+          "display": true,
+          "invalidates": [
+            "selected_shops",
+            "shop",
+            "destination"
+          ],
+          "promote": true,
+          "scope": "session",
           "turn_index": 1,
           "updated_at": "<volatile>"
         },
         "total": {
+          "display": false,
+          "promote": true,
+          "scope": "session",
           "turn_index": 1,
           "updated_at": "<volatile>"
         }

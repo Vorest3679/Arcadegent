@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.turn_recorder import record_tool_result_turn
 from app.agent.runtime.budget import RunBudget
 from app.agent.runtime.domain_port import TurnDomain
@@ -105,6 +106,7 @@ class _SpawnAgentHook:
                     output={"error": {"type": "worker_dispatch_error", "message": error_message}},
                     error_message=error_message,
                     capabilities=result.capabilities,
+                    artifacts=result.artifacts,
                 )
             else:
                 result = ToolExecutionResult(
@@ -114,6 +116,7 @@ class _SpawnAgentHook:
                     output=envelope,
                     error_message=envelope.get("error"),
                     capabilities=result.capabilities,
+                    artifacts=result.artifacts,
                 )
         return await self._next.after(task, result)
 
@@ -130,9 +133,11 @@ class ToolActions:
         subagent_builder: SubAgentBuilder,
         emit: LifecycleCall,
         spawn_worker: WorkerSpawner,
+        artifacts: ArtifactSink | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._domain = domain
+        self._artifacts = artifacts or ArtifactSink()
         self._session_store = session_store
         self._subagent_builder = subagent_builder
         self._emit = emit
@@ -207,10 +212,12 @@ class ToolActions:
         step_ctx: LifecycleContext | None = None,
         clear_error: bool = True,
     ) -> None:
-        """Record a tool result: evidence turn, kernel memory, then domain projection.
+        """Record a tool result: evidence turn, artifacts, kernel memory, domain projection.
 
-        ``clear_error`` is False when an earlier call in the same batch failed,
-        so a later success does not erase that failure's ``last_error``.
+        Tool-declared artifacts win; otherwise the domain's transitional mapping
+        supplies them. ``clear_error`` is False when an earlier call in the same
+        batch failed, so a later success does not erase that failure's
+        ``last_error``.
         """
         record_tool_result_turn(
             state=state,
@@ -222,6 +229,13 @@ class ToolActions:
             argument_evidence=argument_evidence,
             session_store=self._session_store if persist else None,
         )
+        artifacts = result.artifacts
+        if not artifacts and result.status == "completed":
+            # Transitional mapping for tools that do not describe their own
+            # artifacts yet. Tool-declared artifacts always take precedence.
+            artifacts = self._domain.artifacts_from_result(state=state, result=result)
+        if artifacts:
+            self._artifacts.apply(state, artifacts)
         memory = state.working_memory
         if result.status != "completed":
             error_payload = result.output.get("error")
