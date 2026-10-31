@@ -134,6 +134,23 @@ publish("assistant.completed" or "session.failed", {"reply": final_text, ...}, o
 
 `backend/app/tests/integration/test_runtime_kernel_domain.py` 直接使用 `AgentKernel.run_turn`，以 `BaseTurnDomain` 和一个最小的非机厅领域验证上述约定。
 
+### 包边界与端口（阶段 8）
+
+执行内核模块（`agent/runtime/`、`agent/artifacts/`、`llm/model_gateway.py`、`tools/execution.py`、`context/turn_recorder.py`、`subagents/agent_node.py`）只 import `app.agent.*`。内核需要的外部能力都以端口形式定义在 agent 包内，应用层原位置再导出，调用方不改：
+
+| 端口 | 定义位置 | 应用侧 |
+| --- | --- | --- |
+| `SessionStore`（`get_or_create_session`、`save_session`） | `agent/runtime/ports.py` | `infra/db/protocols.SessionStateRepository` 继承它，并补充历史列表、详情读取等依赖应用 DTO 的方法 |
+| `RunPublisher`、`NullPublisher` | `agent/runtime/events.py` | `session/injector.py` 再导出 |
+| `KernelEvent`（内核发布的 11 个事件名） | `agent/runtime/events.py` | `session/events.py` 以 `RunEvent` 名称再导出，与 `AppEvent`、`ControlEvent` 组成目录 |
+| 日志 | `agent/_logging.py` | 目前转发 `infra.observability.logger`；外移时只换这一处 |
+
+`SessionStateRepository` 没有整体搬入 agent 包：`list_session_summaries` 返回 `protocol.session_dto` 的 DTO，搬进来会把应用 DTO 带进内核，因此只把内核实际调用的两个方法拆成端口。
+
+事件名分三类：内核事件（`KernelEvent`）、应用事件（`AppEvent`，目前只有沿用旧名的 `navigation.route_ready`）和领域事件。领域通过 `domain_event(namespace, name)` 得到 `domain.<namespace>.<name>`（两段都是 `[a-z][a-z0-9_]*`，不合法时在声明处抛 `ValueError`），再经 `ToolResultSignal.events` 发布；`session/events.is_known_event` 对整个命名空间放行，不必改目录。前端只认 `RUN_EVENT_NAMES` 中的事件，其余丢弃，领域事件需要界面支持时再在前端添加。
+
+`backend/app/tests/integration/test_runtime_package_boundary.py` 用 AST 扫描上述模块（含 `TYPE_CHECKING` 与函数内导入），允许清单只有 `react_runtime.py`（应用适配器）和 `_logging.py`，并检查允许清单中的模块确实仍需越界。
+
 ## Artifacts（阶段 6）
 
 `backend/app/agent/artifacts/` 把“工具产出了什么”和“怎么展示/提升”拆开。`Artifact{key, value, memory, display, scope, promote, append, append_key, invalidates}` 只携带策略，值本身对内核不透明；`ArtifactSink` 是唯一把策略写成 `working_memory["artifact_meta"]` 的地方：
@@ -228,7 +245,7 @@ domain 进入内核时会被翻译成 core 能理解的概念，但语义由适�
 | `ChatRequest` | `TurnInput.request`（不透明） |
 | 机厅 intent / memory | `ctx.memory["arcade"]`、`runtime_hints` |
 | 店铺/路线产物 | `Artifact` 或命名空间 memory |
-| `navigation.route_ready` | 通用 `Event(name, data)` |
+| `navigation.route_ready` | `ToolResultSignal.events`；新领域事件用 `domain.<ns>.<name>` |
 | `ArcadePayloadMapper` | domain 构造依赖，不进 core |
 | worker 合法名单 | `AgentNode.spawnable` |
 | `ChatResponse` | presenter 返回的 opaque result |
@@ -248,7 +265,7 @@ domain 进入内核时会被翻译成 core 能理解的概念，但语义由适�
 - 钩子可写之后，多个领域并存时的执行顺序会影响结果；接入第二个领域前须先实现“注册顺序挂载、逆序卸载”。
 - worker 收尾：证据回写与 usage 合并恰好执行一次——正常路径在构建信封前执行；异常或取消时补做，并按 `ActiveWorkerSlots` 恢复父会话 `active_subagent`（还有 worker 在跑则取最近启动者，全部结束才回到 `main_agent`），run 的终态（failed / cancelled）仍交给 run/session 层记录。
 
-2.7–2.8 已把这些边界显式化：`runtime/lifecycle.py` 提供 dispatcher、`StateView`、保留键检查和 `BaseLifecycleHooks`；`AgentKernel` 在 run/turn/step/worker 边界发事件；`AgentNode.spawnable` 是唯一的 worker 合法名单；`StepPolicy.runtime_hints` 已合并进 provider hints。剩余：model/reasoning_effort 进入 provider 请求（阶段 3）、session scope 事件、多 domain 钩子顺序、公共 `TurnContext/TurnState/ToolResult` 契约（阶段 5/8）。并行 worker 的父级顺序已在阶段 7 由 `ActiveWorkerSlots` 与 model-order commit 解决。
+2.7–2.8 已把这些边界显式化：`runtime/lifecycle.py` 提供 dispatcher、`StateView`、保留键检查和 `BaseLifecycleHooks`；`AgentKernel` 在 run/turn/step/worker 边界发事件；`AgentNode.spawnable` 是唯一的 worker 合法名单；`StepPolicy.runtime_hints` 已合并进 provider hints。剩余：model/reasoning_effort 映射到 provider 协议参数、session scope 事件、多 domain 钩子顺序、公共 `TurnContext/TurnState/ToolResult` 契约（独立成包的后续事项）。并行 worker 的父级顺序已在阶段 7 由 `ActiveWorkerSlots` 与 model-order commit 解决。
 
 ## 工具执行与 worker 派发（阶段 4、7）
 

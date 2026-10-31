@@ -20,9 +20,9 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from app.agent._logging import get_logger, log_ref
 from app.agent.skills.execution import SkillExecution, bind_skill_execution
 from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
-from app.infra.observability.logger import get_logger, log_ref
 
 if TYPE_CHECKING:
     from app.agent.llm.provider_adapter import ModelToolCall

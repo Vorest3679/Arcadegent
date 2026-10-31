@@ -17,9 +17,9 @@ import asyncio
 from dataclasses import dataclass
 from typing import Literal
 
+from app.agent._logging import get_logger, log_ref
 from app.agent.tools.execution import ToolDispatcher, ToolTask
 from app.agent.tools.registry import ToolExecutionResult
-from app.infra.observability.logger import get_logger, log_ref
 
 logger = get_logger(__name__)
 

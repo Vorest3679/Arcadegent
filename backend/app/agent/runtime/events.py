@@ -1,8 +1,12 @@
-"""Run event publishing bound to the current async context.
+"""Run event ports and publishing bound to the current async context.
 
-The runtime publishes through a ``RunPublisher`` bound once per run, so nested
+The kernel publishes through a ``RunPublisher`` bound once per run, so nested
 main-agent, worker and tool calls do not need to pass the publisher through the
-call chain. Event payloads stay exactly as defined by ``app.session.events``.
+call chain. ``KernelEvent`` names the business events the kernel itself
+publishes; the application's full catalog (``app.session.events``) is built
+from them plus application events. Domains publish their own events under the
+``domain.<namespace>.<name>`` form (see ``domain_event``), which the catalog
+accepts without listing them.
 
 ``ToolEventHooks`` is the default tool lifecycle hook implementation injected
 into ``ToolDispatcher``: it turns each settled call into the tool event trace
@@ -11,13 +15,13 @@ and log line, in the same order the kernel always published them.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from contextvars import ContextVar, Token
-from typing import TYPE_CHECKING, Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, Protocol
 
-from app.infra.observability.logger import get_logger, log_ref
-from app.session.events import RunEvent
-from app.session.injector import NullPublisher, RunPublisher
+from app.agent._logging import get_logger, log_ref
 
 if TYPE_CHECKING:
     from app.agent.runtime.domain_port import ToolResultSignal
@@ -25,6 +29,71 @@ if TYPE_CHECKING:
     from app.agent.tools.registry import ToolExecutionResult
 
 logger = get_logger(__name__)
+
+
+class RunPublisher(Protocol):
+    """Run-bound publishing port; must not interpret business payloads."""
+
+    def publish(
+        self,
+        event: str,
+        data: dict[str, Any] | None = None,
+        *,
+        output_id: str | None = None,
+    ) -> None:
+        """Append one business event to the run's log; dropped once the run is sealed."""
+
+
+class NullPublisher:
+    """Publisher that drops everything; used when nobody observes a run."""
+
+    def publish(
+        self,
+        event: str,
+        data: dict[str, Any] | None = None,
+        *,
+        output_id: str | None = None,
+    ) -> None:
+        return None
+
+
+class KernelEvent(StrEnum):
+    """Business events published by the kernel; payloads are documented in ``app.session.events``."""
+
+    SESSION_STARTED = "session.started"
+    SUBAGENT_CHANGED = "subagent.changed"
+    WORKER_STARTED = "worker.started"
+    WORKER_COMPLETED = "worker.completed"
+    WORKER_FAILED = "worker.failed"
+    TOOL_STARTED = "tool.started"
+    TOOL_COMPLETED = "tool.completed"
+    TOOL_FAILED = "tool.failed"
+    ASSISTANT_TOKEN = "assistant.token"
+    ASSISTANT_COMPLETED = "assistant.completed"
+    SESSION_FAILED = "session.failed"
+
+
+DOMAIN_EVENT_PREFIX = "domain."
+_DOMAIN_SEGMENT = r"[a-z][a-z0-9_]*"
+_DOMAIN_EVENT = re.compile(rf"domain\.{_DOMAIN_SEGMENT}\.{_DOMAIN_SEGMENT}")
+
+
+def domain_event(namespace: str, name: str) -> str:
+    """Event name ``domain.<namespace>.<name>`` for a domain-defined event.
+
+    Both parts are lowercase identifiers (``[a-z][a-z0-9_]*``); anything else
+    raises ``ValueError`` so a bad name fails where it is declared.
+    """
+    event = f"{DOMAIN_EVENT_PREFIX}{namespace}.{name}"
+    if not is_domain_event(event):
+        raise ValueError(f"invalid domain event name: {event!r}")
+    return event
+
+
+def is_domain_event(event: str) -> bool:
+    """Whether ``event`` has the ``domain.<namespace>.<name>`` form."""
+    return _DOMAIN_EVENT.fullmatch(event) is not None
+
 
 # Bound by ``run_chat`` for the duration of one run; concurrent runs keep their
 # own value because the variable is copied into each task's context.
@@ -70,7 +139,7 @@ def emit_agent_changed(
         payload["from_subagent"] = from_agent
     if worker_run_id:
         payload["worker_run_id"] = worker_run_id
-    publish(RunEvent.SUBAGENT_CHANGED, payload)
+    publish(KernelEvent.SUBAGENT_CHANGED, payload)
 
 
 def publish_assistant_text(text: str, *, output_id: str, stream_mode: str) -> None:
@@ -78,7 +147,7 @@ def publish_assistant_text(text: str, *, output_id: str, stream_mode: str) -> No
     if not text:
         return
     publish(
-        RunEvent.ASSISTANT_TOKEN,
+        KernelEvent.ASSISTANT_TOKEN,
         {"delta": text, "active_subagent": "main_agent", "stream_mode": stream_mode},
         output_id=output_id,
     )
@@ -115,7 +184,7 @@ class ToolEventHooks:
 
     async def before(self, task: "ToolTask") -> None:
         publish(
-            RunEvent.TOOL_STARTED,
+            KernelEvent.TOOL_STARTED,
             {
                 "tool": task.call.name,
                 "call_id": task.call.call_id,
@@ -147,7 +216,7 @@ class ToolEventHooks:
             }
             if signal is not None:
                 payload.update(signal.completed_fields)
-            publish(RunEvent.TOOL_COMPLETED, payload)
+            publish(KernelEvent.TOOL_COMPLETED, payload)
             logger.info(
                 "tool.completed session_ref=%s tool_ref=%s agent_ref=%s",
                 log_ref(self._session_id),
@@ -157,7 +226,7 @@ class ToolEventHooks:
         else:
             error_message = result.error_message or "tool execution failed"
             publish(
-                RunEvent.TOOL_FAILED,
+                KernelEvent.TOOL_FAILED,
                 {
                     "tool": result.tool_name,
                     "call_id": result.call_id,

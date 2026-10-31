@@ -27,7 +27,7 @@ from app.agent.runtime.session_state import (
 )
 from app.agent.tools.registry import ToolExecutionResult
 from app.domain.arcade.intent import IntentPolicy
-from app.session.events import RunEvent
+from app.session.events import AppEvent
 
 
 _LEGACY_TURN_KEYS = ("search_candidates", "route", "destination", "view_payload")
@@ -65,7 +65,7 @@ def tool_result_signal(result: ToolExecutionResult) -> ToolResultSignal:
     if not isinstance(route, dict):
         return ToolResultSignal()
     return ToolResultSignal(
-        events=((RunEvent.NAVIGATION_ROUTE_READY, route),),
+        events=((AppEvent.NAVIGATION_ROUTE_READY, route),),
         completed_fields={"distance_m": route.get("distance_m")},
     )
 

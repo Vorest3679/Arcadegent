@@ -20,8 +20,8 @@ from app.agent.runtime.session_state import (
 
 if TYPE_CHECKING:
     from app.agent.llm.provider_adapter import ModelResponse
+    from app.agent.runtime.ports import SessionStore
     from app.agent.tools.registry import ToolExecutionResult
-    from app.infra.db.protocols import SessionStateRepository
 
 
 def _utc_now_iso() -> str:
@@ -44,7 +44,7 @@ def append_turn(
     turn: AgentTurn,
     *,
     persist: bool = True,
-    session_store: SessionStateRepository | None = None,
+    session_store: SessionStore | None = None,
 ) -> None:
     """Append a turn to the session state, with optional persistence."""
     state.turns.append(turn)
@@ -138,7 +138,7 @@ def record_tool_result_turn(
     tool_arguments: dict[str, Any] | None,
     persist: bool,
     argument_evidence: dict[str, Any] | None = None,
-    session_store: SessionStateRepository | None = None,
+    session_store: SessionStore | None = None,
 ) -> None:
     """Append the tool-result turn; the caller publishes the matching events."""
     append_turn(

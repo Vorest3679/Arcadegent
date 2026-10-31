@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from app.agent._logging import get_logger, log_exception_frames, log_ref
 from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.context_builder import ContextBuilder
 from app.agent.context.turn_recorder import append_turn
@@ -22,6 +23,8 @@ from app.agent.runtime.actions import ToolActions
 from app.agent.runtime.agent_loop import STATUS_COMPLETED, AgentLoop, LoopOutcome, LoopSpec
 from app.agent.runtime.domain_port import BaseTurnDomain, TurnDomain
 from app.agent.runtime.events import (
+    KernelEvent,
+    RunPublisher,
     bind_run_events,
     current_run_events,
     emit_agent_changed,
@@ -40,6 +43,7 @@ from app.agent.runtime.lifecycle import (
     TurnScope,
 )
 from app.agent.runtime.budget import RunBudget
+from app.agent.runtime.ports import SessionStore
 from app.agent.runtime.worker_runner import ActiveWorkerSlots, WorkerDispatch, WorkerRunner
 from app.agent.skills.execution import SkillExecution
 from app.agent.skills.registry import SkillRegistry
@@ -50,12 +54,8 @@ from app.agent.runtime.session_state import (
     ensure_working_memory_shape,
     reset_turn_scratch,
 )
-from app.infra.db.protocols import SessionStateRepository
 from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.tools.registry import ToolRegistry
-from app.infra.observability.logger import get_logger, log_exception_frames, log_ref
-from app.session.events import RunEvent
-from app.session.injector import RunPublisher
 
 logger = get_logger(__name__)
 
@@ -116,7 +116,7 @@ class AgentKernel:
         subagent_builder: SubAgentBuilder,
         tool_registry: ToolRegistry,
         provider_adapter: ProviderAdapter,
-        session_store: SessionStateRepository,
+        session_store: SessionStore,
         max_steps: int,
         skill_registry: SkillRegistry | None = None,
         domain: TurnDomain | None = None,
@@ -280,7 +280,7 @@ class AgentKernel:
             state.updated_at = _utc_now_iso()
             self._session_store.save_session(state)
             publish_event(
-                RunEvent.SESSION_FAILED,
+                KernelEvent.SESSION_FAILED,
                 {
                     "error": error_message,
                     "active_subagent": state.active_subagent,
@@ -388,7 +388,7 @@ class AgentKernel:
             session_store=self._session_store,
         )
         publish_event(
-            RunEvent.SESSION_STARTED,
+            KernelEvent.SESSION_STARTED,
             {
                 **self._domain.session_event_fields(state),
                 "model": "react-runtime",
@@ -469,7 +469,7 @@ class AgentKernel:
             state.last_error = None
         self._session_store.save_session(state)
         publish_event(
-            RunEvent.SESSION_FAILED if model_error else RunEvent.ASSISTANT_COMPLETED,
+            KernelEvent.SESSION_FAILED if model_error else KernelEvent.ASSISTANT_COMPLETED,
             {
                 "reply": final_text,
                 "active_subagent": state.active_subagent,

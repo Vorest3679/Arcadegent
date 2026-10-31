@@ -19,12 +19,14 @@ from collections.abc import Awaitable, Callable, Iterator
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from app.agent._logging import get_logger, log_ref
 from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.turn_recorder import record_tool_result_turn
 from app.agent.runtime.budget import RunBudget
 from app.agent.runtime.domain_port import TurnDomain
 from app.agent.runtime.events import ToolEventHooks
 from app.agent.runtime.lifecycle import LifecycleContext, LifecyclePhase
+from app.agent.runtime.ports import SessionStore
 from app.agent.runtime.session_state import AgentSessionState
 from app.agent.runtime.supervisor import LoopSupervisor, WaitPolicy
 from app.agent.subagents.subagent_builder import SubAgentBuilder, SubAgentProfile
@@ -35,8 +37,6 @@ from app.agent.tools.execution import (
     ToolTask,
 )
 from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
-from app.infra.db.protocols import SessionStateRepository
-from app.infra.observability.logger import get_logger, log_ref
 
 logger = get_logger(__name__)
 
@@ -183,7 +183,7 @@ class ToolActions:
         *,
         tool_registry: ToolRegistry,
         domain: TurnDomain,
-        session_store: SessionStateRepository,
+        session_store: SessionStore,
         subagent_builder: SubAgentBuilder,
         emit: LifecycleCall,
         spawn_worker: WorkerSpawner,

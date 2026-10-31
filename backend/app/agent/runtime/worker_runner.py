@@ -26,7 +26,7 @@ from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.turn_recorder import merge_usage_totals, persist_worker_evidence_turns
 from app.agent.runtime.agent_loop import STATUS_COMPLETED, STATUS_FAILED, LoopOutcome, LoopSpec
 from app.agent.runtime.domain_port import TurnDomain
-from app.agent.runtime.events import emit_agent_changed, publish as publish_event
+from app.agent.runtime.events import KernelEvent, emit_agent_changed, publish as publish_event
 from app.agent.runtime.lifecycle import (
     LifecycleContext,
     LifecyclePhase,
@@ -35,6 +35,7 @@ from app.agent.runtime.lifecycle import (
     WorkerScope,
 )
 from app.agent.runtime.budget import RunBudget
+from app.agent.runtime.ports import SessionStore
 from app.agent.runtime.session_state import (
     AgentSessionState,
     AgentTurn,
@@ -44,8 +45,6 @@ from app.agent.runtime.session_state import (
 from app.agent.skills.registry import SkillRegistry
 from app.agent.subagents.agent_node import AgentNode
 from app.agent.subagents.subagent_builder import SubAgentBuilder
-from app.infra.db.protocols import SessionStateRepository
-from app.session.events import RunEvent
 
 ContextFactory = Callable[..., LifecycleContext]
 LoopRunner = Callable[[LoopSpec], Awaitable[LoopOutcome]]
@@ -195,7 +194,7 @@ class WorkerRunner:
         request: Any,
         request_payload: dict[str, Any],
         domain: TurnDomain,
-        session_store: SessionStateRepository,
+        session_store: SessionStore,
         subagent_builder: SubAgentBuilder,
         skill_registry: SkillRegistry | None,
         new_context: ContextFactory,
@@ -339,7 +338,7 @@ class WorkerRunner:
             worker_run_id=run.run_id,
         )
         publish_event(
-            RunEvent.WORKER_STARTED,
+            KernelEvent.WORKER_STARTED,
             {
                 "worker": run.worker_name,
                 "run_id": run.run_id,
@@ -435,7 +434,7 @@ class WorkerRunner:
             parent.last_error = envelope["error"]
             parent.working_memory["last_error"] = {"message": envelope["error"]}
             publish_event(
-                RunEvent.WORKER_FAILED,
+                KernelEvent.WORKER_FAILED,
                 {
                     "worker": run.worker_name,
                     "run_id": run.run_id,
@@ -448,7 +447,7 @@ class WorkerRunner:
             # Error recovery belongs to the batch layer: a successful spawn
             # must not erase a sibling tool failure from the same batch.
             publish_event(
-                RunEvent.WORKER_COMPLETED,
+                KernelEvent.WORKER_COMPLETED,
                 {
                     "worker": run.worker_name,
                     "run_id": run.run_id,

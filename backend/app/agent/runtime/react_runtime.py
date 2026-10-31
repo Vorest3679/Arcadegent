@@ -13,13 +13,13 @@ from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.context_builder import ContextBuilder
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.domain_port import TurnDomain
+from app.agent.runtime.events import RunPublisher
 from app.agent.runtime.kernel import AgentKernel, TurnInput
+from app.agent.runtime.ports import SessionStore
 from app.agent.skills.registry import SkillRegistry
 from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.tools.registry import ToolRegistry
-from app.infra.db.protocols import SessionStateRepository
 from app.protocol.messages import ChatRequest, ChatResponse
-from app.session.injector import RunPublisher
 
 
 class ReactRuntime(AgentKernel):
@@ -32,7 +32,7 @@ class ReactRuntime(AgentKernel):
         subagent_builder: SubAgentBuilder,
         tool_registry: ToolRegistry,
         provider_adapter: ProviderAdapter,
-        session_store: SessionStateRepository,
+        session_store: SessionStore,
         max_steps: int,
         skill_registry: SkillRegistry | None = None,
         domain: TurnDomain | None = None,

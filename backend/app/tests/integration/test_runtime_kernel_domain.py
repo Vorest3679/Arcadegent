@@ -14,7 +14,8 @@ from typing import Any
 import pytest
 
 from app.agent.llm.provider_adapter import ModelResponse
-from app.agent.runtime.domain_port import BaseTurnDomain, TurnReply
+from app.agent.runtime.domain_port import BaseTurnDomain, ToolResultSignal, TurnReply
+from app.agent.runtime.events import domain_event
 from app.agent.runtime.lifecycle import (
     AgentEnvironment,
     LifecycleContext,
@@ -26,6 +27,7 @@ from app.agent.runtime.lifecycle import (
     TurnScope,
 )
 from app.agent.runtime.session_state import AgentSessionState, AgentTurn
+from app.agent.tools.registry import ToolExecutionResult
 from app.session.events import RunEvent
 from backend.app.tests.integration._runtime_kernel_test_support import (
     _Context,
@@ -121,6 +123,33 @@ def test_minimal_coding_domain_overrides_only_what_it_needs(tmp_path: Path) -> N
     assert response.response == {"session_id": "s_kernel", "reply": "main.py sets x", "files": ["app/main.py"]}
     started = next(data for name, data, _ in events.events if name == RunEvent.SESSION_STARTED)
     assert "intent" not in started
+
+
+FILE_READ = domain_event("coding", "file_read")
+
+
+class _EventDomain(BaseTurnDomain):
+    """A domain publishes its own event without touching the session catalog."""
+
+    def tool_result_signal(self, *, state: AgentSessionState, result: ToolExecutionResult) -> ToolResultSignal:
+        if result.tool_name != "read_file":
+            return ToolResultSignal()
+        return ToolResultSignal(events=((FILE_READ, {"path": result.output["path"]}),))
+
+
+def test_domain_namespaced_event_is_published_before_tool_completed(tmp_path: Path) -> None:
+    provider = _Provider([
+        ("main_agent", _call("read_file", path="app/main.py")),
+        ("main_agent", _text("done")),
+    ])
+    runtime = _runtime(tmp_path, provider, _Store(), domain=_EventDomain())
+
+    _, events = _run(runtime, "read main.py")
+
+    names = events.names()
+    assert FILE_READ == "domain.coding.file_read"
+    assert names[names.index(FILE_READ) + 1] == RunEvent.TOOL_COMPLETED
+    assert next(data for name, data, _ in events.events if name == FILE_READ) == {"path": "app/main.py"}
 
 
 class _RecordingDomain(BaseTurnDomain):

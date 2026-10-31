@@ -7,12 +7,13 @@
 | 文件 | 职责 |
 | --- | --- |
 | `session/models.py` | run 状态（pending / running / cancelling / completed / failed / cancelled）、`RunRecord`、合法迁移函数 `transition` 和错误类型 |
-| `session/injector.py` | 交给 runtime 的入口：`RunPublisher`、`RunContext`、`RunExecutor`、`TerminalHook`，以及评测/测试用的 `CollectingPublisher` |
+| `session/injector.py` | 交给 runtime 的入口：`RunContext`、`RunExecutor`、`TerminalHook`，评测/测试用的 `CollectingPublisher`，以及再导出的 `RunPublisher`/`NullPublisher`（定义在 `agent/runtime/events.py`） |
+| `session/events.py` | 事件目录：内核事件 `RunEvent`（即 `agent/runtime/events.KernelEvent`）、应用事件 `AppEvent`、控制事件 `ControlEvent`，并放行 `domain.<namespace>.<name>` 领域事件 |
 | `session/run_log.py` | `RunLog`：每个会话只保留最近一轮的事件记录本，run 内编号、回放、等待、封口 |
 | `session/runs.py` | `RunManager`：同一会话同时只有一个活动 run；负责 task、取消、关停 drain 和收尾 |
 | `services/chat_run_service.py` | 应用层胶水：会话归属检查、把 `ReactRuntime.run_chat` 包成 run、取消/失败时写回会话存储 |
 
-`session/` 不依赖 agent、protocol、services 或数据库实现，也不解释事件内容。runtime 只通过 `RunPublisher.publish(event, data, output_id=)` 发事件，看不到登记簿和记录本。
+`session/` 不依赖 protocol、services 或数据库实现，也不解释事件内容；对 agent 只依赖端口模块 `agent/runtime/events.py`（发布端口与内核事件名），不依赖内核实现。runtime 只通过 `RunPublisher.publish(event, data, output_id=)` 发事件，看不到登记簿和记录本。
 
 ## 一个 run 的生命周期
 

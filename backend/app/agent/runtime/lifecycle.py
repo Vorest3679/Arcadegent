@@ -16,8 +16,8 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Protocol
 
+from app.agent._logging import get_logger
 from app.agent.runtime.session_state import KERNEL_MEMORY_KEYS, AgentSessionState
-from app.infra.observability.logger import get_logger
 
 logger = get_logger(__name__)
 

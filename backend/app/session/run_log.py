@@ -137,8 +137,9 @@ class RunLog:
     ) -> StreamEvent | None:
         """Number and store one event; returns None when the book is sealed or replaced.
 
-        Names outside the event catalog are refused (and logged): the stream
-        contract is closed, a new event must be added to ``session.events`` first.
+        Names outside the event catalog are refused (and logged): a new
+        kernel or application event must be added to ``session.events`` first;
+        domain events use the open ``domain.<namespace>.<name>`` form.
         """
         if not is_known_event(kind, event):
             logger.error("run_log.unknown_event kind=%s event=%s", kind, event)
