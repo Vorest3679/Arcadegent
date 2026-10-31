@@ -25,5 +25,6 @@
       "name"
     ],
     "additionalProperties": false
-  }
+  },
+  "execution_mode": "parallel"
 }

@@ -94,6 +94,10 @@ class ToolEventHooks:
     ran the tool. Its events are published before ``tool.completed`` and its
     ``completed_fields`` are merged into that payload, keeping the application
     event order stable.
+
+    Publishing lives in ``commit`` rather than ``after``: commit runs in the
+    loop coroutine and in model call order, so overlapping parallel calls still
+    produce one deterministic tool trace after their execution settled.
     """
 
     def __init__(
@@ -125,6 +129,11 @@ class ToolEventHooks:
         return None
 
     async def after(self, task: "ToolTask", result: "ToolExecutionResult") -> "ToolExecutionResult":
+        """Execution finished inside the call's task; publishing waits for commit."""
+        return result
+
+    async def commit(self, task: "ToolTask", result: "ToolExecutionResult") -> "ToolExecutionResult":
+        """Publish ``tool.completed``/``tool.failed`` and log the settled call."""
         if result.status == "completed":
             signal = self._signal(result) if self._signal is not None else None
             if signal is not None:

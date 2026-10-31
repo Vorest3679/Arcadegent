@@ -241,3 +241,64 @@ def test_promote_ignores_values_copied_from_the_parent_without_metadata() -> Non
 
     assert promoted == {}
     assert "shops" not in parent.working_memory.get("artifacts", {})
+
+
+def test_later_promoting_worker_wins_and_records_its_run_id() -> None:
+    parent = _state(turn_index=2)
+    sink = ArtifactSink()
+    for run_id, source_id in (("wrk_first", 1), ("wrk_second", 2)):
+        child = _state(turn_index=2)
+        sink.apply(child, [Artifact("shops", [{"source_id": source_id}], display=True, scope="session")])
+        sink.promote(
+            child_memory=child.working_memory,
+            parent_memory=parent.working_memory,
+            turn_index=2,
+            run_id=run_id,
+        )
+
+    assert parent.working_memory["artifacts"]["shops"] == [{"source_id": 2}]
+    assert parent.working_memory["artifact_meta"]["shops"]["source_run_id"] == "wrk_second"
+
+
+def test_parent_apply_clears_a_previous_worker_origin() -> None:
+    parent = _state(turn_index=2)
+    sink = ArtifactSink()
+    child = _state(turn_index=2)
+    sink.apply(child, [Artifact("shops", [{"source_id": 1}], display=True, scope="session")])
+    sink.promote(
+        child_memory=child.working_memory,
+        parent_memory=parent.working_memory,
+        turn_index=2,
+        run_id="wrk_first",
+    )
+    assert parent.working_memory["artifact_meta"]["shops"]["source_run_id"] == "wrk_first"
+
+    sink.apply(parent, [Artifact("shops", [{"source_id": 2}], display=True, scope="session")])
+
+    assert "source_run_id" not in parent.working_memory["artifact_meta"]["shops"]
+
+
+def test_direct_parent_artifact_write_also_clears_worker_origin() -> None:
+    from app.agent.runtime.session_state import set_working_memory_artifact
+
+    parent = _state(turn_index=2)
+    sink = ArtifactSink()
+    child = _state(turn_index=2)
+    sink.apply(child, [Artifact("shops", [{"source_id": 1}], display=True, scope="session")])
+    sink.promote(
+        child_memory=child.working_memory,
+        parent_memory=parent.working_memory,
+        turn_index=2,
+        run_id="wrk_first",
+    )
+
+    set_working_memory_artifact(
+        parent.working_memory,
+        "shops",
+        [{"source_id": 3}],
+        turn_index=2,
+        display=True,
+        scope="session",
+    )
+
+    assert "source_run_id" not in parent.working_memory["artifact_meta"]["shops"]

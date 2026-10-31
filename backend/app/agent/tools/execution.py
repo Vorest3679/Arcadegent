@@ -5,10 +5,11 @@ it does not import ``app.agent.runtime``. Runtime concerns (tool events, logs,
 domain projection and worker dispatch) are injected through
 ``ToolLifecycleHooks``.
 
-Every call runs inside its own ``asyncio.Task`` so a supervisor can overlap
-calls whose descriptor declares ``execution_mode="parallel"`` (stage 7). This
-module still settles calls in model order: ``execute`` awaits each task right
-away.
+Every call runs inside its own ``asyncio.Task``. The runtime supervisor may
+overlap calls whose descriptor declares ``execution_mode="parallel"`` (stage 7).
+Finalization happens in two phases: ``after`` runs inside the call's task (it may
+start a worker concurrently), ``commit`` runs in the loop coroutine in model
+call order (it commits workers, publishes events and records evidence).
 """
 
 from __future__ import annotations
@@ -42,9 +43,11 @@ class ToolLifecycleHooks(Protocol):
     """Runtime-provided hooks around one tool call.
 
     ``before`` runs before argument preparation, so ``tool.started`` is
-    published even when preparation fails. ``after`` may replace the result
-    (worker dispatch) before events are published. ``on_update`` is reserved
-    for partial tool output and is not called yet.
+    published even when preparation fails. ``after`` runs inside the call's
+    task and may replace the result (it starts a worker without committing it).
+    ``commit`` runs when the loop settles the call in model order and may
+    replace the result again (worker commit, domain projection, events).
+    ``on_update`` is reserved for partial tool output and is not called yet.
     """
 
     async def before(self, task: "ToolTask") -> None:
@@ -54,7 +57,10 @@ class ToolLifecycleHooks(Protocol):
         """Observe a partial result of a still-running call (reserved)."""
 
     async def after(self, task: "ToolTask", result: ToolExecutionResult) -> ToolExecutionResult:
-        """Observe and optionally replace the settled result."""
+        """Finalize the call inside its task; no loop-ordered writes here."""
+
+    async def commit(self, task: "ToolTask", result: ToolExecutionResult) -> ToolExecutionResult:
+        """Commit the call in the loop coroutine, then publish its events."""
 
 
 @dataclass
@@ -71,6 +77,15 @@ class ToolTask:
     capabilities: tuple[str, ...] = ()
     result: ToolExecutionResult | None = None
     task: "asyncio.Task[ToolExecutionResult] | None" = None
+    # Runtime-owned opaque payload set by ``after`` (for ``spawn_agent`` this is
+    # a pending worker dispatch) and consumed by ``commit``.
+    deferred: Any = None
+    # True when the call was finalized (``commit`` ran) and its result is final.
+    finalized: bool = False
+    # True when the result was synthesized because the call was cancelled.
+    cancelled: bool = False
+    # Set by the batch recorder once its evidence turn was handled.
+    recorded: bool = False
 
 
 class ToolDispatcher:
@@ -111,7 +126,7 @@ class ToolDispatcher:
         agent_name: str = "",
         skill_execution: SkillExecution,
     ) -> ToolTask:
-        """Start one call as a task; ``settle`` collects its result.
+        """Start one call as a task; ``settle`` finalizes it in model order.
 
         ``before`` runs here and not inside the task so the ``tool.started``
         event is ordered with the model's call list even when several calls
@@ -132,7 +147,14 @@ class ToolDispatcher:
         return task
 
     async def settle(self, task: ToolTask) -> ToolExecutionResult:
-        """Await a submitted call; a cancelled batch never leaves the task behind."""
+        """Await a submitted call, then run its commit phase exactly once.
+
+        Calling ``settle`` again after a commit (or after ``cancel``) returns the
+        finalized result without touching the task. A cancelled batch never
+        leaves the task behind.
+        """
+        if task.finalized and task.result is not None:
+            return task.result
         run = task.task
         if run is None:
             raise RuntimeError("tool task was not submitted")
@@ -144,7 +166,58 @@ class ToolDispatcher:
                 await run
             raise
         task.result = result
-        return result
+        return await self._finalize(task, result)
+
+    async def cancel(self, task: ToolTask, *, reason: str = "cancelled") -> ToolExecutionResult:
+        """Cancel a call and finalize it so its event span always closes.
+
+        A call that already finished is committed normally; an unfinished or
+        cancelled call gets a synthesized failed result with error type
+        ``cancelled``. A task that finished with a real exception keeps that
+        exception as a ``tool_execution_error`` instead of pretending it was
+        cancelled. Only the child task's own cancellation/exception is
+        suppressed; a cancellation of the caller is always re-raised.
+        """
+        if task.finalized and task.result is not None:
+            return task.result
+        run = task.task
+        if run is not None and not run.done():
+            run.cancel()
+        if run is not None:
+            current = asyncio.current_task()
+            cancelling_before = current.cancelling() if current is not None else 0
+            try:
+                await run
+            except asyncio.CancelledError:
+                # A second outer cancellation must not be mistaken for the
+                # child's own cancellation and swallowed.
+                if current is not None and current.cancelling() > cancelling_before:
+                    raise
+            except Exception:
+                # The real error is re-read from ``run.result()`` below and
+                # reported as a tool failure, not as a cancellation.
+                pass
+        if task.finalized and task.result is not None:
+            return task.result
+        result: ToolExecutionResult | None = None
+        if run is not None and run.done() and not run.cancelled():
+            try:
+                result = run.result()
+            except Exception as exc:
+                result = _execution_failure_result(task, exc)
+        if result is None:
+            task.cancelled = True
+            result = _cancelled_result(task, reason=reason)
+        task.result = result
+        return await self._finalize(task, result)
+
+    async def _finalize(self, task: ToolTask, result: ToolExecutionResult) -> ToolExecutionResult:
+        if task.finalized and task.result is not None:
+            return task.result
+        final = await self._hooks.commit(task, result)
+        task.result = final
+        task.finalized = True
+        return final
 
     async def _run(
         self,
@@ -236,3 +309,27 @@ class ToolDispatcher:
                 log_ref(call.call_id),
                 len(hydrated),
             )
+
+
+def _cancelled_result(task: ToolTask, *, reason: str) -> ToolExecutionResult:
+    """Synthetic result for a call whose execution task was cancelled."""
+    message = f"tool call cancelled ({reason})"
+    return ToolExecutionResult(
+        call_id=task.call.call_id,
+        tool_name=task.call.name,
+        status="failed",
+        output={"error": {"type": "cancelled", "message": message}},
+        error_message=message,
+    )
+
+
+def _execution_failure_result(task: ToolTask, exc: Exception) -> ToolExecutionResult:
+    """Failed result preserving an exception raised by the call's own task."""
+    message = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+    return ToolExecutionResult(
+        call_id=task.call.call_id,
+        tool_name=task.call.name,
+        status="failed",
+        output={"error": {"type": "tool_execution_error", "message": message}},
+        error_message=message,
+    )

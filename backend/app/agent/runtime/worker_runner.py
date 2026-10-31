@@ -1,11 +1,15 @@
 """Worker dispatch: isolated execution, then a serialized commit into the parent.
 
-``run`` executes the worker loop against a dedicated ``AgentSessionState`` and
-never merges artifacts, usage or evidence into the parent, so workers can
-overlap once the supervisor allows it (stage 7). ``commit`` performs those
-merges in the parent loop's coroutine and in the model's call order.
-``spawn`` is the one-shot entry used by the tool layer and guarantees
-exactly-once cleanup on success, failure and cancellation (fix C).
+``start`` prepares a dedicated ``AgentSessionState`` and runs the worker loop
+without merging artifacts, usage or evidence into the parent. ``finish``
+performs those merges in the parent loop's coroutine and in the model's call
+order, builds the envelope and restores the active agent.
+``spawn`` is the one-shot entry (``start`` + ``finish``); the runtime hook uses
+the two halves so parallel workers overlap while their commits stay ordered.
+
+While workers overlap, ``ActiveWorkerSlots`` keeps one live ``active_subagent``:
+the most recently started worker, or ``main_agent`` once the last one finishes.
+Every worker event still carries its own run id, so the UI can tell them apart.
 """
 
 from __future__ import annotations
@@ -81,6 +85,64 @@ def _invalid_worker_envelope(*, worker_name: str, task: str) -> dict[str, Any]:
     }
 
 
+class ActiveWorkerSlots:
+    """用于存储每个 AgentSessionState 的活跃 worker slots，
+    确保在多个 worker 并行运行时，能够正确地恢复 active_subagent。
+    每个 AgentSessionState 可以有多个活跃的 worker slots，
+    每个 slot 由 run_id 和 worker_name 组成。
+    ActiveWorkerSlots 提供了存储worker的栈结构，
+    添加、移除和清理 slots 的方法，以便在 worker 完成或取消时，
+    能够正确地恢复 active_subagent。
+    """
+
+    def __init__(self) -> None:
+        # 元组会被封装成entry，entry[0]是parent_state，entry[1]是slots列表
+        self._slots: dict[int, tuple[AgentSessionState, list[tuple[str, str]]]] = {}
+
+    def _entry(self, parent: AgentSessionState) -> list[tuple[str, str]]:
+        """查找parent的slots列表，如果不存在则创建一个新的空列表并返回"""
+        entry = self._slots.get(id(parent))
+        if entry is None:
+            entry = (parent, [])
+            self._slots[id(parent)] = entry
+        return entry[1]
+
+    def add(self, parent: AgentSessionState, *, run_id: str, worker_name: str) -> str:
+        """注册新worker slot并返回之前的active_subagent"""
+        previous = parent.active_subagent
+        self._entry(parent).append((run_id, worker_name))
+        return previous
+
+    def next_active(self, parent: AgentSessionState, *, run_id: str) -> str:
+        """切换到下一个活跃的worker，如果没有则返回main_agent"""
+        entry = self._slots.get(id(parent))
+        remaining = [
+            name
+            for item_run_id, name in (entry[1] if entry is not None else [])
+            if item_run_id != run_id # 循环过滤掉当前的run_id，剩下的就是其他活跃的worker
+        ]
+        return remaining[-1] if remaining else "main_agent"
+
+    def clear(self, parent: AgentSessionState) -> None:
+        """Drop every slot for ``parent`` (turn-end safety net)."""
+        self._slots.pop(id(parent), None)
+
+    def remove(self, parent: AgentSessionState, *, run_id: str) -> str | None:
+        """Remove a finished worker and return the next active name."""
+        entry = self._slots.get(id(parent))
+        if entry is None:
+            return None
+        slots = entry[1]
+        remaining = [item for item in slots if item[0] != run_id]
+        if len(remaining) == len(slots):
+            return None
+        if remaining:
+            self._slots[id(parent)] = (entry[0], remaining)
+        else:
+            self._slots.pop(id(parent), None)
+        return remaining[-1][1] if remaining else "main_agent"
+
+
 @dataclass
 class WorkerRun:
     """One worker invocation: isolated state plus the parent it commits into."""
@@ -100,6 +162,28 @@ class WorkerRun:
     evidence_committed: bool = False
     committed: bool = False
     envelope: dict[str, Any] | None = None
+    slot_registered: bool = False
+    slot_released: bool = False
+    unmounted: bool = False
+    error_emitted: bool = False
+
+
+@dataclass
+class WorkerDispatch:
+    """A started worker waiting for its ordered commit (or an invalid envelope)."""
+
+    runner: "WorkerRunner"
+    run: WorkerRun | None = None
+    envelope: dict[str, Any] | None = None
+    error: BaseException | None = None
+
+    async def commit(self) -> dict[str, Any]:
+        """Commit in the caller's coroutine; returns the domain envelope."""
+        if self.run is None:
+            if self.envelope is None:
+                raise RuntimeError("worker dispatch has no run or envelope")
+            return self.envelope
+        return await self.runner.finish(self)
 
 
 class WorkerRunner:
@@ -119,6 +203,7 @@ class WorkerRunner:
         safe_emit: LifecycleCall,
         run_loop: LoopRunner,
         artifacts: ArtifactSink | None = None,
+        slots: ActiveWorkerSlots | None = None,
     ) -> None:
         self._request = request
         self._request_payload = request_payload
@@ -131,6 +216,7 @@ class WorkerRunner:
         self._emit = emit
         self._safe_emit = safe_emit
         self._run_loop = run_loop
+        self._slots = slots or ActiveWorkerSlots()
 
     def prepare(
         self,
@@ -175,17 +261,55 @@ class WorkerRunner:
             budget=budget,
         )
 
+    async def start(
+        self,
+        *,
+        state: AgentSessionState,
+        worker_name: str,
+        task: str,
+        spawnable: tuple[str, ...],
+        budget: RunBudget,
+    ) -> WorkerDispatch:
+        """Validate, mount and run a worker; do not merge the parent yet.
+
+        ``CancelledError`` performs the exactly-once cleanup here because the
+        run is ending. Other execution errors are stored on the dispatch so the
+        ordered ``finish`` phase can recover evidence and restore the parent.
+        """
+        if worker_name not in spawnable or not task:
+            return WorkerDispatch(
+                runner=self,
+                envelope=_invalid_worker_envelope(worker_name=worker_name, task=task),
+            )
+        run = self.prepare(
+            parent_state=state,
+            worker_name=worker_name,
+            task=task,
+            budget=budget,
+        )
+        dispatch = WorkerDispatch(runner=self, run=run)
+        try:
+            await self.run(run)
+        except asyncio.CancelledError as exc:
+            await self._emit_error(run, exc, reason="cancelled")
+            self._recover(run)
+            await self._unmount(run)
+            raise
+        except Exception as exc:
+            # Defer the parent merge to finish()/commit order; the tool call
+            # still ends as a failed result once that runs.
+            await self._emit_error(run, exc, reason="failed")
+            dispatch.error = exc
+        return dispatch
+
     async def run(self, run: WorkerRun) -> WorkerRun:
         """Mount the worker and run its loop; no parent memory is merged here.
 
-        The worker's ``active_subagent`` transition is the live UI signal and
-        still writes the parent state here (and saves it), so the front end
-        follows the running worker. Evidence, usage, artifacts and the envelope
-        wait for ``commit``. Multi-worker bookkeeping — the nearest running
-        worker while several overlap, restoring ``main_agent`` only after all
-        finish — belongs to the stage 7 supervisor, which is why no tool
-        declares ``parallel`` yet. Errors and cancellation propagate to the
-        caller, which is responsible for the error lifecycle and ``_recover``.
+        The worker's ``active_subagent`` transition is the live UI signal:
+        while several workers overlap the parent shows the most recently
+        started one, and ``main_agent`` returns once the last one finishes.
+        Evidence, usage, artifacts and the envelope wait for ``finish``.
+        Errors and cancellation propagate to ``start``, which owns recovery.
         """
         if self._skill_registry is not None:
             await asyncio.to_thread(self._skill_registry.refresh)
@@ -202,7 +326,10 @@ class WorkerRunner:
                 payload={"dispatch": True},
             )
         )
-        previous_agent = parent.active_subagent
+        previous_agent = self._slots.add(
+            parent, run_id=run.run_id, worker_name=run.worker_name
+        )
+        run.slot_registered = True
         parent.active_subagent = run.worker_name
         self._session_store.save_session(parent)
         emit_agent_changed(
@@ -216,6 +343,7 @@ class WorkerRunner:
             {
                 "worker": run.worker_name,
                 "run_id": run.run_id,
+                "worker_run_id": run.run_id,
                 "task_preview": _short(run.task, limit=160),
                 "active_subagent": run.worker_name,
             },
@@ -240,6 +368,36 @@ class WorkerRunner:
         run.failed_error = _worker_failed_error(run.outcome)
         return run
 
+    async def finish(self, dispatch: WorkerDispatch) -> dict[str, Any]:
+        """Commit a finished worker in the caller's coroutine, exactly once.
+
+        Promotion, evidence, usage, the envelope and the ``active_subagent``
+        restore run here so parallel workers can commit one by one in model
+        call order. ``unmounted`` is emitted on success, failure and
+        cancellation; a failed commit still recovers evidence once.
+        """
+        run = dispatch.run
+        if run is None:
+            if dispatch.envelope is None:
+                raise RuntimeError("worker dispatch has no run or envelope")
+            return dispatch.envelope
+        try:
+            if dispatch.error is not None:
+                raise dispatch.error
+            envelope = self.commit(run)
+        except asyncio.CancelledError as exc:
+            await self._emit_error(run, exc, reason="cancelled")
+            self._recover(run)
+            raise
+        except Exception as exc:
+            await self._emit_error(run, exc, reason="failed")
+            self._recover(run)
+            raise
+        finally:
+            await self._unmount(run)
+        dispatch.envelope = envelope
+        return envelope
+
     def commit(self, run: WorkerRun) -> dict[str, Any]:
         """Merge a finished worker into the parent; idempotent per run.
 
@@ -255,6 +413,7 @@ class WorkerRunner:
             parent_memory=parent.working_memory,
             turn_index=parent.turn_index,
             status="failed" if run.failed_error is not None else "completed",
+            run_id=run.run_id,
         )
         parent.working_memory.update(
             deepcopy(self._domain.worker_memory_promotions(run.state.working_memory))
@@ -271,6 +430,7 @@ class WorkerRunner:
         )
         envelope["usage"] = deepcopy(run.state.working_memory.get("usage_totals") or {})
         append_worker_run(parent.working_memory, envelope)
+        active_after = self._slots.next_active(parent, run_id=run.run_id)
         if envelope["status"] == "failed":
             parent.last_error = envelope["error"]
             parent.working_memory["last_error"] = {"message": envelope["error"]}
@@ -279,8 +439,9 @@ class WorkerRunner:
                 {
                     "worker": run.worker_name,
                     "run_id": run.run_id,
+                    "worker_run_id": run.run_id,
                     "error": envelope["error"],
-                    "active_subagent": run.worker_name,
+                    "active_subagent": active_after,
                 },
             )
         else:
@@ -291,9 +452,10 @@ class WorkerRunner:
                 {
                     "worker": run.worker_name,
                     "run_id": run.run_id,
+                    "worker_run_id": run.run_id,
                     "status": envelope["status"],
                     "summary": envelope["summary"],
-                    "active_subagent": run.worker_name,
+                    "active_subagent": active_after,
                 },
             )
         self._restore_parent(run, reason="worker.completed")
@@ -310,34 +472,15 @@ class WorkerRunner:
         spawnable: tuple[str, ...],
         budget: RunBudget,
     ) -> dict[str, Any]:
-        """One dispatch with guaranteed, exactly-once cleanup.
-
-        On failure or cancellation the finished evidence is still committed to
-        the parent and ``active_subagent`` is restored; the run's terminal
-        status stays with the run/session layer.
-        """
-        if worker_name not in spawnable or not task:
-            return _invalid_worker_envelope(worker_name=worker_name, task=task)
-        run = self.prepare(parent_state=state, worker_name=worker_name, task=task, budget=budget)
-        completed = False
-        try:
-            await self.run(run)
-            envelope = self.commit(run)
-            completed = True
-            return envelope
-        except asyncio.CancelledError as exc:
-            self._mark_error(run, exc, reason="cancelled")
-            await self._safe_emit(run.ctx)
-            raise
-        except Exception as exc:
-            self._mark_error(run, exc, reason="failed")
-            await self._safe_emit(run.ctx)
-            raise
-        finally:
-            if not completed:
-                self._recover(run)
-            run.ctx.phase = LifecyclePhase.UNMOUNTED
-            await self._safe_emit(run.ctx)
+        """One-shot dispatch (``start`` + ordered ``finish``)."""
+        dispatch = await self.start(
+            state=state,
+            worker_name=worker_name,
+            task=task,
+            spawnable=spawnable,
+            budget=budget,
+        )
+        return await dispatch.commit()
 
     def _commit_evidence(self, run: WorkerRun) -> None:
         """Merge usage and finished worker evidence exactly once."""
@@ -351,13 +494,22 @@ class WorkerRunner:
         persist_worker_evidence_turns(parent_state=run.parent_state, worker_state=run.state)
 
     def _restore_parent(self, run: WorkerRun, *, reason: str) -> None:
+        """Release the worker slot and restore the next active agent."""
+        if run.slot_released:
+            return
+        run.slot_released = True
+        if not run.slot_registered:
+            return
         parent = run.parent_state
-        parent.active_subagent = "main_agent"
+        target = self._slots.remove(parent, run_id=run.run_id)
+        if target is None:
+            return
+        parent.active_subagent = target
         parent.updated_at = _utc_now_iso()
         self._session_store.save_session(parent)
         emit_agent_changed(
             from_agent=run.worker_name,
-            to_agent="main_agent",
+            to_agent=target,
             reason=reason,
             worker_run_id=run.run_id,
         )
@@ -369,10 +521,23 @@ class WorkerRunner:
         self._commit_evidence(run)
         self._restore_parent(run, reason="worker.unmounted")
 
-    def _mark_error(self, run: WorkerRun, exc: BaseException, *, reason: str) -> None:
+    async def _unmount(self, run: WorkerRun) -> None:
+        """Emit ``unmounted`` exactly once per worker."""
+        if run.unmounted:
+            return
+        run.unmounted = True
+        run.ctx.phase = LifecyclePhase.UNMOUNTED
+        await self._safe_emit(run.ctx)
+
+    async def _emit_error(self, run: WorkerRun, exc: BaseException, *, reason: str) -> None:
+        """Emit the worker error hook once, whatever path reports it."""
+        if run.error_emitted:
+            return
+        run.error_emitted = True
         run.ctx.error = exc
         run.ctx.reason = reason
         run.ctx.phase = LifecyclePhase.ERROR
+        await self._safe_emit(run.ctx)
 
 
 def _worker_failed_error(outcome: LoopOutcome) -> str | None:

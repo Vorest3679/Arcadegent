@@ -65,6 +65,8 @@ class _RecordingHooks:
         self.before_tasks: list[ToolTask] = []
         self.after_tasks: list[ToolTask] = []
         self.after_results: list[Any] = []
+        self.commit_tasks: list[ToolTask] = []
+        self.commit_results: list[Any] = []
 
     async def before(self, task: ToolTask) -> None:
         self.before_tasks.append(task)
@@ -75,6 +77,11 @@ class _RecordingHooks:
     async def after(self, task: ToolTask, result: Any) -> Any:
         self.after_tasks.append(task)
         self.after_results.append(result)
+        return result
+
+    async def commit(self, task: ToolTask, result: Any) -> Any:
+        self.commit_tasks.append(task)
+        self.commit_results.append(result)
         return result
 
 
@@ -108,9 +115,12 @@ def test_dispatcher_settles_each_call_as_a_task_and_keeps_evidence(tmp_path: Pat
     assert result.output == {"echo": {"value": 1}}
     task = hooks.before_tasks[0]
     assert task is hooks.after_tasks[0]
+    assert task is hooks.commit_tasks[0]
     assert hooks.after_results == [result]
+    assert hooks.commit_results == [result]
     assert isinstance(task.task, asyncio.Task) and task.task.done()
     assert task.agent_name == "main_agent"
+    assert task.finalized
     assert task.prepared_args == {"value": 1}
     assert task.argument_evidence["prepared_arguments"] == {"value": 1}
     assert task.argument_evidence["preparation_error"] is None
@@ -173,6 +183,39 @@ def test_cancelling_a_settled_call_cancels_the_running_tool_task(tmp_path: Path)
     asyncio.run(scenario())
 
 
+class _AfterRaisesHooks(_RecordingHooks):
+    async def after(self, task: ToolTask, result: Any) -> Any:
+        raise RuntimeError("after boom")
+
+
+def test_cancel_preserves_a_real_task_error_instead_of_cancelling(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        dispatcher = ToolDispatcher(
+            tool_registry=_registry(tmp_path),
+            hooks=_AfterRaisesHooks(),
+        )
+        task = await dispatcher.submit(
+            _call("echo", value=1),
+            session_id="s_test",
+            runtime_context={},
+            allowed_tools=["echo"],
+            agent_name="main_agent",
+            skill_execution=SkillExecution(),
+        )
+        while task.task is not None and not task.task.done():
+            await asyncio.sleep(0)
+
+        result = await dispatcher.cancel(task)
+
+        assert result.status == "failed"
+        assert result.output["error"]["type"] == "tool_execution_error"
+        assert "after boom" in (result.error_message or "")
+        assert task.cancelled is False
+        assert task.finalized
+
+    asyncio.run(scenario())
+
+
 def test_registry_reports_declared_execution_mode(tmp_path: Path) -> None:
     registry = _registry(tmp_path)
 
@@ -186,14 +229,16 @@ def test_registry_reports_declared_execution_mode(tmp_path: Path) -> None:
     assert asyncio.run(modes()) == ("exclusive", "parallel", "exclusive")
 
 
-def test_builtin_tools_stay_exclusive_until_the_supervisor() -> None:
+def test_builtin_tools_declare_parallel_only_for_the_safe_reads() -> None:
     tools = asyncio.run(BuiltinToolProvider().get_tools())
 
-    # Stage 4 only lands the declaration mechanism. ``read_skill``/``list_skills``
-    # run in worker threads against an unlocked ``SkillExecution`` registry, and
-    # concurrent workers still share the parent's ``active_subagent``; both are
-    # stage 7 prerequisites, so no builtin tool promises ``parallel`` yet.
-    assert {name for name, tool in tools.items() if tool.execution_mode == "parallel"} == set()
+    # Stage 7 prerequisites are in place: skill snapshots are locked and worker
+    # slots keep the most recent running worker, so these three can overlap.
+    assert {name for name, tool in tools.items() if tool.execution_mode == "parallel"} == {
+        "invoke_worker",
+        "list_skills",
+        "read_skill",
+    }
     assert tools["db_query_tool"].execution_mode == "exclusive"
     assert tools["summary_tool"].execution_mode == "exclusive"
 

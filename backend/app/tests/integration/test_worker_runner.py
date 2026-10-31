@@ -14,7 +14,12 @@ from app.agent.artifacts.sink import ArtifactSink
 from app.agent.runtime.domain_port import BaseTurnDomain
 from app.agent.runtime.kernel import AgentKernel, TurnInput
 from app.agent.runtime.lifecycle import AgentEnvironment, LifecycleContext
-from app.agent.runtime.session_state import AgentSessionState, AgentTurn, ensure_working_memory_shape
+from app.agent.runtime.session_state import (
+    AgentSessionState,
+    AgentTurn,
+    ensure_working_memory_shape,
+    set_working_memory_artifact,
+)
 from app.agent.runtime.worker_runner import WorkerRunner
 from app.agent.subagents.agent_node import AgentNode
 from app.agent.subagents.subagent_builder import SubAgentProfile
@@ -225,6 +230,77 @@ def test_worker_runner_keeps_the_parent_clean_until_commit(tmp_path: Path) -> No
         assert runner.commit(run) is envelope
         assert len(parent.working_memory["worker_runs"]) == 1
         assert [turn.name for turn in parent.turns if turn.scope == "worker"] == ["echo"]
+
+    asyncio.run(scenario())
+
+
+def test_parallel_worker_commits_keep_model_order_and_artifact_origin(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        store = _Store()
+        parent = AgentSessionState(session_id="s_parallel", turn_index=1)
+        parent.working_memory = ensure_working_memory_shape({})
+        store.save_session(parent)
+
+        async def fake_loop(spec: LoopSpec) -> LoopOutcome:
+            set_working_memory_artifact(
+                spec.state.working_memory,
+                "shops",
+                [{"worker": spec.state.active_subagent}],
+                turn_index=spec.state.turn_index,
+                display=True,
+                scope="session",
+            )
+            return LoopOutcome(
+                status="completed",
+                text=f"{spec.state.active_subagent} done",
+            )
+
+        runner = WorkerRunner(
+            request=ChatRequest(session_id="s_parallel", message="go"),
+            request_payload={"message": "go"},
+            domain=BaseTurnDomain(),
+            session_store=store,  # type: ignore[arg-type]
+            subagent_builder=_SubAgents(),  # type: ignore[arg-type]
+            skill_registry=None,
+            new_context=_new_context,
+            emit=_noop,
+            safe_emit=_noop,
+            run_loop=fake_loop,
+        )
+        spawnable = ("alpha_worker", "beta_worker")
+        first = await runner.start(
+            state=parent,
+            worker_name="alpha_worker",
+            task="first",
+            spawnable=spawnable,
+            budget=RunBudget(3),
+        )
+        second = await runner.start(
+            state=parent,
+            worker_name="beta_worker",
+            task="second",
+            spawnable=spawnable,
+            budget=RunBudget(3),
+        )
+        assert parent.active_subagent == "beta_worker"
+
+        await first.commit()
+
+        # Alpha finished while beta is still running: beta stays active.
+        assert parent.active_subagent == "beta_worker"
+
+        await second.commit()
+
+        assert parent.active_subagent == "main_agent"
+        # Commits are in model order, so the later worker's value wins and its
+        # run id is the recorded origin.
+        assert parent.working_memory["artifacts"]["shops"] == [{"worker": "beta_worker"}]
+        meta = parent.working_memory["artifact_meta"]["shops"]
+        assert meta["source_run_id"] == second.run.run_id  # type: ignore[union-attr]
+        assert [run["worker"] for run in parent.working_memory["worker_runs"]] == [
+            "alpha_worker",
+            "beta_worker",
+        ]
 
     asyncio.run(scenario())
 

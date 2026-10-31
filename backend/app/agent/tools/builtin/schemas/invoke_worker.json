@@ -24,5 +24,6 @@
     "required": ["worker", "task"],
     "title": "InvokeWorkerArgs",
     "type": "object"
-  }
+  },
+  "execution_mode": "parallel"
 }

@@ -10,9 +10,14 @@ Business events (`kind="event"`) are published by the runtime:
   (the arcade domain supplies `intent`).
 - `subagent.changed`: `active_subagent`, `to_subagent`, `reason`,
   optional `from_subagent`, `worker_run_id`.
-- `worker.started`: `worker`, `run_id`, `task_preview`, `active_subagent`.
-- `worker.completed`: `worker`, `run_id`, `status`, `summary`, `active_subagent`.
-- `worker.failed`: `worker`, `run_id`, `error`, `active_subagent`.
+- `worker.started`: `worker`, `run_id`, `worker_run_id` (same value; the run id
+  is the stable discriminator when several workers overlap),
+  `task_preview`, `active_subagent`.
+- `worker.completed`: `worker`, `run_id`, `worker_run_id`, `status`,
+  `summary`, `active_subagent` (the next active agent; `main_agent` once the
+  last worker finishes).
+- `worker.failed`: `worker`, `run_id`, `worker_run_id`, `error`,
+  `active_subagent`.
 - `tool.started` / `tool.completed`: `tool`, `call_id`, `active_subagent`,
   `worker_run_id` (`tool.completed` may add `distance_m`).
 - `tool.failed`: as above plus `error`.

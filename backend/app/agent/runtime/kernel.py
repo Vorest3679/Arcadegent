@@ -40,7 +40,7 @@ from app.agent.runtime.lifecycle import (
     TurnScope,
 )
 from app.agent.runtime.budget import RunBudget
-from app.agent.runtime.worker_runner import WorkerRunner
+from app.agent.runtime.worker_runner import ActiveWorkerSlots, WorkerDispatch, WorkerRunner
 from app.agent.skills.execution import SkillExecution
 from app.agent.skills.registry import SkillRegistry
 from app.agent.runtime.session_state import (
@@ -132,6 +132,9 @@ class AgentKernel:
         self._domain: TurnDomain = domain or BaseTurnDomain()
         self._lifecycle = LifecycleDispatcher(self._domain)
         self._artifacts = artifacts or ArtifactSink()
+        # Shared by every worker dispatch so overlapping workers agree on the
+        # parent's live ``active_subagent``.
+        self._worker_slots = ActiveWorkerSlots()
 
     def _new_loop(self, turn: TurnInput) -> AgentLoop:
         # Built per run from the current attributes, so replaced collaborators
@@ -143,9 +146,10 @@ class AgentKernel:
             task: str,
             spawnable: tuple[str, ...],
             budget: RunBudget | None,
-        ) -> dict[str, Any]:
+        ) -> WorkerDispatch:
             # One runner per dispatch; a loop that never spawns (including the
-            # worker loops) does not allocate one.
+            # worker loops) does not allocate one. The hook runs the worker
+            # concurrently and commits it later in model order.
             runner = WorkerRunner(
                 request=turn.request,
                 request_payload=turn.request_payload,
@@ -158,8 +162,9 @@ class AgentKernel:
                 emit=self._emit,
                 safe_emit=self._safe_emit,
                 run_loop=lambda spec: self._new_loop(turn).run(spec),
+                slots=self._worker_slots,
             )
-            return await runner.spawn(
+            return await runner.start(
                 state=state,
                 worker_name=worker_name,
                 task=task,
@@ -292,6 +297,9 @@ class AgentKernel:
             run_ctx.phase = LifecyclePhase.UNMOUNTED
             await self._safe_emit(run_ctx)
             state.skill_execution = SkillExecution()
+            # Safety net: a leaked worker slot must not pin this session state
+            # for the rest of the process or leak into a later turn.
+            self._worker_slots.clear(state)
 
     async def _run_turn_session(
         self,

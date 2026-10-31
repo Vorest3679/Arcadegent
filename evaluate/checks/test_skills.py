@@ -4,6 +4,8 @@ import asyncio
 import json
 import os
 import shutil
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -218,6 +220,33 @@ def test_concurrent_tool_invocations_do_not_share_identity_or_loaded_state(tmp_p
     results = asyncio.run(together())
     assert [result.status for result in results] == ["completed", "failed"]
     assert main.resources and not worker.resources
+
+
+def test_parallel_skill_loads_keep_the_capacity_lock(tmp_path, monkeypatch):
+    folder = write_skill(tmp_path)
+    size = (folder / "SKILL.md").stat().st_size
+    registry = SkillRegistry(SkillConfig(roots=[tmp_path], max_loaded_bytes=size))
+    execution = SkillExecution()
+    original = registry.read_skill
+    reads = []
+
+    def slow_read(*args, **kwargs):
+        reads.append((args, kwargs))
+        time.sleep(0.05)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(registry, "read_skill", slow_read)
+
+    def load(_index):
+        return execution.load(registry, agent_name="main_agent", name="sample-skill", path="SKILL.md")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        receipts = list(pool.map(load, range(8)))
+
+    assert all(receipt["status"] == "loaded" for receipt in receipts)
+    assert len(reads) == 1  # threads cannot load the same resource twice
+    assert len(execution.resources) == 1
+    assert execution.loaded_bytes == size  # the capacity cap was not bypassed
 
 
 def test_config_paths_are_relative_to_config_and_legacy_yaml_is_rejected(tmp_path, monkeypatch):

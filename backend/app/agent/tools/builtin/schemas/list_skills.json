@@ -13,5 +13,6 @@
     "properties": {},
     "required": [],
     "additionalProperties": false
-  }
+  },
+  "execution_mode": "parallel"
 }

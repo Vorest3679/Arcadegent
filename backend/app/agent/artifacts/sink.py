@@ -102,6 +102,8 @@ class ArtifactSink:
                 promote=artifact.promote,
                 status=None,
                 invalidates=artifact.invalidates,
+                # A parent-produced value no longer originates from a worker run.
+                source_run_id=None,
             )
         batch_keys = {artifact.key for artifact in artifacts if isinstance(artifact, Artifact)}
         for artifact in artifacts:
@@ -140,6 +142,7 @@ class ArtifactSink:
         parent_memory: dict[str, Any],
         turn_index: int,
         status: str = "completed",
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         """Merge a finished worker's artifacts into the parent.
 
@@ -148,6 +151,10 @@ class ArtifactSink:
         with ``promote=False`` stay worker-local (for example candidate rows).
         A non-completed worker still contributes what it produced, marked
         ``partial`` so readers can distinguish it from a complete result.
+
+        ``run_id`` is recorded as the artifact's promotion origin. Workers
+        commit in model call order, so a later worker's value for the same key
+        wins and its run id replaces the earlier one.
         """
         child = ensure_working_memory_shape(child_memory)
         parent = ensure_working_memory_shape(parent_memory)
@@ -172,6 +179,7 @@ class ArtifactSink:
                 promote=True,
                 status=promote_status,
                 invalidates=tuple(entry.get("invalidates") or ()),
+                source_run_id=run_id,
             )
             promoted[key] = deepcopy(value)
         for key in promoted:

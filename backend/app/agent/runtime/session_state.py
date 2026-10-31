@@ -114,13 +114,16 @@ def set_working_memory_artifact(
     promote: bool | None = None,
     status: str | None = None,
     invalidates: tuple[str, ...] | None = None,
+    source_run_id: str | None = None,
 ) -> None:
     """Write one artifact and, when a turn is given, its display metadata.
 
     ``display``/``scope``/``promote``/``invalidates`` are optional so direct
     domain writes keep the flags an earlier :class:`ArtifactSink` application
     recorded. Passing ``status=None`` clears a previous ``partial`` mark;
-    workers set it when promotion happens before they fail.
+    workers set it when promotion happens before they fail. ``source_run_id``
+    records which worker run promoted the value; a parent-produced write passes
+    ``None`` (the default) and clears a previous promotion origin.
     """
     normalized = ensure_working_memory_shape(memory)
     normalized["artifacts"][key] = deepcopy(value)
@@ -148,6 +151,10 @@ def set_working_memory_artifact(
                 entry["invalidates"] = list(invalidates)
             else:
                 entry.pop("invalidates", None)
+        if source_run_id is None:
+            entry.pop("source_run_id", None)
+        else:
+            entry["source_run_id"] = source_run_id
         meta[key] = entry
 
 

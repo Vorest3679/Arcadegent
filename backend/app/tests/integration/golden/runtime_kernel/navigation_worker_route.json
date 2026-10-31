@@ -391,7 +391,8 @@
             "active_subagent": "navigation_worker",
             "run_id": "<wrk1>",
             "task_preview": "从起点步行到 Gamma Arcade",
-            "worker": "navigation_worker"
+            "worker": "navigation_worker",
+            "worker_run_id": "<wrk1>"
           },
           "event": "worker.started",
           "kind": "event"
@@ -516,11 +517,12 @@
         },
         {
           "data": {
-            "active_subagent": "navigation_worker",
+            "active_subagent": "main_agent",
             "run_id": "<wrk1>",
             "status": "completed",
             "summary": "route ready",
-            "worker": "navigation_worker"
+            "worker": "navigation_worker",
+            "worker_run_id": "<wrk1>"
           },
           "event": "worker.completed",
           "kind": "event"
@@ -1801,6 +1803,7 @@
           "display": true,
           "promote": true,
           "scope": "turn",
+          "source_run_id": "<wrk1>",
           "turn_index": 1,
           "updated_at": "<volatile>"
         },
@@ -1808,6 +1811,7 @@
           "display": true,
           "promote": true,
           "scope": "turn",
+          "source_run_id": "<wrk1>",
           "turn_index": 1,
           "updated_at": "<volatile>"
         },
@@ -1819,6 +1823,7 @@
           ],
           "promote": true,
           "scope": "turn",
+          "source_run_id": "<wrk1>",
           "turn_index": 1,
           "updated_at": "<volatile>"
         }

@@ -211,7 +211,8 @@
             "active_subagent": "search_worker",
             "run_id": "<wrk1>",
             "task_preview": "查找 Gamma 机厅",
-            "worker": "search_worker"
+            "worker": "search_worker",
+            "worker_run_id": "<wrk1>"
           },
           "event": "worker.started",
           "kind": "event"
@@ -258,11 +259,12 @@
         },
         {
           "data": {
-            "active_subagent": "search_worker",
+            "active_subagent": "main_agent",
             "run_id": "<wrk1>",
             "status": "completed",
             "summary": "worker found Gamma",
-            "worker": "search_worker"
+            "worker": "search_worker",
+            "worker_run_id": "<wrk1>"
           },
           "event": "worker.completed",
           "kind": "event"
@@ -1877,6 +1879,7 @@
           "display": true,
           "promote": true,
           "scope": "session",
+          "source_run_id": "<wrk1>",
           "turn_index": 1,
           "updated_at": "<volatile>"
         },
@@ -1889,6 +1892,7 @@
           ],
           "promote": true,
           "scope": "session",
+          "source_run_id": "<wrk1>",
           "turn_index": 1,
           "updated_at": "<volatile>"
         },
@@ -1896,6 +1900,7 @@
           "display": false,
           "promote": true,
           "scope": "session",
+          "source_run_id": "<wrk1>",
           "turn_index": 1,
           "updated_at": "<volatile>"
         }

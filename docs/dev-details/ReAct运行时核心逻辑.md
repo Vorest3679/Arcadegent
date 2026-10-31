@@ -246,55 +246,68 @@ domain 进入内核时会被翻译成 core 能理解的概念，但语义由适�
 - `create/mount/update` 失败则中止并进入错误卸载；`before_unmount` 失败仍执行 `unmounted`；`unmounted` 失败只记录，不覆盖主错误。
 - 改状态的逻辑只在钩子里（`on_turn_mount`、`on_step_update`、`on_worker_mount`），同一时机没有第二个入口；返回数据的策略（hints、`tool_result_signal`、worker envelope、`build_response`）仍是显式函数，由内核直接调用。`BaseLifecycleHooks` 的默认钩子都是空操作，覆盖时不需要调用 `super()`。
 - 钩子可写之后，多个领域并存时的执行顺序会影响结果；接入第二个领域前须先实现“注册顺序挂载、逆序卸载”。
-- worker 收尾：证据回写与 usage 合并恰好执行一次——正常路径在构建信封前执行；异常或取消时在 `finally` 中补做，并把父会话 `active_subagent` 恢复为 `main_agent` 后保存，run 的终态（failed / cancelled）仍交给 run/session 层记录。
+- worker 收尾：证据回写与 usage 合并恰好执行一次——正常路径在构建信封前执行；异常或取消时补做，并按 `ActiveWorkerSlots` 恢复父会话 `active_subagent`（还有 worker 在跑则取最近启动者，全部结束才回到 `main_agent`），run 的终态（failed / cancelled）仍交给 run/session 层记录。
 
-2.7–2.8 已把这些边界显式化：`runtime/lifecycle.py` 提供 dispatcher、`StateView`、保留键检查和 `BaseLifecycleHooks`；`AgentKernel` 在 run/turn/step/worker 边界发事件；`AgentNode.spawnable` 是唯一的 worker 合法名单；`StepPolicy.runtime_hints` 已合并进 provider hints。剩余：model/reasoning_effort 进入 provider 请求（阶段 3）、session scope 事件、多 domain 钩子顺序、并行 worker 父级顺序（阶段 7）、公共 `TurnContext/TurnState/ToolResult` 契约（阶段 5/8）。
+2.7–2.8 已把这些边界显式化：`runtime/lifecycle.py` 提供 dispatcher、`StateView`、保留键检查和 `BaseLifecycleHooks`；`AgentKernel` 在 run/turn/step/worker 边界发事件；`AgentNode.spawnable` 是唯一的 worker 合法名单；`StepPolicy.runtime_hints` 已合并进 provider hints。剩余：model/reasoning_effort 进入 provider 请求（阶段 3）、session scope 事件、多 domain 钩子顺序、公共 `TurnContext/TurnState/ToolResult` 契约（阶段 5/8）。并行 worker 的父级顺序已在阶段 7 由 `ActiveWorkerSlots` 与 model-order commit 解决。
 
-## 工具执行与 worker 派发（阶段 4）
+## 工具执行与 worker 派发（阶段 4、7）
 
 ### 一次工具调用
 
-`tools/execution.py` 的 `ToolDispatcher` 负责与 runtime 无关的部分：参数准备、参数证据（`raw_arguments`、`parse_error`、`prepared_arguments`、`hydrated_fields`、`preparation_error`）以及真正执行。每个调用在 `submit` 时包成一个 `asyncio.Task`，由 `settle` 收集结果；准备失败也生成一个 `failed` 结果，因此 `tool.started` 与 `tool.failed` 仍然成对。取消一个正在 `settle` 的批次时，`settle` 会 `cancel()` 子任务并等待它结束，不在事件循环里留下悬挂任务。
+`tools/execution.py` 的 `ToolDispatcher` 负责与 runtime 无关的部分：参数准备、参数证据（`raw_arguments`、`parse_error`、`prepared_arguments`、`hydrated_fields`、`preparation_error`）以及真正执行。每个调用在 `submit` 时包成一个 `asyncio.Task`；准备失败也生成一个 `failed` 结果，因此 `tool.started` 与 `tool.failed` 仍然成对。
 
-runtime 侧（`runtime/actions.py`）通过 `ToolLifecycleHooks` 注入行为，执行顺序保持不变：
+`ToolLifecycleHooks` 分成两个阶段：
+
+- `after` 在调用自己的 task 内执行，只能替换结果或启动并发工作（`spawn_agent` 在这里启动 worker 的 `run`），不能写父状态、不能发布工具完成事件。
+- `commit` 在父循环协程内、按模型调用顺序执行；worker 的合并、领域事件与 `tool.completed/failed` 都在这里发生。
 
 ```text
-tool.started
+tool.started（submit，模型顺序）
   → 参数准备（失败则跳过执行）
-  → 工具执行（可包成 task）
-  → spawn_agent 钩子（派发 worker，worker.* 事件仍在这次调用内）
-  → 领域 tool_result_signal 事件 → tool.completed / tool.failed
-  → 证据回合 → last_error 记账 → step update 生命周期钩子
+  → 工具执行（task 内并发）
+  → after（task 内；spawn_agent 启动 worker run）
+  → commit（父循环，模型顺序）：
+      spawn_agent 提交 worker（产物/证据/usage/信封）
+      → 领域 tool_result_signal 事件 → tool.completed / tool.failed
+      → 证据回合 → last_error 记账 → step update 生命周期钩子
 ```
 
-- `runtime/events.py` 的 `ToolEventHooks` 是默认实现：发布 `tool.started/completed/failed` 并记录 `tool.completed`、`tool.failed` 日志；领域事件与 `completed_fields` 由构造时注入的 `signal` 提供，仍排在 `tool.completed` 之前。
-- `_SpawnAgentHook` 只处理声明了 `spawn_agent` 的已完成结果，把 worker 信封替换为工具结果；它排在事件钩子之前，所以 `worker.started/completed/failed` 仍在 `tool.completed` 之前。派发本身抛出普通异常时，钩子把它转成 `worker_dispatch_error` 的失败工具结果（错误文本与 `session.failed` 一样压缩空白并截断到 280 字符），主 agent 会照常收到 `tool.failed` 并可在下一步恢复，不会因为一个 worker 异常丢掉整轮；`CancelledError` 直接上抛。worker 自己的 `worker.error → worker.unmounted`、证据/usage 回写已在 `spawn` 内完成。若真正的持久化或事件发布故障导致失败，异常会在记录/发布这个工具结果时再次出现，本轮仍会失败。
+- `runtime/events.py` 的 `ToolEventHooks` 是默认实现：`after` 只透传，`commit` 发布 `tool.started/completed/failed` 并记录日志。领域事件与 `completed_fields` 由构造时注入的 `signal` 提供，仍排在 `tool.completed` 之前。
+- `_SpawnAgentHook` 只处理声明了 `spawn_agent` 的已完成结果。它把 worker 的 `run` 留在调用 task 内，把 `commit` 留到父循环；派发普通异常转成 `worker_dispatch_error` 的失败工具结果（错误文本压缩空白并截断到 280 字符），主 agent 收到 `tool.failed` 后可继续本轮；`CancelledError` 上抛。持久化或事件发布故障会在 `commit` 阶段再次出现，本轮仍会失败。
+- 取消或任何非取消异常都会走 `supervisor.cancel_all()`：未完成的调用被取消并生成 `status=failed`、`error.type=cancelled` 的合成结果，从而关闭 `tool.started` 开出的 span。取消路径还会记录已完成兄弟调用的证据（只写一次）；非取消异常路径只保证清理与关闭 span，已记录的证据保留，不承诺补齐未记录的兄弟结果。`ToolDispatcher.cancel()` 只吞子任务自身的取消/异常，外层取消通过 `Task.cancelling()` 识别后重新上抛；子任务若因真实异常结束，结果保留为 `tool_execution_error`，不会被伪装成 `cancelled`。
 - capability 常量（`spawn_agent`、`concludes_turn`，以及预留的 `background`、`programmatic`）定义在 `tools/execution.py`；`tools` 不 import `runtime`，只认 `ToolLifecycleHooks` 协议与 `runtime_context` 字典。
 
-### 执行模式
+### 执行模式与监督器
 
-`ToolDescriptor.execution_mode` 是工具自声明的并发属性，默认 `exclusive`；`ToolRegistry.execution_mode(tool_name)` 对未知工具返回 `exclusive`。`BuiltinToolProvider` 从工具 JSON 读取并校验该字段，MCP 工具显式保持 `exclusive`（以后可映射 MCP 的 `readOnlyHint`）。阶段 4 只落地声明机制，**所有内置工具仍为 `exclusive`**，`ToolActions` 仍逐个 `settle`；`execution_mode` 也只是被查询，尚未进入执行路径。
+`ToolDescriptor.execution_mode` 是工具自声明的并发属性，默认 `exclusive`；`ToolRegistry.execution_mode(tool_name)` 对未知工具返回 `exclusive`，批量入口 `execution_modes(names)` 每个模型步只收集一次描述符。`BuiltinToolProvider` 从工具 JSON 读取并校验该字段，MCP 工具显式保持 `exclusive`（以后可映射 MCP 的 `readOnlyHint`）。首批 `parallel` 为 `list_skills`、`read_skill`、`invoke_worker`；其余内置工具保持独占。
 
-`list_skills`、`read_skill`、`invoke_worker` 原计划作为首批 `parallel`，审查后暂缓到阶段 7，前置条件是：
+`runtime/supervisor.py` 的 `LoopSupervisor` 跟踪本批 `ToolTask`：
 
-- `read_skill` / `list_skills` 的 executor 经 `asyncio.to_thread` 执行；`SkillExecution.load` 的“检查 `loaded_bytes` → 累加”没有锁，并发会绕过 `max_loaded_bytes` 或重复加载同一资源，`list_skills` 还会在线程里刷新同一个 registry。需要加锁或改成纯 async。
-- `WorkerRunner.run` 仍会写父状态 `active_subagent` 并 `save_session`；多个 worker 并发时，先结束者的 `commit` 会把父状态改回 `main_agent`。阶段 7 要先实现“有 worker 在跑时取最近启动者、全部结束后才恢复 `main_agent`”，并把提交严格放到父循环协程里。
+- `WaitPolicy(mode="all")` 是唯一生产策略：等待本批全部调用结束。
+- `ToolActions` 把模型调用列表切成段：相邻的 `parallel` 调用同段并发，`exclusive` 调用单独成段并作为屏障。无论完成顺序如何，`commit` 与证据记录都按模型调用顺序进行。
+- 取消等待协程时，`wait` 调用 `cancel_all()` 取消并终结所有被跟踪的调用，再让 `CancelledError` 继续传播；`ToolActions` 会记录已完成兄弟的结果，且不会留下悬挂的 asyncio task。
+- `WaitPolicy(mode="first_or_interval", interval_s=5)` 的接口、`Settled.done/pending` 与单测骨架已就绪，但生产路径仍只用 `all`。后台调用的占位结果、跨步回送与 tool-call/result 配对规则只在 `supervisor.py` 末尾以设计说明保留，尚未接入。`all` 故意不在 `wait` 内释放任务，由记录方在 `settle`/记录后 `release`；`cancel_all` 对已 finalized 的调用是幂等的。`execution_modes()` 收集失败（例如 MCP 描述符不可用）时，`ToolActions` 降级为整批 `exclusive` 并记录无敏感字段日志，避免 step 在拿到任何工具结果前整体失败。
 
-### worker：run / commit 两段
+### worker：start / finish / commit
 
-`runtime/worker_runner.py` 把原 `_run_worker` 拆成两段，为并行 worker 做准备：
+`runtime/worker_runner.py` 把原 `_run_worker` 拆成三段，并行 worker 才成立：
 
 | 段 | 做什么 | 约束 |
 | --- | --- | --- |
-| `run` | 在独立的 `AgentSessionState` 上挂载 worker、发 `worker.started`、跑子循环 | 只写父状态的 `active_subagent`（前端实时信号）并保存；不合并父记忆（产物、usage、证据、信封） |
-| `commit` | 产物提升（失败时标记 `partial`）、usage 合并、worker 证据回写、构造信封并追加 `worker_runs`、发 `worker.completed/failed`、恢复 `active_subagent` | 只应在父循环协程、按模型调用顺序执行；同一 run 幂等 |
-| `spawn` | `prepare → run → commit` 的一次性入口 | `finally` 保证失败/取消时证据与 usage 恰好回写一次并恢复父状态；run 终态仍由 session/run 层记录 |
+| `start` | 校验名单、建隔离 state、挂载、发 `worker.started`、跑子循环 | 只声明“最近启动的 worker”并写父 `active_subagent`；不合并父记忆。`CancelledError` 当场收尾（run 已中止）；普通异常暂存在 dispatch 上，交给 `finish` 按顺序恢复 |
+| `finish` | 提交 worker；失败/取消时补做证据与 usage 回写、恢复父状态；`unmounted` 恰好一次 | 调用方在父循环协程、按模型调用顺序执行；同一 run 幂等 |
+| `commit` | 产物提升（失败标记 `partial`，记录 `source_run_id`）、usage 合并、证据回写、构造信封、`worker.completed/failed`、释放 active slot | 只在父循环协程执行 |
+| `spawn` | `start + finish` 的一次性入口 | 保留给非并发的直接调用 |
 
-当前 `ToolActions` 串行调用，`spawn` 内的 `run + commit` 顺序天然成立；并发后必须由 supervisor 拆开两者，按模型调用顺序调用 `commit`。
+`ActiveWorkerSlots` 以父状态为键保存正在运行的 worker：新 worker 启动时成为 `active_subagent`，某个 worker 结束时取仍在运行的最近启动者，最后一个结束后恢复 `main_agent`。`add` 在各 worker 自己的任务中执行，因此这些方法保持同步且没有 await；`AgentKernel` 在 run 结束时清除该状态的 slots，避免泄漏的 slot 长期强引用 session state。`worker.started/completed/failed` 都带 `run_id` 与同值的 `worker_run_id`，前端据此区分并行 worker；`worker.completed/failed` 的 `active_subagent` 是提交后的下一个 active。
+
+`SkillExecution.load` 用线程锁覆盖“查重 → 读取 → 累加 `loaded_bytes`”，所以并行 `read_skill` 不会重复加载、也不会绕过 `max_loaded_bytes`；`SkillRegistry` 自身的刷新/读取仍由 `RLock` 串行化。`SkillExecution` 的 `__deepcopy__` 复制资源快照但不复制锁，兼容会话存储与测试里的 deepcopy。
 
 worker 的合法名单来自当前节点的 `AgentNode.spawnable`；非法派发在 `prepare` 之前返回失败信封，不产生 `worker.started`。
 
-`backend/app/tests/integration/test_worker_runner.py` 覆盖“worker 工具执行中取消后父状态恢复、已完成工具证据只出现一次、无悬挂 task”“`run` 期间不合并父记忆、`commit` 幂等”和“派发异常转成失败工具结果”。共享的测试替身放在 `_runtime_kernel_test_support.py`。
+产物来源：`ArtifactSink.promote` 在 `artifact_meta` 写入 `source_run_id`；父级通过 `ArtifactSink.apply` 或直接 `set_working_memory_artifact` 覆盖同名值时，默认清除旧的 `source_run_id`，避免把父级新值误标成某个 worker 的产物。
+
+`backend/app/tests/integration/test_worker_runner.py` 覆盖“worker 工具执行中取消后父状态恢复、已完成工具证据只出现一次、无悬挂 task”“`start` 期间不合并父记忆、`commit` 幂等”和“派发异常转成失败工具结果”。并行行为见 `test_runtime_supervisor.py`。共享的测试替身放在 `_runtime_kernel_test_support.py`。
 
 ## 配置
 
