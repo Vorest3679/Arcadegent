@@ -161,15 +161,15 @@ publish("assistant.completed" or "session.failed", {"reply": final_text, ...}, o
 | `scope` | `scope` | `turn` 在下一轮开始时由 `begin_turn` 删除；`session` 保留到同名 artifact 被替换或显式删除 |
 | `promote` | `promote` | 是否允许 worker 的结果覆盖父状态；候选列表这类 worker 局部值设为 false |
 | `invalidates` | `invalidates` | 新值会让哪些旧值失效（例如新搜索清掉上一轮 `selected_shops`/`shop`/`destination`）；worker 提升时同样生效 |
-| `append` / `append_key` | — | 列表追加；`append_key` 由生产者提供（搜索候选传 `source_id`），内核不硬编码业务字段 |
+| `append` / `append_key` | — | 列表追加；`append_key` 由生产者提供（搜索候选传 `source_id`），标识可为整数或字符串（路径、UUID），其他类型按“缺少稳定标识”跳过；内核不硬编码业务字段 |
 
 `memory=False` 目前不支持 display-only 存储，`apply` 会直接报错，避免静默丢数据。
 
 `ArtifactSink` 的时机：
 
-- `begin_turn`：按 `scope="turn"` 统一清理上一轮的值；没有 `scope` 元数据的老会话由领域提供 `legacy_keys` 兜底。
+- `begin_turn`：内核在每个回合开始时无条件调用，按 `scope="turn"` 统一清理上一轮的值；没有 `scope` 元数据的老会话由领域用 `drop_legacy_turn_keys` 提供 `legacy_keys` 兜底。因此最小第三方领域即使不写生命周期钩子也不会把上一轮 artifact 带进下一轮。
 - `apply`：工具/领域结果写入当前状态，记录 `turn_index`、`display`、`scope`、`promote`、`invalidates`；同一批 artifact 中产生的 key 不会被同批的 `invalidates` 删除。
-- `promote`：只提升 worker 自己产生过（有元数据）的 artifact；失败 worker 的提升结果带 `status="partial"`，worker 从父状态复制的值不会被提升。父状态里被提升 artifact 声明为失效的旧值同时被删除，所以 worker 搜索没有选择新店时不会显示父状态上一轮的 `selected_shops`。非 artifact 的标量字段由 `TurnDomain.worker_memory_promotions` 返回。
+- `promote`：只提升 worker 自己产生过（有元数据）的 artifact；失败 worker 的提升结果带 `status="partial"`，worker 从父状态复制的值不会被提升。父状态里被提升 artifact 声明为失效的旧值同时被删除，所以 worker 搜索没有选择新店时不会显示父状态上一轮的 `selected_shops`。非 artifact 的标量字段由 `TurnDomain.worker_memory_promotions` 返回；机厅领域只回写 worker 实际写入的字段（挂载时记录基线，工具处理处用 `mark_worker_memory_write` 标记写入），未运行的 worker 不会用旧快照覆盖并行兄弟的新查询。
 - `display_snapshot` / `turn_snapshot`：前者给即时响应与会话详情（session scope 常驻，turn scope 取最近一次展示轮），后者给最终 assistant 回合的 `map_artifacts`（只有本轮确实更新过展示 artifact 才归档）。领域把两者投影成机厅自有的 `ArcadeDisplay`（`domain/arcade/display.py`），由 `ArcadeTurnDomain.session_display` 提供；该方法不属于内核端口，内核只经 `turn_display_snapshot` 拿到不透明 dict。没有 `display` 元数据的老会话按“展示 + session”兼容，不会被新 artifact 挤掉。
 
 工具自带 artifacts 时，`ToolExecutionResult.artifacts` 优先；否则才调用 `TurnDomain.artifacts_from_result`。当前 `db_query_tool`、`result_selection_tool`、`route_plan_tool` 通过 `ToolOutcome` 自带 artifacts，过渡映射只剩 MCP 结果；worker 的结果由 `ArtifactSink.promote` 提升，不再从 `invoke_worker` 信封二次写入。`ProviderExecutionResult` 与 `MCPExecutionResult` 都携带 artifacts，`BuiltinToolProvider` 接受 `ToolOutcome` 或纯 dict（旧执行器无需改动）。

@@ -12,6 +12,26 @@ from app.agent.runtime.session_state import (
 )
 from app.domain.arcade.replies import display_shops, memory_shops
 
+# Scalar/bookkeeping fields a worker inherits from its parent at mount. Workers
+# may update them through tools; promotion only writes back the ones the worker
+# actually wrote (see ``worker_memory_promotions``).
+_WORKER_SCALAR_KEYS = (
+    "last_request",
+    "last_shop_id",
+    "keyword",
+    "last_db_query",
+    "provider",
+    "last_route_endpoints",
+)
+# Reserved worker-memory key with the values inherited at mount. It lets a late
+# commit distinguish "worker changed this" from "worker merely inherited the
+# parent's old snapshot"; without it a worker that never queried would restore
+# the parent's stale value over a sibling worker's newer one.
+_WORKER_MOUNT_BASELINE_KEY = "_worker_mount_baseline"
+# Scalar keys the worker wrote after mount. A write of the same value still
+# counts: a fresh query that happens to match the snapshot must stay consistent
+# with the artifacts it produced.
+_WORKER_WRITTEN_KEYS = "_worker_written_keys"
 # Artifacts copied into a worker at mount time. Route/destination/view_payload
 # are deliberately absent: a worker must plan them itself.
 _WORKER_SNAPSHOT_KEYS = (
@@ -49,9 +69,15 @@ def worker_memory_snapshot(parent_memory: dict[str, Any]) -> dict[str, Any]:
     """Copy the promotable slice of parent memory into an isolated worker."""
     memory = ensure_working_memory_shape({})
     parent_memory = ensure_working_memory_shape(parent_memory)
-    for key in ("last_request", "last_shop_id", "keyword", "last_db_query", "provider", "last_route_endpoints"):
+    baseline: dict[str, Any] = {}
+    for key in _WORKER_SCALAR_KEYS:
         if key in parent_memory:
-            memory[key] = deepcopy(parent_memory[key])
+            value = deepcopy(parent_memory[key])
+            memory[key] = value
+            baseline[key] = deepcopy(value)
+    if baseline:
+        memory[_WORKER_MOUNT_BASELINE_KEY] = baseline
+        memory[_WORKER_WRITTEN_KEYS] = []
     for key in _WORKER_SNAPSHOT_KEYS:
         value = get_working_memory_artifact(parent_memory, key)
         if value is not None:
@@ -59,20 +85,67 @@ def worker_memory_snapshot(parent_memory: dict[str, Any]) -> dict[str, Any]:
     return memory
 
 
+def mark_worker_memory_write(worker_memory: dict[str, Any], key: str) -> None:
+    """Record a scalar field this worker actually wrote after mount.
+
+    The helper is a no-op outside a mounted worker (the parent has no baseline),
+    so domain tool-result handlers can mark writes unconditionally.
+    """
+    if not isinstance(worker_memory.get(_WORKER_MOUNT_BASELINE_KEY), dict):
+        return
+    written = worker_memory.get(_WORKER_WRITTEN_KEYS)
+    if not isinstance(written, list):
+        written = []
+    if key not in written:
+        written.append(key)
+        worker_memory[_WORKER_WRITTEN_KEYS] = written
+
+
+def _changed_since_mount(
+    worker_memory: dict[str, Any],
+    key: str,
+    baseline: dict[str, Any],
+    written: set[str],
+) -> bool:
+    """Whether the worker wrote the value or its snapshot value differs."""
+    if key in written or key not in baseline:
+        return True
+    return worker_memory.get(key) != baseline[key]
+
+
 def worker_memory_promotions(worker_memory: dict[str, Any]) -> dict[str, Any]:
     """Non-artifact worker fields that should reach the parent.
 
     Artifact values are merged generically by ``ArtifactSink`` from their
     metadata; these scalar/bookkeeping fields are arcade memory and stay here.
+    Values the worker inherited from its mount snapshot are skipped, so a
+    worker that never ran the matching tool cannot overwrite a sibling's newer
+    value with the parent's old state. Worker memories created without a
+    snapshot (direct tests or future callers) keep promoting their values.
     """
+    baseline = worker_memory.get(_WORKER_MOUNT_BASELINE_KEY)
+    if not isinstance(baseline, dict):
+        baseline = {}
+    written_raw = worker_memory.get(_WORKER_WRITTEN_KEYS)
+    written: set[str] = set()
+    if isinstance(written_raw, list):
+        written = {key for key in written_raw if isinstance(key, str)}
     promoted: dict[str, Any] = {}
-    if isinstance(worker_memory.get("last_db_query"), dict):
+    if _changed_since_mount(worker_memory, "last_db_query", baseline, written) and isinstance(
+        worker_memory.get("last_db_query"), dict
+    ):
         promoted["last_db_query"] = deepcopy(worker_memory["last_db_query"])
-    if isinstance(worker_memory.get("provider"), str):
+    if _changed_since_mount(worker_memory, "provider", baseline, written) and isinstance(
+        worker_memory.get("provider"), str
+    ):
         promoted["provider"] = worker_memory["provider"]
-    if isinstance(worker_memory.get("last_route_endpoints"), dict):
+    if _changed_since_mount(worker_memory, "last_route_endpoints", baseline, written) and isinstance(
+        worker_memory.get("last_route_endpoints"), dict
+    ):
         promoted["last_route_endpoints"] = deepcopy(worker_memory["last_route_endpoints"])
-    if isinstance(worker_memory.get("keyword"), str):
+    if _changed_since_mount(worker_memory, "keyword", baseline, written) and isinstance(
+        worker_memory.get("keyword"), str
+    ):
         promoted["keyword"] = worker_memory["keyword"]
     if isinstance(worker_memory.get("last_mcp_result"), dict):
         promoted["last_mcp_result"] = deepcopy(worker_memory["last_mcp_result"])

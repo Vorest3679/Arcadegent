@@ -312,6 +312,9 @@ class AgentKernel:
         state.skill_execution = SkillExecution()
         state.active_subagent = "main_agent"
         state.working_memory = reset_turn_scratch(state.working_memory)
+        # Generic artifact lifecycle is a kernel invariant: a domain may add its
+        # legacy keys in a turn-mount hook, but never has to remember this step.
+        self._artifacts.begin_turn(state.working_memory)
         turn_scope = TurnScope(
             session_id=session_id,
             turn_index=state.turn_index,

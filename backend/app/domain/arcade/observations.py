@@ -27,6 +27,7 @@ from app.agent.runtime.session_state import (
 )
 from app.agent.tools.registry import ToolExecutionResult
 from app.domain.arcade.intent import IntentPolicy
+from app.domain.arcade.worker_results import mark_worker_memory_write
 from app.session.events import AppEvent
 
 
@@ -38,22 +39,23 @@ def prepare_turn_memory(
     *,
     artifact_sink: ArtifactSink | None = None,
 ) -> dict[str, Any]:
-    """Drop arcade artifacts whose scope ended with the previous turn.
+    """Drop arcade legacy artifacts whose turn ended before ``scope`` existed.
 
-    Kernel scratch keys (``reply``, ``last_error``) are reset by the runtime.
-    Session-scoped artifacts (search results, selection, total) survive so a
-    follow-up reply can still show the last map; turn-scoped route/shop/detail
-    artifacts must not leak into a new answer. ``legacy_keys`` covers sessions
-    saved before ``scope`` was recorded.
+    Generic ``scope="turn"`` cleanup is a kernel invariant (``ArtifactSink``
+    ``begin_turn`` runs at every turn start); this hook only names the keys that
+    older persisted sessions used without metadata. Kernel scratch keys
+    (``reply``, ``last_error``) are reset by the runtime as well.
     """
     prepared = ensure_working_memory_shape(memory)
     if artifact_sink is not None:
-        artifact_sink.begin_turn(prepared, legacy_keys=_LEGACY_TURN_KEYS)
+        artifact_sink.drop_legacy_turn_keys(prepared, _LEGACY_TURN_KEYS)
         return prepared
     for key in _LEGACY_TURN_KEYS:
         prepared["artifacts"].pop(key, None)
         prepared.pop(key, None)
-        prepared.get("artifact_meta", {}).pop(key, None)
+        meta = prepared.get("artifact_meta")
+        if isinstance(meta, dict):
+            meta.pop(key, None)
     return prepared
 
 
@@ -143,11 +145,13 @@ def apply_tool_result(
         query_meta = output.get("query")
         if isinstance(query_meta, dict):
             memory["last_db_query"] = query_meta
+            mark_worker_memory_write(memory, "last_db_query")
         last_request = memory.get("last_request")
         if isinstance(last_request, dict):
             memory["keyword"] = last_request.get("keyword") or intent_policy.extract_keyword(
                 str(last_request.get("message") or "")
             )
+            mark_worker_memory_write(memory, "keyword")
         return
 
     if result.tool_name == "result_selection_tool":
@@ -162,6 +166,7 @@ def apply_tool_result(
         provider = output.get("provider")
         if isinstance(provider, str):
             memory["provider"] = provider
+            mark_worker_memory_write(memory, "provider")
         return
 
     if result.tool_name == "route_plan_tool":
@@ -176,6 +181,7 @@ def apply_tool_result(
                     "provider": route.get("provider"),
                     "mode": route.get("mode"),
                 }
+                mark_worker_memory_write(memory, "last_route_endpoints")
             destination = get_working_memory_artifact(memory, "shop")
             if isinstance(destination, dict):
                 set_working_memory_artifact(

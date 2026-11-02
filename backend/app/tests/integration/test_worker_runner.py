@@ -27,6 +27,7 @@ from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
 from app.agent.tools.execution import CAP_SPAWN_AGENT
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
+from app.domain.arcade.domain import ArcadeTurnDomain
 from app.protocol.messages import ChatRequest
 from app.session.events import RunEvent
 from app.session.injector import CollectingPublisher
@@ -301,6 +302,76 @@ def test_parallel_worker_commits_keep_model_order_and_artifact_origin(tmp_path: 
             "alpha_worker",
             "beta_worker",
         ]
+
+    asyncio.run(scenario())
+
+
+def test_stale_worker_snapshot_does_not_overwrite_a_sibling_update(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        store = _Store()
+        parent = AgentSessionState(session_id="s_stale", turn_index=1)
+        parent.working_memory = ensure_working_memory_shape({
+            "last_db_query": {"keyword": "old"},
+            "provider": "amap",
+            "last_route_endpoints": {
+                "origin": {"lng": 1.0, "lat": 2.0},
+                "destination": {"lng": 3.0, "lat": 4.0},
+            },
+        })
+        store.save_session(parent)
+
+        async def fake_loop(spec: LoopSpec) -> LoopOutcome:
+            if spec.state.active_subagent == "beta_worker":
+                spec.state.working_memory["last_db_query"] = {"keyword": "new"}
+                spec.state.working_memory["provider"] = "google"
+                spec.state.working_memory["last_route_endpoints"] = {
+                    "origin": {"lng": 5.0, "lat": 6.0},
+                    "destination": {"lng": 7.0, "lat": 8.0},
+                }
+            return LoopOutcome(status="completed", text=f"{spec.state.active_subagent} done")
+
+        runner = WorkerRunner(
+            request=ChatRequest(session_id="s_stale", message="go"),
+            request_payload={"message": "go"},
+            domain=ArcadeTurnDomain(),
+            session_store=store,  # type: ignore[arg-type]
+            subagent_builder=_SubAgents(),  # type: ignore[arg-type]
+            skill_registry=None,
+            new_context=_new_context,
+            emit=_noop,
+            safe_emit=_noop,
+            run_loop=fake_loop,
+        )
+        spawnable = ("alpha_worker", "beta_worker")
+        # Both workers mount while the parent still holds the old snapshot.
+        stale = await runner.start(
+            state=parent,
+            worker_name="alpha_worker",
+            task="read only",
+            spawnable=spawnable,
+            budget=RunBudget(3),
+        )
+        updating = await runner.start(
+            state=parent,
+            worker_name="beta_worker",
+            task="query",
+            spawnable=spawnable,
+            budget=RunBudget(3),
+        )
+
+        # The sibling's newer values commit first; the stale worker commits last
+        # and must not restore the values it merely inherited at mount.
+        await updating.commit()
+        await stale.commit()
+
+        memory = parent.working_memory
+        assert memory["last_db_query"] == {"keyword": "new"}
+        assert memory["provider"] == "google"
+        assert memory["last_route_endpoints"] == {
+            "origin": {"lng": 5.0, "lat": 6.0},
+            "destination": {"lng": 7.0, "lat": 8.0},
+        }
+        assert "_worker_mount_baseline" not in memory
 
     asyncio.run(scenario())
 

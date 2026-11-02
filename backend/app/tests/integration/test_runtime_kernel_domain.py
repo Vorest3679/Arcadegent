@@ -26,7 +26,7 @@ from app.agent.runtime.lifecycle import (
     StateView,
     TurnScope,
 )
-from app.agent.runtime.session_state import AgentSessionState, AgentTurn
+from app.agent.runtime.session_state import AgentSessionState, AgentTurn, set_working_memory_artifact
 from app.agent.tools.registry import ToolExecutionResult
 from app.session.events import RunEvent
 from backend.app.tests.integration._runtime_kernel_test_support import (
@@ -59,6 +59,46 @@ def test_base_domain_runs_two_turns_without_stale_reply(tmp_path: Path) -> None:
     assert provider.calls == ["main_agent"] * 3
     assert events.names()[-1] == RunEvent.ASSISTANT_COMPLETED
     assert store.states["s_kernel"].working_memory["reply"] == "second reply"
+
+
+class _TurnArtifactDomain(BaseTurnDomain):
+    """A minimal domain that lets a tool produce a turn-scoped artifact."""
+
+    async def on_step_update(self, ctx: LifecycleContext) -> None:
+        if ctx.tool_result is None or ctx.tool_result.tool_name != "echo":
+            return
+        set_working_memory_artifact(
+            ctx.memory,  # type: ignore[arg-type]
+            "turn_marker",
+            {"turn": ctx.state.turn_index},
+            turn_index=ctx.state.turn_index,
+            display=True,
+            scope="turn",
+        )
+
+
+def test_base_domain_clears_turn_scoped_artifacts_before_the_next_turn(tmp_path: Path) -> None:
+    store = _Store()
+    provider = _Provider([
+        ("main_agent", _call("echo", value=1)),
+        ("main_agent", _text("first reply")),
+        ("main_agent", _text("second reply")),
+    ])
+    runtime = _runtime(tmp_path, provider, store, domain=_TurnArtifactDomain())
+
+    _run(runtime, "one")
+
+    first_memory = store.states["s_kernel"].working_memory
+    assert first_memory["artifacts"]["turn_marker"] == {"turn": 1}
+    assert first_memory["artifact_meta"]["turn_marker"]["scope"] == "turn"
+
+    _run(runtime, "two")
+
+    second_memory = store.states["s_kernel"].working_memory
+    assert "turn_marker" not in second_memory["artifacts"]
+    assert "turn_marker" not in second_memory["artifact_meta"]
+    # The next turn's model call never saw the previous turn's artifact.
+    assert "turn_marker" not in provider.hints[-1]["memory"]["artifacts"]
 
 
 def test_base_domain_marks_worker_failed_after_tool_failure(tmp_path: Path) -> None:

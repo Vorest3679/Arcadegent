@@ -300,6 +300,34 @@ def test_worker_promotions_keep_last_mcp_result() -> None:
     assert parent_state.working_memory["last_mcp_result"]["tool"] == "maps_geo"
 
 
+def test_worker_promotions_keep_a_field_rewritten_with_the_snapshot_value() -> None:
+    domain = _domain()
+    parent_memory = {
+        "last_request": {"keyword": "maimai"},
+        "last_db_query": {"keyword": "maimai"},
+    }
+    worker_state = AgentSessionState(
+        session_id="s_worker_rewrite",
+        working_memory=domain.worker_memory_snapshot(parent_memory),
+    )
+    result = ToolExecutionResult(
+        call_id="call_query",
+        tool_name="db_query_tool",
+        status="completed",
+        output={
+            "shops": [{"source_id": 1, "name": "Alpha"}],
+            "query": {"keyword": "maimai"},
+        },
+    )
+
+    observations.apply_tool_result(state=worker_state, result=result, intent_policy=domain.intent_policy)
+    promotions = domain.worker_memory_promotions(worker_state.working_memory)
+
+    # The worker really queried, so its value wins even though it matches the
+    # mount snapshot and has to stay consistent with the shops it produced.
+    assert promotions["last_db_query"] == {"keyword": "maimai"}
+
+
 def test_persist_worker_evidence_turns_copies_tool_payload_arguments() -> None:
     parent_state = AgentSessionState(session_id="s_parent")
     worker_state = AgentSessionState(

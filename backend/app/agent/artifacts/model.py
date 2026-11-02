@@ -37,7 +37,8 @@ class Artifact:
     # Append the value to an existing list instead of replacing it.
     append: bool = False
     # Field used to de-duplicate appended dict rows; None keeps equal rows only
-    # once (domain code supplies the field name, e.g. "source_id").
+    # once (domain code supplies the field name, e.g. "source_id"). Row values
+    # may be integers or strings (paths, UUIDs); other identifiers are skipped.
     append_key: str | None = None
     # Artifacts that a new value makes stale (for example a fresh search
     # invalidates the previous selection). Removed unless the same batch

@@ -27,8 +27,17 @@ from app.agent.runtime.session_state import (
 )
 
 
+def _append_id_is_stable(value: Any) -> bool:
+    """Append rows de-duplicate on integer or string identifiers."""
+    return isinstance(value, str) or (isinstance(value, int) and not isinstance(value, bool))
+
+
 def _append_values(existing: Any, value: Any, *, append_key: str | None) -> Any:
-    """Append list rows, de-duplicating by ``append_key`` or by equality."""
+    """Append list rows, de-duplicating by ``append_key`` or by equality.
+
+    ``append_key`` values may be integers (database ids) or strings (paths,
+    UUIDs); rows without a stable identifier are skipped, as before.
+    """
     if not isinstance(value, list):
         return value
     merged = list(existing) if isinstance(existing, list) else []
@@ -40,10 +49,10 @@ def _append_values(existing: Any, value: Any, *, append_key: str | None) -> Any:
     known_ids = {
         item.get(append_key)
         for item in merged
-        if isinstance(item, dict) and type(item.get(append_key)) is int
+        if isinstance(item, dict) and _append_id_is_stable(item.get(append_key))
     }
     for item in value:
-        if not isinstance(item, dict) or type(item.get(append_key)) is not int:
+        if not isinstance(item, dict) or not _append_id_is_stable(item.get(append_key)):
             continue
         if item[append_key] in known_ids:
             continue
@@ -116,24 +125,35 @@ class ArtifactSink:
     def begin_turn(self, memory: dict[str, Any], *, legacy_keys: tuple[str, ...] = ()) -> None:
         """Drop artifacts whose scope ended with the previous turn.
 
-        ``legacy_keys`` exists only for sessions persisted before ``scope`` was
-        recorded: those entries have no scope, so the domain names the keys that
-        historically belonged to a single turn.
+        The kernel calls this at every turn start, so a domain with no lifecycle
+        hooks still cannot leak a previous turn's artifacts. ``legacy_keys``
+        exists only for sessions persisted before ``scope`` was recorded: those
+        entries have no scope, so the domain names the keys that historically
+        belonged to a single turn.
         """
-        memory = ensure_working_memory_shape(memory)
-        meta = memory.get("artifact_meta")
+        normalized = ensure_working_memory_shape(memory)
+        meta = normalized.get("artifact_meta")
         if isinstance(meta, dict):
             for key, entry in list(meta.items()):
                 if isinstance(entry, dict) and entry.get("scope") == "turn":
-                    _remove_artifact(memory, key)
-            for key in legacy_keys:
+                    _remove_artifact(normalized, key)
+        self.drop_legacy_turn_keys(normalized, legacy_keys)
+
+    def drop_legacy_turn_keys(self, memory: dict[str, Any], legacy_keys: tuple[str, ...]) -> None:
+        """Drop pre-scope artifacts a domain historically owned per turn.
+
+        Generic turn-scoped cleanup belongs to ``begin_turn`` (and the kernel);
+        a domain uses this only to supply key names from older persisted
+        sessions, which carry no ``scope`` metadata.
+        """
+        normalized = ensure_working_memory_shape(memory)
+        meta = normalized.get("artifact_meta")
+        for key in legacy_keys:
+            if isinstance(meta, dict):
                 entry = meta.get(key)
                 if isinstance(entry, dict) and entry.get("scope") is not None:
                     continue
-                _remove_artifact(memory, key)
-        else:
-            for key in legacy_keys:
-                _remove_artifact(memory, key)
+            _remove_artifact(normalized, key)
 
     def promote(
         self,

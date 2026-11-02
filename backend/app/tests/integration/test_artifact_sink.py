@@ -66,6 +66,31 @@ def test_append_key_skips_rows_without_the_key() -> None:
     assert state.working_memory["artifacts"]["search_candidates"] == [{"source_id": 1}]
 
 
+def test_append_key_accepts_string_identifiers() -> None:
+    state = _state()
+    sink = ArtifactSink()
+    first_batch = [
+        {"path": "/arcades/alpha"},
+        {"path": "550e8400-e29b-41d4-a716-446655440000"},
+    ]
+    second_batch = [
+        {"path": "/arcades/alpha"},
+        {"path": "/arcades/beta"},
+        {"path": "550e8400-e29b-41d4-a716-446655440000"},
+    ]
+    for rows in (first_batch, second_batch):
+        sink.apply(
+            state,
+            [Artifact("search_candidates", rows, append=True, append_key="path", promote=False)],
+        )
+
+    assert state.working_memory["artifacts"]["search_candidates"] == [
+        {"path": "/arcades/alpha"},
+        {"path": "550e8400-e29b-41d4-a716-446655440000"},
+        {"path": "/arcades/beta"},
+    ]
+
+
 def test_display_only_artifacts_fail_loudly_until_supported() -> None:
     with pytest.raises(ValueError, match="display-only"):
         ArtifactSink().apply(_state(), [Artifact("shops", [], memory=False)])
