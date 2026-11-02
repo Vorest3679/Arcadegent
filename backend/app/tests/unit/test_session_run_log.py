@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 
-from app.session.events import ControlEvent, RunEvent
+import pytest
+
+from app.agent.runtime.events import domain_event
+from app.session.events import AppEvent, ControlEvent, RunEvent, is_known_event
 from app.session.run_log import HEARTBEAT, RunLog, StreamEvent
 
 
@@ -138,6 +141,33 @@ def test_events_outside_the_catalog_are_refused() -> None:
 
 
 def test_every_catalog_name_is_dotted_and_unique() -> None:
-    names = [str(name) for name in (*RunEvent, *ControlEvent)]
+    names = [str(name) for name in (*RunEvent, *AppEvent, *ControlEvent)]
     assert len(names) == len(set(names))
     assert all("." in name for name in names)
+    assert not any(name.startswith("domain.") for name in names)
+
+
+def test_domain_namespace_is_accepted_as_business_events_only() -> None:
+    assert is_known_event("event", "domain.arcade.route_ready")
+    assert is_known_event("event", domain_event("coding", "file_read_2"))
+    for name in ("domain.arcade", "domain.Arcade.x", "domain.arcade.x.y", "domain..x", "domains.arcade.x"):
+        assert not is_known_event("event", name)
+    assert not is_known_event("control", "domain.arcade.route_ready")
+    for namespace, name in (("arcade", ""), ("Arcade", "x"), ("arcade.x", "y"), ("1x", "y")):
+        with pytest.raises(ValueError):
+            domain_event(namespace, name)
+
+
+def test_domain_events_reach_subscribers() -> None:
+    async def scenario() -> None:
+        log = RunLog()
+        log.open("s1", "r1")
+        channel = log.channel("s1", "r1")
+        channel.publish("domain.coding.file_read", {"path": "a.py"})
+        channel.publish("domain.Coding.bad")
+        log.seal("s1", "r1")
+
+        items = await _collect(log, "s1", "r1")
+        assert [(item.event, item.data) for item in items] == [("domain.coding.file_read", {"path": "a.py"})]
+
+    asyncio.run(scenario())

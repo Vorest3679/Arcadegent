@@ -219,6 +219,7 @@ def _build_client_with_rows(
     *,
     session_store: SessionStateRepository | None = None,
     cache_path: Path | None = None,
+    chat_clock: Callable[[], float] | None = None,
 ) -> TestClient:
     data_path = tmp_path / "shops_custom.jsonl"
     empty_mcp_dir = tmp_path / "mcp_empty"
@@ -253,6 +254,8 @@ def _build_client_with_rows(
     try:
         client = TestClient(create_app())
         client.app.state.container.session_store = store  # type: ignore[attr-defined]
+        if chat_clock is not None:
+            client.app.state.container.chat_rate_limiter = ChatRateLimiter(clock=chat_clock)
         client.__enter__()
     finally:
         container_module._build_session_repository = original_build_session_repository

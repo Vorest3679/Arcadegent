@@ -2,38 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 from ipaddress import ip_address
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
 from pydantic import StringConstraints
 
-from app.agent.runtime.session_state import (
-    AgentSessionState,
-    AgentTurn,
-    SessionOwnershipError,
-    get_working_memory_artifact,
-)
+from app.agent.runtime.session_state import AgentSessionState, SessionOwnershipError
 from app.api.deps import get_container
 from app.core.container import AppContainer
 from app.infra.observability.logger import get_logger, log_ref
 from app.protocol.messages import (
-    ChatHistoryTurnDto,
     ChatRequest,
     ChatRunDto,
     ChatResponse,
-    ChatSessionDispatchDto,
     ChatSessionDetailDto,
+    ChatSessionDispatchDto,
     ChatSessionSummaryDto,
-    ChatTextStepDto,
-    ChatToolStepDto,
-    ChatTurnMapArtifactsDto,
-    ChatTurnStepDto,
-    ClientLocationContext,
-    IntentType,
 )
-from app.services.chat_session_summary import visible_turns as _visible_turns
 from app.services.chat_rate_limit import ChatRateLimitExceeded
+from app.services.chat_session_detail import normalize_intent
 from app.session.models import (
     RunConflictError,
     RunNotFoundError,
@@ -98,160 +87,11 @@ def _current_run(session_id: str, *, container: AppContainer) -> ChatRunDto | No
     return ChatRunDto(run_id=record.run_id, status=record.status)
 
 
-def _normalize_intent(raw: str) -> IntentType:
-    if raw == "navigate":
-        return "navigate"
-    if raw == "search_nearby":
-        return "search_nearby"
-    return "search"
-
-
-def _to_step(turn: AgentTurn) -> ChatTurnStepDto | None:
-    """Project stored turn into a UI step, or None when it is not part of the round's story.
-
-    Only names, status and the main agent's own text leave the server; model
-    evidence (transcript, usage), tool arguments and tool results stay private.
-    """
-    if turn.role == "tool":
-        if not turn.name:
-            return None
-        status = "completed" if turn.payload.get("status") == "completed" else "failed"
-        return ChatToolStepDto(
-            call_id=turn.call_id, name=turn.name, agent=turn.agent, status=status, created_at=turn.created_at
-        )
-    model = turn.payload.get("model")
-    if turn.role == "assistant" and turn.scope == "conversation" and isinstance(model, dict):
-        text = turn.content.strip()
-        # A call without tool calls is the final reply, which is shown as the assistant turn itself.
-        if text and model.get("tool_calls"):
-            return ChatTextStepDto(agent=turn.agent, content=text, created_at=turn.created_at)
-    return None
-
-
-def _round_steps(turns: list[AgentTurn]) -> list[list[ChatTurnStepDto]]:
-    """Steps of every round, one list per user turn in order (a round ends at the next user turn)."""
-    rounds: list[list[ChatTurnStepDto]] = []
-    for turn in turns:
-        if turn.role == "user":
-            rounds.append([])
-            continue
-        step = _to_step(turn)
-        if step is not None and rounds:
-            rounds[-1].append(step)
-    return rounds
-
-
-def _turn_map_artifacts(turn: AgentTurn, *, container: AppContainer) -> ChatTurnMapArtifactsDto | None:
-    raw = turn.payload.get("map_artifacts") if isinstance(turn.payload, dict) else None
-    if not isinstance(raw, dict):
-        return None
-    shop_rows = raw.get("shops")
-    shops = container.arcade_payload_mapper.summaries_from_rows(
-        [item for item in shop_rows if isinstance(item, dict)] if isinstance(shop_rows, list) else []
-    )
-    destination_raw = raw.get("destination")
-    destination = (
-        container.arcade_payload_mapper.summary_from_row(destination_raw)
-        if isinstance(destination_raw, dict)
-        else None
-    )
-    route = container.arcade_payload_mapper.route_from_payload(raw.get("route"))
-    client_location = container.arcade_payload_mapper.client_location_from_payload(raw.get("client_location"))
-    view_payload = raw.get("view_payload") if isinstance(raw.get("view_payload"), dict) else None
-    if not (shops or destination or route or view_payload):
-        return None
-    return ChatTurnMapArtifactsDto(
-        shops=shops,
-        route=route,
-        client_location=client_location,
-        destination=destination,
-        view_payload=view_payload,
-    )
-
-
-def _to_turn(
-    turn: AgentTurn, *, container: AppContainer, steps: list[ChatTurnStepDto] | None = None
-) -> ChatHistoryTurnDto:
-    return ChatHistoryTurnDto(
-        role=turn.role,
-        content=turn.content,
-        name=turn.name,
-        call_id=turn.call_id,
-        map_artifacts=_turn_map_artifacts(turn, container=container),
-        steps=steps or [],
-        created_at=turn.created_at,
-    )
-
-
-def _state_shop_rows(state: AgentSessionState) -> list[dict]:
-    shops_raw: list[dict] = []
-    memory_shops = get_working_memory_artifact(state.working_memory, "shops")
-    if isinstance(memory_shops, list):
-        shops_raw.extend(item for item in memory_shops if isinstance(item, dict))
-    memory_shop = get_working_memory_artifact(state.working_memory, "shop")
-    if isinstance(memory_shop, dict):
-        source_id = memory_shop.get("source_id")
-        exists = any(item.get("source_id") == source_id for item in shops_raw)
-        if not exists:
-            shops_raw.append(memory_shop)
-    return shops_raw[:20]
-
-
-def _state_client_location(state: AgentSessionState) -> ClientLocationContext | None:
-    memory_location = get_working_memory_artifact(state.working_memory, "client_location")
-    if not isinstance(memory_location, dict):
-        return None
-    try:
-        return ClientLocationContext.model_validate(memory_location)
-    except Exception:
-        return None
-
-
-def _history_turns(
-    state: AgentSessionState, visible_turns: list[AgentTurn], *, container: AppContainer
-) -> list[ChatHistoryTurnDto]:
-    # Every user turn is visible, so visible user turns line up with the rounds.
-    rounds = iter(_round_steps(state.turns))
-    return [
-        _to_turn(turn, container=container, steps=next(rounds, []) if turn.role == "user" else None)
-        for turn in visible_turns
-    ]
-
-
 def _to_detail(state: AgentSessionState, *, container: AppContainer) -> ChatSessionDetailDto:
-    visible_turns = _visible_turns(state.turns)
-    raw_shops = _state_shop_rows(state)
-    shops = container.arcade_payload_mapper.summaries_from_rows(raw_shops)
-    route = container.arcade_payload_mapper.route_from_payload(
-        get_working_memory_artifact(state.working_memory, "route")
-    )
-    destination_raw = get_working_memory_artifact(state.working_memory, "destination")
-    if not isinstance(destination_raw, dict) and route is not None:
-        destination_raw = raw_shops[0] if raw_shops else None
-    destination = (
-        container.arcade_payload_mapper.summary_from_row(destination_raw)
-        if isinstance(destination_raw, dict)
-        else None
-    )
-    return ChatSessionDetailDto(
-        session_id=state.session_id,
-        intent=_normalize_intent(state.intent),
-        active_subagent=state.active_subagent,
+    return container.chat_session_detail.project(
+        state,
         status=_live_status(state.session_id, state.status, container=container),
         current_run=_current_run(state.session_id, container=container),
-        last_error=state.last_error,
-        reply=state.working_memory.get("reply") if isinstance(state.working_memory.get("reply"), str) else None,
-        shops=shops,
-        route=route,
-        client_location=_state_client_location(state),
-        destination=destination,
-        view_payload=get_working_memory_artifact(state.working_memory, "view_payload")
-        if isinstance(get_working_memory_artifact(state.working_memory, "view_payload"), dict)
-        else None,
-        turn_count=len(visible_turns),
-        created_at=state.created_at,
-        updated_at=state.updated_at,
-        turns=_history_turns(state, visible_turns, container=container),
     )
 
 
@@ -323,7 +163,8 @@ async def cancel_chat_session(
     except SessionError as exc:
         raise _http_error(exc) from exc
     updated = container.session_store.get_session(session_id, client_id=client_id)
-    return _to_detail(updated or session, container=container)
+    # The DTO mapping may geocode rows; keep it off the event loop.
+    return await asyncio.to_thread(_to_detail, updated or session, container=container)
 
 
 @router.get("/chat/sessions", response_model=list[ChatSessionSummaryDto])
@@ -340,7 +181,7 @@ def list_chat_sessions(
             continue
         summaries.append(
             ChatSessionSummaryDto.model_validate(
-                {**record.model_dump(), "intent": _normalize_intent(record.intent), "status": status}
+                {**record.model_dump(), "intent": normalize_intent(record.intent), "status": status}
             )
         )
     return summaries

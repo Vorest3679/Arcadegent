@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.agent.artifacts.model import Artifact
+
 MCP_TOOL_PREFIX = "mcp__"
 MCP_TOOL_WILDCARD = "mcp__*"
 
@@ -59,3 +61,4 @@ class MCPExecutionResult:
     status: str
     output: dict[str, Any]
     error_message: str | None = None
+    artifacts: tuple[Artifact, ...] = ()

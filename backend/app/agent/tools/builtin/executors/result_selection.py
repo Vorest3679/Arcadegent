@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.agent.artifacts.model import Artifact
+from app.agent.tools.base import ToolOutcome
 from app.agent.tools.builtin.provider import BuiltinToolContext
 
 
@@ -39,10 +41,18 @@ def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, 
     return args, ["selected_shops"]
 
 
-def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    """Return prepared rows; runtime owns their memory lifecycle."""
+def execute(context: BuiltinToolContext, args: dict[str, Any]) -> ToolOutcome:
+    """Return prepared rows and declare them as the displayed selection.
+
+    ``selected_shops`` is authoritative even when empty: an explicit empty list
+    means the user asked to show nothing, not "fall back to candidates".
+    """
     _ = context
-    return {
-        "selected_shop_ids": list(args["selected_shop_ids"]),
-        "shops": list(args["selected_shops"]),
-    }
+    shops = list(args["selected_shops"])
+    return ToolOutcome(
+        output={
+            "selected_shop_ids": list(args["selected_shop_ids"]),
+            "shops": shops,
+        },
+        artifacts=(Artifact("selected_shops", shops, display=True, scope="session"),),
+    )

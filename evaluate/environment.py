@@ -164,6 +164,6 @@ def environment(config, model, budget, directory, attempt_id, write, session_id)
         api_key="", base_url="https://fixture.invalid", cache_path=directory / "geo-cache.json",
         request_timeout_seconds=1, sync_limit=0, max_workers=1)))
     container.arcade_payload_mapper = mapper
-    container.react_runtime._arcade_payload_mapper = mapper
+    container.react_runtime._domain.payload_mapper = mapper
     events = RecordedEvents(write, attempt_id, session_id, config.max_tools)
     return container, provider, events

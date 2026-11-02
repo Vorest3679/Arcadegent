@@ -2,29 +2,27 @@
 
 The runtime only sees these: a run-bound publisher, the run context and the
 executor/terminal-hook signatures. It never touches the run registry or the
-run log directly.
+run log directly. ``RunPublisher`` and ``NullPublisher`` are defined by the
+agent kernel (``app.agent.runtime.events``) and re-exported here.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any
 
+from app.agent.runtime.events import NullPublisher, RunPublisher
 from app.session.models import RunRecord
 
-
-class RunPublisher(Protocol):
-    """Run-bound publishing port; must not interpret business payloads."""
-
-    def publish(
-        self,
-        event: str,
-        data: dict[str, Any] | None = None,
-        *,
-        output_id: str | None = None,
-    ) -> None:
-        """Append one business event to the run's log; dropped once the run is sealed."""
+__all__ = [
+    "CollectingPublisher",
+    "NullPublisher",
+    "RunContext",
+    "RunExecutor",
+    "RunPublisher",
+    "TerminalHook",
+]
 
 
 @dataclass(frozen=True)
@@ -43,19 +41,6 @@ RunExecutor = Callable[[RunContext], Awaitable[Any]]
 #: the log is sealed, so the application can persist business state and publish
 #: its own closing business event.
 TerminalHook = Callable[[RunRecord, RunPublisher], Awaitable[None]]
-
-
-class NullPublisher:
-    """Publisher that drops everything; used when nobody observes a run."""
-
-    def publish(
-        self,
-        event: str,
-        data: dict[str, Any] | None = None,
-        *,
-        output_id: str | None = None,
-    ) -> None:
-        return None
 
 
 @dataclass

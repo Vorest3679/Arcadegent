@@ -10,9 +10,14 @@ import importlib
 import inspect
 import os
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping, cast
 
-from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
+from app.agent.tools.base import (
+    ExecutionMode,
+    ProviderExecutionResult,
+    ToolDescriptor,
+    ToolOutcome,
+)
 from app.agent.tools.schemas import build_json_schema_validator, load_json_schema
 
 _DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -57,7 +62,7 @@ class BuiltinToolContext:
 
 BuiltinToolExecutor = Callable[
     [BuiltinToolContext, dict[str, Any]],
-    dict[str, Any] | Awaitable[dict[str, Any]],
+    dict[str, Any] | ToolOutcome | Awaitable[dict[str, Any] | ToolOutcome],
 ]
 BuiltinToolArgumentPreparer = Callable[
     [dict[str, Any], dict[str, Any]],
@@ -137,10 +142,18 @@ class BuiltinToolProvider:
             raise ValueError(f"unknown_tool:{tool_name}")
         payload = validated_arguments if isinstance(validated_arguments, dict) else raw_arguments
         if inspect.iscoroutinefunction(binding.executor):
-            output = await binding.executor(self._context, payload)
+            raw_output = await binding.executor(self._context, payload)
         else:
-            output = await asyncio.to_thread(binding.executor, self._context, payload)
-        return ProviderExecutionResult(status="completed", output=output)
+            raw_output = await asyncio.to_thread(binding.executor, self._context, payload)
+        if isinstance(raw_output, ToolOutcome):
+            return ProviderExecutionResult(
+                status="completed",
+                output=raw_output.output,
+                artifacts=raw_output.artifacts,
+            )
+        if not isinstance(raw_output, dict):
+            raise ValueError(f"invalid_builtin_tool_output:{tool_name}")
+        return ProviderExecutionResult(status="completed", output=raw_output)
 
     def prepare_arguments(
         self,
@@ -191,6 +204,7 @@ class BuiltinToolProvider:
                 for value in item.get("capabilities", [])
                 if isinstance(value, str) and value.strip()
             )
+            execution_mode = self._read_execution_mode(item, tool_path=tool_path)
             if not name or not description or not executor_import or not isinstance(input_schema, dict):
                 raise ValueError(f"invalid_builtin_tool_definition:{tool_path}")
             if name in bindings:
@@ -208,6 +222,7 @@ class BuiltinToolProvider:
                     input_schema=input_schema,
                     validator=build_json_schema_validator(input_schema, source=str(tool_path)),
                     capabilities=capabilities,
+                    execution_mode=execution_mode,
                     metadata=metadata if isinstance(metadata, dict) else {},
                 ),
                 executor=executor,
@@ -224,6 +239,14 @@ class BuiltinToolProvider:
         if not callable(preparer):
             raise ValueError(f"invalid_builtin_tool_argument_preparer:{import_path}")
         return preparer
+
+    def _read_execution_mode(self, item: dict[str, Any], *, tool_path: Path) -> ExecutionMode:
+        """Declared concurrency mode; missing means the safe ``exclusive`` default."""
+        raw = item.get("execution_mode", "exclusive")
+        value = raw.strip().lower() if isinstance(raw, str) else ""
+        if value not in {"exclusive", "parallel"}:
+            raise ValueError(f"invalid_builtin_tool_execution_mode:{tool_path}")
+        return cast(ExecutionMode, value)
 
     def _parse_manifest(
         self,

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.context_builder import ContextBuilder
 from app.agent.skills.config import load_skill_config
 from app.agent.skills.registry import SkillRegistry
@@ -18,6 +19,7 @@ from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.mcp_gateway import MCPToolGateway, build_mcp_server_configs
 from app.agent.tools.registry import ToolRegistry
 from app.core.config import Settings
+from app.domain.arcade.domain import ArcadeTurnDomain
 from app.infra.db.local import LocalArcadeStore
 from app.infra.db.online import SupabaseArcadeRepository, SupabaseRepositoryConfig, build_supabase_session_repository
 from app.infra.db.protocols import ArcadeRepository, SessionStateRepository
@@ -25,6 +27,7 @@ from app.services.arcade_geo_resolver import ArcadeGeoResolver, ArcadeGeoResolve
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
 from app.services.amap_reverse_geocoder import AMapReverseGeocoder, AMapReverseGeocoderConfig
 from app.services.chat_run_service import ChatRunService
+from app.services.chat_session_detail import ChatSessionDetailService
 from app.services.chat_rate_limit import ChatRateLimiter
 from app.session.run_log import RunLog
 from app.session.runs import RunManager
@@ -42,6 +45,7 @@ class AppContainer:
     reverse_geocoder: AMapReverseGeocoder
     arcade_geo_resolver: ArcadeGeoResolver
     arcade_payload_mapper: ArcadePayloadMapper
+    chat_session_detail: ChatSessionDetailService
     tool_registry: ToolRegistry
     skill_registry: SkillRegistry
     react_runtime: ReactRuntime
@@ -117,15 +121,25 @@ def build_container(
         strict_schema=True,
     )
     session_store = session_store if session_store is not None else _build_session_repository(settings)
+    artifact_sink = ArtifactSink()
+    arcade_domain = ArcadeTurnDomain(
+        payload_mapper=arcade_payload_mapper,
+        artifact_sink=artifact_sink,
+    )
     react_runtime = ReactRuntime(
         context_builder=context_builder,
         subagent_builder=subagent_builder,
         tool_registry=tool_registry,
         provider_adapter=provider_adapter,
         session_store=session_store,
-        arcade_payload_mapper=arcade_payload_mapper,
         max_steps=settings.agent_max_steps,
         skill_registry=skill_registry,
+        domain=arcade_domain,
+        artifacts=artifact_sink,
+    )
+    chat_session_detail = ChatSessionDetailService(
+        display_source=arcade_domain,
+        payload_mapper=arcade_payload_mapper,
     )
     chat_runs = ChatRunService(
         runtime=react_runtime,
@@ -141,6 +155,7 @@ def build_container(
         reverse_geocoder=reverse_geocoder,
         arcade_geo_resolver=arcade_geo_resolver,
         arcade_payload_mapper=arcade_payload_mapper,
+        chat_session_detail=chat_session_detail,
         tool_registry=tool_registry,
         skill_registry=skill_registry,
         react_runtime=react_runtime,

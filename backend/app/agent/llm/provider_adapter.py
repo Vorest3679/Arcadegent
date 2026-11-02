@@ -111,7 +111,10 @@ class ProviderAdapter:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         runtime_hints: dict[str, Any] | None = None,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> ModelResponse:
+        # model / reasoning_effort are accepted for AgentNode overrides but not yet mapped to the request.
         if self._config.stream:
             return await collect_stream(self._stream_events(
                 instructions=instructions, messages=messages, tools=tools, runtime_hints=runtime_hints))
@@ -144,6 +147,8 @@ class ProviderAdapter:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         runtime_hints: dict[str, Any] | None = None,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Yield normalized deltas, then one StreamDone with the collected response.
 
@@ -300,6 +305,7 @@ class ProviderAdapter:
         tool_choice: str,
         stream: bool = False,
     ) -> tuple[str, dict[str, Any]]:
+        """构建http请求所需要的endpoint跟payload（response模式）"""
         endpoint = self._config.base_url.rstrip("/") + "/responses"
         payload: dict[str, Any] = {
             "model": self._config.model,
@@ -433,6 +439,7 @@ class ProviderAdapter:
         tool_choice: str,
         stream: bool = False,
     ) -> tuple[str, dict[str, Any]]:
+        """构建http请求所需要的endpoint跟payload（completion模式）"""
         endpoint = self._config.base_url.rstrip("/") + "/chat/completions"
         raw_tool_messages = sum(
             1

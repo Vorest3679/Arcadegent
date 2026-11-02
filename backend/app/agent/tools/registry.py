@@ -9,7 +9,8 @@ from typing import Any
 from pydantic import ValidationError
 from pydantic_core import ErrorDetails
 
-from app.agent.tools.base import ToolDescriptor, ToolInputValidationError, ToolProvider
+from app.agent.artifacts.model import Artifact
+from app.agent.tools.base import ExecutionMode, ToolDescriptor, ToolInputValidationError, ToolProvider
 from app.agent.tools.builtin.provider import BuiltinToolProvider
 from app.agent.tools.mcp_gateway import MCPToolGateway
 from app.agent.tools.permission import ToolPermissionChecker, ToolPermissionError
@@ -53,6 +54,8 @@ class ToolExecutionResult:
     status: str
     output: dict[str, Any]
     error_message: str | None = None
+    capabilities: tuple[str, ...] = ()
+    artifacts: tuple[Artifact, ...] = ()
 
 
 class ToolRegistry:
@@ -120,6 +123,32 @@ class ToolRegistry:
             if provider.provider_name == "mcp":
                 await provider.refresh()
 
+    async def execution_mode(self, tool_name: str) -> ExecutionMode:
+        """Concurrency mode declared by the tool descriptor.
+
+        Unknown tools stay ``exclusive``: a missing descriptor must never turn
+        into an unsafe parallel execution. The supervisor reads the batch's
+        modes once through :meth:`execution_modes`.
+        """
+        return (await self.execution_modes([tool_name]))[tool_name]
+
+    async def execution_modes(self, tool_names: list[str] | tuple[str, ...]) -> dict[str, ExecutionMode]:
+        """Declared concurrency modes for one batch, in one descriptor pass.
+
+        Unknown tools are reported as ``exclusive``. This is the batch API the
+        supervisor uses so a model step does not re-collect descriptors per
+        call.
+        """
+        tools, _ = await self._collect_tools()
+        modes: dict[str, ExecutionMode] = {}
+        for name in tool_names:
+            if name in modes:
+                continue
+            descriptor = tools.get(name)
+            modes[name] = descriptor.execution_mode if descriptor is not None else "exclusive"
+            # 未知的按照 exclusive 处理，避免并行执行；已知的按照 descriptor 中的 execution_mode 处理
+        return modes
+
     def provider_health(self) -> dict[str, Any]:
         return {
             provider.provider_name: provider.health()
@@ -168,6 +197,8 @@ class ToolRegistry:
                 status=result.status,
                 output=result.output,
                 error_message=result.error_message,
+                capabilities=descriptor.capabilities,
+                artifacts=result.artifacts,
             )
         except ToolPermissionError as exc:
             return self._failed(

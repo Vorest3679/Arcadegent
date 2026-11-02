@@ -78,6 +78,23 @@ def ensure_working_memory_shape(memory: dict[str, Any] | None) -> dict[str, Any]
     return normalized
 
 
+# Working-memory keys owned by the kernel. Lifecycle hooks may write any other
+# key (domain memory) but never these.
+KERNEL_MEMORY_KEYS: tuple[str, ...] = ("reply", "last_error", "usage_totals", "worker_runs")
+
+
+def reset_turn_scratch(memory: dict[str, Any] | None) -> dict[str, Any]:
+    """Clear kernel-owned per-turn keys before a new turn starts.
+
+    ``reply`` ends the turn once a concluding tool sets it and ``last_error``
+    marks the latest tool failure, so neither may leak into the next turn.
+    """
+    normalized = ensure_working_memory_shape(memory)
+    normalized.pop("reply", None)
+    normalized.pop("last_error", None)
+    return normalized
+
+
 def get_working_memory_artifact(memory: dict[str, Any] | None, key: str) -> Any:
     normalized = ensure_working_memory_shape(memory)
     artifacts = normalized["artifacts"]
@@ -92,7 +109,22 @@ def set_working_memory_artifact(
     value: Any,
     *,
     turn_index: int | None = None,
+    display: bool | None = None,
+    scope: str | None = None,
+    promote: bool | None = None,
+    status: str | None = None,
+    invalidates: tuple[str, ...] | None = None,
+    source_run_id: str | None = None,
 ) -> None:
+    """Write one artifact and, when a turn is given, its display metadata.
+
+    ``display``/``scope``/``promote``/``invalidates`` are optional so direct
+    domain writes keep the flags an earlier :class:`ArtifactSink` application
+    recorded. Passing ``status=None`` clears a previous ``partial`` mark;
+    workers set it when promotion happens before they fail. ``source_run_id``
+    records which worker run promoted the value; a parent-produced write passes
+    ``None`` (the default) and clears a previous promotion origin.
+    """
     normalized = ensure_working_memory_shape(memory)
     normalized["artifacts"][key] = deepcopy(value)
     if turn_index is not None:
@@ -100,7 +132,30 @@ def set_working_memory_artifact(
         if not isinstance(meta, dict):
             meta = {}
             normalized["artifact_meta"] = meta
-        meta[key] = {"turn_index": turn_index, "updated_at": _utc_now_iso()}
+        previous = meta.get(key) if isinstance(meta.get(key), dict) else {}
+        entry = dict(previous)
+        entry["turn_index"] = turn_index
+        entry["updated_at"] = _utc_now_iso()
+        if display is not None:
+            entry["display"] = display
+        if scope is not None:
+            entry["scope"] = scope
+        if promote is not None:
+            entry["promote"] = promote
+        if status is None:
+            entry.pop("status", None)
+        else:
+            entry["status"] = status
+        if invalidates is not None:
+            if invalidates:
+                entry["invalidates"] = list(invalidates)
+            else:
+                entry.pop("invalidates", None)
+        if source_run_id is None:
+            entry.pop("source_run_id", None)
+        else:
+            entry["source_run_id"] = source_run_id
+        meta[key] = entry
 
 
 def append_worker_run(memory: dict[str, Any] | None, run: dict[str, Any], *, max_entries: int = 20) -> None:

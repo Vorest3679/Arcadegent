@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Protocol
 
+from app.agent.runtime.ports import SessionStore
 from app.agent.runtime.session_state import AgentSessionState
 from app.protocol.session_dto import ChatSessionSummaryRecord
 
@@ -57,15 +58,15 @@ class ArcadeRepository(Protocol):
         ...
 
 
-class SessionStateRepository(Protocol):
-    """Persistence contract for the ReAct runtime's session store."""
+class SessionStateRepository(SessionStore, Protocol):
+    """Persistence contract of the session store.
+
+    Extends the kernel's ``SessionStore`` port (``get_or_create_session`` and
+    ``save_session``) with the reads the HTTP API and history list need.
+    """
 
     def health(self) -> dict[str, Any]:
         """Return diagnostics for the active repository backend."""
-        ...
-
-    def get_or_create_session(self, session_id: str) -> AgentSessionState:
-        """Fetch an existing session or return a fresh, unpersisted one."""
         ...
 
     def get_session(self, session_id: str, *, client_id: str | None = None) -> AgentSessionState | None:
@@ -97,8 +98,4 @@ class SessionStateRepository(Protocol):
 
     def delete_session(self, session_id: str, *, client_id: str | None = None) -> bool:
         """Delete one session by id; return True when it existed."""
-        ...
-
-    def save_session(self, state: AgentSessionState) -> None:
-        """Persist one mutated session state."""
         ...
