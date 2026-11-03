@@ -1,4 +1,4 @@
-import type { ChatHistoryTurn, ChatMapArtifacts, ChatStreamEnvelope, RouteSummary } from "../../types";
+import type { ArcadeSummary, ChatHistoryTurn, ChatMapArtifacts, ChatStreamEnvelope, RouteSummary } from "../../types";
 
 const SUBAGENT_LABEL: Record<string, string> = {
   intent_router: "意图路由",
@@ -112,6 +112,26 @@ export function mapArtifactsForEvent(
       destination: previous?.destination ?? null,
       view_payload: { version: 1, scene: "agent_route" },
       route_pending: true
+    };
+  }
+  if (event === "domain.arcade.results_ready") {
+    const shops = Array.isArray(data.shops)
+      ? (data.shops.filter((shop) => typeof shop === "object" && shop !== null) as ArcadeSummary[])
+      : [];
+    if (shops.length === 0) {
+      return undefined;
+    }
+    // A route already planned in this round stays; the candidates come along.
+    if (previous?.route || previous?.route_pending) {
+      return { ...previous, shops };
+    }
+    return {
+      shops,
+      route: null,
+      client_location: previous?.client_location ?? null,
+      destination: null,
+      view_payload: { version: 1, scene: "agent_candidates" },
+      route_pending: false
     };
   }
   if (event === "navigation.route_ready") {

@@ -26,21 +26,27 @@ class ArcadePayloadMapper:
         *,
         sync_limit: int | None = None,
         max_workers: int | None = None,
+        geocode: bool = True,
     ) -> list[ArcadeShopSummaryDto]:
+        """``geocode=False`` uses catalog and cached coordinates only: no request is made."""
         geo_by_source_id = self._geo_resolver.resolve_many(
             rows,
-            sync_limit=sync_limit,
+            sync_limit=sync_limit if geocode else 0,
             max_workers=max_workers,
         )
-        return [self.summary_from_row(row, geo=geo_by_source_id.get(self._source_id(row) or -1)) for row in rows]
+        return [
+            self.summary_from_row(row, geo=geo_by_source_id.get(self._source_id(row) or -1), geocode=geocode)
+            for row in rows
+        ]
 
     def summary_from_row(
         self,
         row: Mapping[str, Any],
         *,
         geo: ArcadeGeoDto | None = None,
+        geocode: bool = True,
     ) -> ArcadeShopSummaryDto:
-        resolved_geo = geo if geo is not None else self._geo_resolver.resolve_one(row)
+        resolved_geo = geo if geo is not None or not geocode else self._geo_resolver.resolve_one(row)
         return ArcadeShopSummaryDto(
             source=str(row.get("source") or ""),
             source_id=int(row.get("source_id") or 0),

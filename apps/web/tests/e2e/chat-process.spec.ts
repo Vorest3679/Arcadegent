@@ -3,8 +3,10 @@ import {
   CHAT_INPUT,
   clickDeleteSession,
   DEFAULT_REPLY,
+  CHAT_SHOPS,
   eventFrame,
   feedItems,
+  finalReply,
   installAmapMock,
   installChatApiMocks,
   installStreamMock,
@@ -105,25 +107,25 @@ test("cancelling the run marks the running tool as cancelled", async ({ page }) 
   await expect(toolRows(page).getByRole("img", { name: "已取消" })).toBeVisible();
 });
 
-test("a map arrives as a card in the feed and opens in the map panel", async ({ page }) => {
+test("a planned route shows its map thumbnail before the run ends", async ({ page }) => {
   await installAmapMock(page);
-  // Hold the completion frame: the run stays open while we assert the compact card.
-  await installStreamMock(page, [routeRunScript({ routeAt: 300, doneAt: 600, holdDone: "done" })]);
+  await installStreamMock(page, [routeRunScript({ routeAt: 1200, doneAt: 2600 })]);
   await installChatApiMocks(page, { detailDelayMs: 600 });
 
   await sendChat(page);
   const card = mapCards(page);
-  // The card sits in the feed, right where the navigation run started.
-  await expect(card).toHaveCount(1);
-  await expect(card).toHaveAccessibleName(/查看地图：路线/);
+  // While the route is being planned the card is one compact line.
+  await expect(card).toHaveAccessibleName(/查看地图：路线规划中/);
+  expect(await page.getByTestId("map-preview").count()).toBe(0);
   await expect(page.getByTestId("agent-route-card")).toHaveCount(0);
-  // Compact while the run works; a map thumbnail once it ended.
-  await expect(page.getByTestId("map-preview")).toHaveCount(0);
 
-  await releaseStreamFrame(page, "done");
+  // The route arrived: the thumbnail is drawn while the run still works.
+  await expect(page.getByTestId("map-preview")).toBeVisible();
+  await expect(card).toHaveAccessibleName(/查看地图：路线 1.3 公里/);
+  expect(await finalReply(page).count()).toBe(0);
+
   await waitForHandOver(page);
   await expect(card).toHaveCount(1);
-  await expect(page.getByTestId("map-preview")).toBeVisible();
   await expect(page.getByTestId("map-preview").locator("[data-mock-amap-root]")).toHaveCount(1);
   await openMapPanel(page);
   await expect(page.getByTestId("agent-route-card")).toHaveCount(1);
@@ -132,6 +134,32 @@ test("a map arrives as a card in the feed and opens in the map panel", async ({ 
   await page.getByTestId("map-panel").getByRole("button", { name: "关闭" }).click();
   await expect(page.getByTestId("map-panel")).toHaveCount(0);
   await expect(page.getByTestId("agent-route-card")).toHaveCount(0);
+});
+
+test("selected shops draw the candidate map before the final reply", async ({ page }) => {
+  await installAmapMock(page);
+  await installStreamMock(page, [[
+    runStateFrame(10, 1, "running"),
+    eventFrame(20, 2, "tool.started", { tool: "result_selection_tool", call_id: "s1", active_subagent: "search_worker" }),
+    eventFrame(40, 3, "domain.arcade.results_ready", { shops: [CHAT_SHOPS[0], CHAT_SHOPS[2]] }),
+    eventFrame(50, 4, "tool.completed", { tool: "result_selection_tool", call_id: "s1", active_subagent: "search_worker" }),
+    eventFrame(2500, 5, "assistant.completed", { reply: DEFAULT_REPLY }),
+    runStateFrame(2500, 6, "completed")
+  ]]);
+  await installChatApiMocks(page, { detailDelayMs: 600 });
+
+  await sendChat(page);
+  // Long before the reply and the session detail, the candidates are on the map.
+  const preview = page.getByTestId("map-preview");
+  await expect(preview).toBeVisible();
+  await expect(mapCards(page)).toHaveAccessibleName(/2 家机厅/);
+  await expect(preview.locator(".mock-amap-marker")).toHaveCount(2);
+  expect(await finalReply(page).count()).toBe(0);
+
+  // The hand-over swaps in the detail's map without remounting the thumbnail.
+  await preview.evaluate((node) => node.setAttribute("data-marker", "same-node"));
+  await waitForHandOver(page);
+  await expect(page.getByTestId("map-preview")).toHaveAttribute("data-marker", "same-node");
 });
 
 test("the map panel is a side panel on desktop and a bottom drawer on phones", async ({ page, isMobile }) => {

@@ -34,6 +34,8 @@ Payloads read by the web client:
 - `tool.failed`: as above plus `error`.
 - `navigation.route_ready`: the route summary (`provider`, `mode`,
   `distance_m`, `duration_s`, `origin`, `destination`, `polyline`, `hint`).
+- `domain.arcade.results_ready`: `shops`, the shop summaries committed by
+  `result_selection_tool` (at most 20, catalog/cached coordinates only).
 - `assistant.token`: `delta` (appended per `output_id`), `active_subagent`,
   `stream_mode`; carries `output_id` on the envelope.
 - `assistant.completed`: `reply`, `active_subagent`, `reply_source`,

@@ -122,6 +122,25 @@ test("route events upsert one map item per round", () => {
   expect(maps[0]).toMatchObject({ key: "r0:map", artifacts: { route: { distance_m: 1200 }, route_pending: true } });
 });
 
+test("selected shops fill the round's map before the run ends", () => {
+  const shop = { source: "bemanicn", source_id: 7, source_url: "u", name: "Arcade Seven", arcade_count: 1 };
+  let feed = appendUser(EMPTY_FEED, "q", "t0");
+  feed = applyRunEvent(feed, envelope(1, "domain.arcade.results_ready", { shops: [shop, "junk"] }));
+  const [map] = feed.items.filter((item) => item.kind === "map");
+  expect(map).toMatchObject({ key: "r0:map", artifacts: { shops: [shop], route: null, route_pending: false } });
+  expect(map.kind === "map" && map.artifacts.view_payload).toMatchObject({ scene: "agent_candidates" });
+  // An empty selection draws nothing.
+  expect(applyRunEvent(appendUser(EMPTY_FEED, "q", "t0"), envelope(2, "domain.arcade.results_ready", { shops: [] })).items)
+    .toHaveLength(1);
+
+  // A route planned in the same round keeps its scene; the candidates come along.
+  let routed = appendUser(EMPTY_FEED, "q", "t0");
+  routed = applyRunEvent(routed, envelope(3, "navigation.route_ready", { provider: "amap", mode: "walking", polyline: [] }));
+  routed = applyRunEvent(routed, envelope(4, "domain.arcade.results_ready", { shops: [shop] }));
+  const routeMap = routed.items.find((item) => item.kind === "map");
+  expect(routeMap).toMatchObject({ artifacts: { shops: [shop], route: { mode: "walking" } } });
+});
+
 test("a replayed run starts from the bare user message of the open round", () => {
   const feed = withoutOpenRound(feedFromTurns([
     user("t1"),

@@ -19,6 +19,7 @@ from typing import Any
 from app.agent.artifacts.model import Artifact
 from app.agent.artifacts.sink import ArtifactSink
 from app.agent.runtime.domain_port import ToolResultSignal
+from app.agent.runtime.events import domain_event
 from app.agent.runtime.lifecycle import DomainState
 from app.agent.runtime.session_state import (
     ensure_working_memory_shape,
@@ -28,10 +29,18 @@ from app.agent.runtime.session_state import (
 from app.agent.tools.registry import ToolExecutionResult
 from app.domain.arcade.intent import IntentPolicy
 from app.domain.arcade.worker_results import mark_worker_memory_write
+from app.services.arcade_payload_mapper import ArcadePayloadMapper
 from app.session.events import AppEvent
 
 
 _LEGACY_TURN_KEYS = ("search_candidates", "route", "destination", "view_payload")
+
+# The shops committed by ``result_selection_tool``, published while the run is
+# still going so the web client can draw the candidate map before the final
+# reply. ``data.shops`` holds shop summaries (the session detail's shape).
+RESULTS_READY = domain_event("arcade", "results_ready")
+# Same cap as the session detail's ``shops``.
+_RESULTS_READY_LIMIT = 20
 
 
 def prepare_turn_memory(
@@ -59,17 +68,36 @@ def prepare_turn_memory(
     return prepared
 
 
-def tool_result_signal(result: ToolExecutionResult) -> ToolResultSignal:
-    """Publish the arcade route event and distance field for route outputs."""
-    if result.status != "completed":
+def tool_result_signal(
+    result: ToolExecutionResult,
+    *,
+    payload_mapper: ArcadePayloadMapper | None = None,
+) -> ToolResultSignal:
+    """Publish the arcade route/selection events and the route distance field."""
+    if result.status != "completed" or not isinstance(result.output, dict):
         return ToolResultSignal()
-    route = result.output.get("route") if isinstance(result.output, dict) else None
+    if result.tool_name == "result_selection_tool":
+        return _results_ready_signal(result.output, payload_mapper)
+    route = result.output.get("route")
     if not isinstance(route, dict):
         return ToolResultSignal()
     return ToolResultSignal(
         events=((AppEvent.NAVIGATION_ROUTE_READY, route),),
         completed_fields={"distance_m": route.get("distance_m")},
     )
+
+
+def _results_ready_signal(output: dict[str, Any], payload_mapper: ArcadePayloadMapper | None) -> ToolResultSignal:
+    rows = [row for row in output.get("shops") or [] if isinstance(row, dict)][:_RESULTS_READY_LIMIT]
+    if not rows:
+        return ToolResultSignal()
+    if payload_mapper is None:
+        shops = [deepcopy(row) for row in rows]
+    else:
+        # Catalog and cache coordinates only (no geocoding request): the event
+        # is published inside the run; the session detail fills in the rest.
+        shops = [summary.model_dump(mode="json") for summary in payload_mapper.summaries_from_rows(rows, geocode=False)]
+    return ToolResultSignal(events=((RESULTS_READY, {"shops": shops}),))
 
 
 def artifacts_from_result(

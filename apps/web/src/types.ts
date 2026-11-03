@@ -223,6 +223,8 @@ export const RUN_EVENT_NAMES = [
   "tool.completed",
   "tool.failed",
   "navigation.route_ready",
+  // The arcade domain's selected shops, before the final reply.
+  "domain.arcade.results_ready",
   "assistant.token",
   "assistant.completed",
   "session.failed"

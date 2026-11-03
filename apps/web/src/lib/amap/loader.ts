@@ -24,6 +24,16 @@ export function isAmapConfigured(): boolean {
   return Boolean(key);
 }
 
+// Starts loading the SDK ahead of the first map (e.g. while the agent is still
+// searching), so the map card does not wait for the download. Failures are
+// reported again by the map that needs the SDK.
+export function preloadAmapSdk(): void {
+  if (typeof window === "undefined" || !isAmapConfigured()) {
+    return;
+  }
+  void loadAmapSdk().catch(() => undefined);
+}
+
 export async function loadAmapSdk(): Promise<any | null> {
   const mock = getMockAmap();
   if (mock) {

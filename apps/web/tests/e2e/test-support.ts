@@ -92,6 +92,8 @@ const DETAILS: Record<number, object> = {
   }
 };
 
+export const CHAT_SHOPS = ARCADES;
+
 const CHAT_ROUTE = {
   provider: "amap",
   mode: "walking",

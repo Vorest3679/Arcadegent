@@ -69,7 +69,7 @@ export function ChatFeedList({ runLive, onOpenMap }: { runLive: boolean; onOpenM
     <ol className="flex flex-col gap-3" data-testid="chat-feed">
       {segments.map((segment) => {
         const round = segment.kind === "tools" ? segment.round : segment.item.round;
-        // The round whose stream is still open: tools expanded, map compact.
+        // The round whose stream is still open: its tools stay expanded.
         const liveRound = runOpen && round === lastRound;
         if (segment.kind === "tools") {
           const open = toggled[segment.key] ?? liveRound;
@@ -86,7 +86,7 @@ export function ChatFeedList({ runLive, onOpenMap }: { runLive: boolean; onOpenM
         if (segment.kind === "map") {
           return (
             <li key={segment.key}>
-              <MapArtifactCard item={segment.item} preview={!liveRound} onOpen={onOpenMap} />
+              <MapArtifactCard item={segment.item} onOpen={onOpenMap} />
             </li>
           );
         }

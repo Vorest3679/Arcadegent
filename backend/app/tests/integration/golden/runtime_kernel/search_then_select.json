@@ -201,6 +201,53 @@
         },
         {
           "data": {
+            "shops": [
+              {
+                "address": "Test Address",
+                "arcade_count": 1,
+                "city_code": "110100000000",
+                "city_name": "Beijing",
+                "county_code": "110101000000",
+                "county_name": "Dongcheng",
+                "distance_m": null,
+                "ea_status": null,
+                "end_time": null,
+                "fav_count": null,
+                "geo": {
+                  "gcj02": null,
+                  "precision": "exact",
+                  "source": "catalog",
+                  "wgs84": {
+                    "coord_system": "wgs84",
+                    "lat": 39.90923,
+                    "lng": 116.397428,
+                    "precision": "exact",
+                    "source": "catalog"
+                  }
+                },
+                "locked": null,
+                "name": "Gamma Arcade",
+                "name_pinyin": null,
+                "pay_type": null,
+                "price": null,
+                "province_code": "110000000000",
+                "province_name": "Beijing",
+                "source": "bemanicn",
+                "source_id": 10,
+                "source_url": "https://map.bemanicn.com/s/10",
+                "start_time": null,
+                "status": null,
+                "transport": null,
+                "type": null,
+                "updated_at": "<volatile>"
+              }
+            ]
+          },
+          "event": "domain.arcade.results_ready",
+          "kind": "event"
+        },
+        {
+          "data": {
             "active_subagent": "main_agent",
             "call_id": "sel1",
             "tool": "result_selection_tool",

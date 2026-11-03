@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { buildChatStreamUrl } from "../api/sessionApi";
+import { preloadAmapSdk } from "../lib/amap/loader";
 import { applyOutputText, applyRunEvent, finishRun, sealOutput } from "../lib/chatFeed";
 import { isTerminalRunStatus, openRunStream, type RunStream } from "../lib/sse/runStream";
 import { useChatFeedStore } from "../stores/chatFeedStore";
@@ -10,6 +11,16 @@ import type { ChatStreamEnvelope } from "../types";
 const sessionState = () => useSessionStore.getState();
 const runState = () => useRunStore.getState();
 const feedState = () => useChatFeedStore.getState();
+
+// Tools whose results usually end in a map: the SDK starts loading when they start.
+const MAP_TOOLS = new Set(["db_query_tool", "result_selection_tool", "geo_resolve_tool", "route_plan_tool"]);
+
+function preloadsMap(envelope: ChatStreamEnvelope): boolean {
+  if (envelope.event === "tool.started") {
+    return MAP_TOOLS.has(String(envelope.data.tool));
+  }
+  return envelope.event === "domain.arcade.results_ready" || envelope.event === "navigation.route_ready";
+}
 
 // What the owner of the session does when the followed run ends or is lost.
 export type RunStreamCallbacks = {
@@ -40,6 +51,9 @@ export function useRunStream(clientId: string, callbacks: RunStreamCallbacks) {
 
   function handleRunEvent(sessionId: string, envelope: ChatStreamEnvelope): void {
     runState().setStreamNotice(null);
+    if (preloadsMap(envelope)) {
+      preloadAmapSdk();
+    }
     if (envelope.event === "session.started" || envelope.event === "subagent.changed") {
       const next = envelope.data.to_subagent ?? envelope.data.active_subagent;
       if (typeof next === "string" && next) {

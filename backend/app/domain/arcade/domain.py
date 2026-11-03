@@ -89,7 +89,7 @@ class ArcadeTurnDomain(BaseTurnDomain):
 
     def tool_result_signal(self, *, state: AgentSessionState, result: ToolExecutionResult) -> ToolResultSignal:
         _ = state
-        return observations.tool_result_signal(result)
+        return observations.tool_result_signal(result, payload_mapper=self.payload_mapper)
 
     def artifacts_from_result(
         self,

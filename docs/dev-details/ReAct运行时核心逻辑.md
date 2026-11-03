@@ -246,6 +246,7 @@ domain 进入内核时会被翻译成 core 能理解的概念，但语义由适�
 | 机厅 intent / memory | `ctx.memory["arcade"]`、`runtime_hints` |
 | 店铺/路线产物 | `Artifact` 或命名空间 memory |
 | `navigation.route_ready` | `ToolResultSignal.events`；新领域事件用 `domain.<ns>.<name>` |
+| `domain.arcade.results_ready` | arcade 领域在 `result_selection_tool` 完成时经 `ToolResultSignal.events` 发布，`data.shops` 为选中机厅摘要 |
 | `ArcadePayloadMapper` | domain 构造依赖，不进 core |
 | worker 合法名单 | `AgentNode.spawnable` |
 | `ChatResponse` | presenter 返回的 opaque result |

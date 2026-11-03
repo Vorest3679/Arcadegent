@@ -140,14 +140,11 @@ export function ToolCallRow({ item }: { item: ToolItem }) {
   );
 }
 
-// While the run works the card is one compact line; once it ended (and in
-// history) it also shows a static map thumbnail. The thumbnail only mounts
-// near the viewport, so a long history does not create a map per answer.
-export function MapArtifactCard({ item, preview, onOpen }: {
-  item: MapItem;
-  preview: boolean;
-  onOpen: (key: string) => void;
-}) {
+// A static map thumbnail sits on the card as soon as there is something to
+// draw (candidates or a planned route), even while the run still works; a
+// route being planned shows the compact line only. The thumbnail mounts near
+// the viewport, so a long history does not create a map per answer.
+export function MapArtifactCard({ item, onOpen }: { item: MapItem; onOpen: (key: string) => void }) {
   const { artifacts } = item;
   const ref = useRef<HTMLDivElement | null>(null);
   const inView = useInView(ref);
@@ -155,7 +152,7 @@ export function MapArtifactCard({ item, preview, onOpen }: {
     ? artifacts.view_payload.title.trim()
     : artifacts.route || artifacts.route_pending ? "路线地图" : "候选机厅地图";
   const pending = artifacts.route_pending && !artifacts.route;
-  const showPreview = preview && !pending;
+  const showPreview = !pending;
   return (
     <div
       ref={ref}
