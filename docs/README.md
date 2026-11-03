@@ -25,6 +25,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [智能体地图结果渲染](./dev-details/智能体地图结果渲染.md) | 后端 artifacts 契约与前端地图渲染 |
+| [前端聊天信息流与 UI 架构](./dev-details/前端聊天信息流与UI架构.md) | 单一信息流数组、SSE 折叠与交接、shadcn/Tailwind UI 约定 |
 | [浏览器定位与逆地理编码](./dev-details/浏览器定位与逆地理编码.md) | 定位、逆地理与 Agent 上下文注入 |
 | [会话运行生命周期与 SSE](./dev-details/会话运行生命周期与SSE.md) | run 的接受、取消、收尾与 SSE 回放/结束条件 |
 | [会话加载性能优化](./dev-details/会话加载性能优化.md) | 会话列表/详情/删除的加载态与数据库 select 投影 |
