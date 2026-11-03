@@ -54,7 +54,7 @@ docker-compose.yml               本地或服务器 compose 编排
 ## 环境要求
 
 - Python `>=3.11`
-- Node.js `>=18`
+- Node.js `>=22`（前端 `cn` 依赖与 CI/Docker 的版本一致）
 - pnpm `10.33.0`（版本固定在 `apps/web/package.json`；安装方式见 [pnpm 官方说明](https://pnpm.io/installation)）
 
 仓库根目录没有统一的前端 workspace `package.json`，前端命令需要在 `apps/web/` 下执行。
