@@ -16,8 +16,10 @@ import {
   readStoredActiveSessionId,
   writeStoredActiveSessionId
 } from "../lib/chatSessionStorage";
-import { isRunActive, makeSessionId, mapArtifactsFromSession, turnsFromDetail } from "../lib/sessionDetail";
+import { appendError, appendUser, feedFromDetail, mergeOpenRound, withoutOpenRound } from "../lib/chatFeed";
+import { isRunActive, makeSessionId } from "../lib/sessionDetail";
 import { useAppStore } from "../stores/appStore";
+import { useChatFeedStore } from "../stores/chatFeedStore";
 import { useRunStore } from "../stores/runStore";
 import { useSessionStore } from "../stores/sessionStore";
 import type { ChatSessionDetail } from "../types";
@@ -27,14 +29,17 @@ import { useRunStream } from "./useRunStream";
 const appState = () => useAppStore.getState();
 const sessionState = () => useSessionStore.getState();
 const runState = () => useRunStore.getState();
+const feedState = () => useChatFeedStore.getState();
+
+// Errors are part of the chat feed, after whatever the user was looking at.
+function pushError(message: string): void {
+  feedState().setFeed((feed) => appendError(feed, message, new Date().toISOString()));
+}
 
 // Orchestrates the chat view: session list and detail, send, delete, switch and
 // refresh-recovery. Following a run lives in useRunStream.
 export function useChatSessionController() {
   const [clientLocation, setClientLocation] = useState(loadCachedClientLocation);
-  const sending = useSessionStore((state) => state.sending);
-  const streamConnected = useRunStore((state) => state.streamConnected);
-  const awaitingAssistant = useRunStore((state) => state.awaitingAssistant);
 
   const sessionGenerationRef = useRef(0);
   // Only the latest detail request may apply; an older response (e.g. the
@@ -47,7 +52,7 @@ export function useChatSessionController() {
     clientIdRef.current = getChatClientId();
   }
 
-  const { startStream, commitRunLocally, resetRunView, streamReply, streamReplyPending } =
+  const { startStream, commitRunLocally, resetRunView } =
     useRunStream(clientIdRef.current, {
       // The run's reply becomes a history turn once the detail is loaded; the
       // composer stays locked until then (applySessionDetail releases it). A
@@ -73,7 +78,7 @@ export function useChatSessionController() {
 
 
   async function giveUpRun(sessionId: string, runId: string): Promise<void> {
-    sessionState().setChatError("实时连接中断，已尝试重连 3 次；正在停止本次请求。");
+    pushError("实时连接中断，已尝试重连 3 次；正在停止本次请求。");
     const isLatest = beginDetailRequest();
     try {
       // Only cancel when the run we lost is still the one running.
@@ -88,9 +93,7 @@ export function useChatSessionController() {
       if (!isLatest()) {
         return;
       }
-      sessionState().setChatError(
-        err instanceof Error ? err.message : "停止中断会话失败，请稍后重试。"
-      );
+      pushError(err instanceof Error ? err.message : "停止中断会话失败，请稍后重试。");
       void loadSession(sessionId, {
         preserveStreamState: true,
         reconnectStream: false,
@@ -116,39 +119,35 @@ export function useChatSessionController() {
 
     store.setActiveSessionId(sessionId);
     writeStoredActiveSessionId(sessionId);
-    const detailArtifacts = mapArtifactsFromSession(detail);
-    const visibleTurns = turnsFromDetail(detail);
     const run = detail.current_run ?? null;
     const runActive = isRunActive(detail);
 
     if (!preserveStreamState && !runActive) {
       resetRunView();
     }
-    store.setTurns(visibleTurns);
     runState().setActiveSubagent(detail.active_subagent || null);
     store.setActiveSessionStatus(detail.status);
 
-    if (detail.status === "failed") {
-      store.setChatError(detail.last_error?.trim() ? detail.last_error : "会话执行失败");
-    } else {
-      store.setChatError("");
-    }
-
+    const feed = feedFromDetail(detail);
     if (run && runActive) {
-      runState().setActiveMapArtifacts(detailArtifacts);
       runState().setAwaitingAssistant(true);
       if (reconnectStream) {
-        // Without a cursor the run log replays the whole run, text included.
+        // Without a cursor the run log replays the whole run, text included,
+        // so the open round is rebuilt from the replay.
+        feedState().setFeed(withoutOpenRound(feed));
         startStream(sessionId, run.run_id);
+      } else {
+        // stream.reset: the stream goes on from its cursor; keep what it
+        // already showed of the output in progress.
+        feedState().setFeed((live) => mergeOpenRound(feed, live));
       }
       return;
     }
 
-    // Set together with `turns` so the live bubble hands over to the history
-    // turn in the same render.
+    // The history replaces the live items in the same render; keys match, so
+    // nothing on screen is remounted.
+    feedState().setFeed(feed);
     runState().setActiveRunId(run?.run_id ?? null);
-    runState().setCommittedRunId(run?.run_id ?? null);
-    runState().setActiveMapArtifacts(null);
     runState().setAwaitingAssistant(false);
   }
 
@@ -178,7 +177,7 @@ export function useChatSessionController() {
         writeStoredActiveSessionId(null);
         latestStore.setActiveSessionId(null);
         latestStore.setActiveSessionStatus(null);
-        latestStore.setTurns([]);
+        feedState().resetFeed();
         // A background reload leaves the stream to whoever started it.
         if (preserveStreamState) {
           runState().resetRunState();
@@ -206,7 +205,7 @@ export function useChatSessionController() {
         await loadSession(targetId, { preserveStreamState, reconnectStream: true });
       }
     } catch (err) {
-      sessionState().setChatError(err instanceof Error ? err.message : "加载会话列表失败");
+      pushError(err instanceof Error ? err.message : "加载会话列表失败");
     } finally {
       if (showLoading) {
         sessionState().setSessionsLoading(false);
@@ -228,7 +227,6 @@ export function useChatSessionController() {
       store.setActiveSessionId(sessionId);
       store.setTurnsLoading(true);
     }
-    store.setChatError("");
 
     try {
       const detail = await getChatSession(sessionId, clientIdRef.current);
@@ -242,7 +240,7 @@ export function useChatSessionController() {
       if (!isLatest()) {
         return null;
       }
-      sessionState().setChatError(err instanceof Error ? err.message : "加载会话失败");
+      pushError(err instanceof Error ? err.message : "加载会话失败");
       options?.onFailure?.();
       return null;
     } finally {
@@ -273,9 +271,9 @@ export function useChatSessionController() {
     app.setSidebarOpen(false);
     const store = sessionState();
     store.resetActiveSessionState();
+    feedState().resetFeed();
     store.setTurnsLoading(false);
     writeStoredActiveSessionId(null);
-    store.setChatError("");
   }
 
   async function submitChat(event: FormEvent): Promise<void> {
@@ -290,18 +288,18 @@ export function useChatSessionController() {
     const previousSessionId = currentState.activeSessionId;
     const previousSessionStatus = currentState.activeSessionStatus;
     const previousSessions = currentState.sessions;
-    const previousRunId = runState().committedRunId;
+    const previousRunId = runState().activeRunId;
+    const previousFeed = { items: feedState().items, toolStatus: feedState().toolStatus };
     const sessionId = currentState.activeSessionId || makeSessionId();
     const optimisticCreatedAt = new Date().toISOString();
 
     sessionGenerationRef.current += 1;
-    // No run id until dispatch answers; awaitingAssistant keeps the bubble.
+    // No run id until dispatch answers; awaitingAssistant shows the run indicator.
     resetRunView();
-    currentState.setTurns((previous) => [...previous, { role: "user", content: message, created_at: optimisticCreatedAt }]);
+    feedState().setFeed((feed) => appendUser(feed, message, optimisticCreatedAt));
     runState().setAwaitingAssistant(true);
     currentState.setTurnsLoading(false);
     currentState.setSending(true);
-    currentState.setChatError("");
     currentState.setSessions((previous) => {
       const existing = previous.find((item) => item.session_id === sessionId);
       const optimistic = {
@@ -310,7 +308,7 @@ export function useChatSessionController() {
         preview: message.replace(/\s+/g, " ").slice(0, 72),
         intent: existing?.intent ?? "search" as const,
         status: "running" as const,
-        turn_count: (existing?.turn_count ?? currentState.turns.length) + 1,
+        turn_count: (existing?.turn_count ?? 0) + 1,
         created_at: existing?.created_at ?? optimisticCreatedAt,
         updated_at: optimisticCreatedAt
       };
@@ -344,23 +342,15 @@ export function useChatSessionController() {
       await loadSessionList(dispatched.session_id, { preserveStreamState: true });
     } catch (err) {
       const store = sessionState();
-      store.setChatError(err instanceof Error ? err.message : "发送失败");
       appState().setInputValue(message);
       store.setActiveSessionId(previousSessionId);
       writeStoredActiveSessionId(previousSessionId);
       store.setActiveSessionStatus(previousSessionStatus);
       store.setSessions(previousSessions);
-      store.setTurns((previous) => {
-        const next = [...previous];
-        const last = next[next.length - 1];
-        if (last && last.role === "user" && last.content === message && last.created_at === optimisticCreatedAt) {
-          next.pop();
-        }
-        return next;
-      });
       resetRunView();
       runState().setActiveRunId(previousRunId);
-      runState().setCommittedRunId(previousRunId);
+      feedState().setFeed(previousFeed);
+      pushError(err instanceof Error ? err.message : "发送失败");
     } finally {
       sessionState().setSending(false);
     }
@@ -385,7 +375,6 @@ export function useChatSessionController() {
     }
 
     currentState.setDeletingSessionId(sessionId);
-    currentState.setChatError("");
     // Deleting the open session: show the start panel right away, not after the request.
     const wasActive = currentState.activeSessionId === sessionId;
     if (wasActive) {
@@ -423,7 +412,7 @@ export function useChatSessionController() {
     }
     // Respond to the click immediately instead of keeping the old chat on screen.
     store.setActiveSessionId(sessionId);
-    store.setTurns([]);
+    feedState().resetFeed();
     resetRunView();
     void loadSession(sessionId);
   }
@@ -441,8 +430,6 @@ export function useChatSessionController() {
     quickAsk,
     removeSession,
     selectSession,
-    refreshSessions,
-    streamReply,
-    streamReplyActive: sending || streamConnected || awaitingAssistant || streamReplyPending
+    refreshSessions
   };
 }

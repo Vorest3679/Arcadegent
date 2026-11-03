@@ -1,139 +1,120 @@
-import { FormEvent, useEffect, useRef } from "react";
-import { latestMapArtifacts, mapArrivalKey } from "../../lib/mapDock";
-import { useAppStore } from "../../stores/appStore";
-import { useRunStore } from "../../stores/runStore";
-import { useSessionStore } from "../../stores/sessionStore";
-import { MapDock } from "./MapDock";
-import { RoundList } from "./RoundList";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { Loader2, MapPinned, Route, Sparkles } from "lucide-react";
+import { useChatFeedStore } from "@/stores/chatFeedStore";
+import { useRunStore } from "@/stores/runStore";
+import { useSessionStore } from "@/stores/sessionStore";
+import { ChatComposer } from "./ChatComposer";
+import { ChatFeedList } from "./ChatFeedList";
+import { MapPanel } from "./MapPanel";
 
 // Distance from the bottom within which streaming output keeps following.
 const FOLLOW_THRESHOLD_PX = 120;
-// Visual viewport shrink that means the soft keyboard is up.
-const KEYBOARD_THRESHOLD_PX = 150;
 
 type ChatPanelProps = {
   city: string;
   onSubmit: (event: FormEvent) => Promise<void>;
   onQuickAsk: (prompt: string) => void;
-  streamReply: string;
-  streamReplyActive: boolean;
 };
 
-export function ChatPanel({ city, onSubmit, onQuickAsk, streamReply, streamReplyActive }: ChatPanelProps) {
+export function ChatPanel({ city, onSubmit, onQuickAsk }: ChatPanelProps) {
   const quickPrompts = [
-    "帮我找找适合下班后去的机厅",
-    `${city}最多机台的机厅是哪家？`,
-    "给我一条从当前位置到最近机厅的路线建议"
+    { icon: Sparkles, text: "帮我找找适合下班后去的机厅" },
+    { icon: MapPinned, text: `${city}最多机台的机厅是哪家？` },
+    { icon: Route, text: "给我一条从当前位置到最近机厅的路线建议" }
   ];
-  const turns = useSessionStore((state) => state.turns);
+  const items = useChatFeedStore((state) => state.items);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const loading = useSessionStore((state) => state.turnsLoading);
   const sending = useSessionStore((state) => state.sending);
-  const error = useSessionStore((state) => state.chatError);
-  const inputValue = useAppStore((state) => state.inputValue);
-  const setInputValue = useAppStore((state) => state.setInputValue);
   const awaitingAssistant = useRunStore((state) => state.awaitingAssistant);
-  const activeRunId = useRunStore((state) => state.activeRunId);
-  const committedRunId = useRunStore((state) => state.committedRunId);
-  const liveArtifacts = useRunStore((state) => state.activeMapArtifacts);
-  const liveRound = useRunStore((state) => state.liveRound);
-  const streamItems = useRunStore((state) => state.streamItems);
+  const [mapKey, setMapKey] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const followRef = useRef(true);
 
-  // Live while the run's reply has not been handed over to history yet.
-  const runLive = awaitingAssistant || (activeRunId !== null && activeRunId !== committedRunId);
-  const showEmptyState = turns.length === 0 && !runLive && !loading;
+  const showEmptyState = items.length === 0 && !awaitingAssistant && !loading;
   const composerBusy = sending || awaitingAssistant;
-  const mapArtifacts = latestMapArtifacts(turns, liveArtifacts, runLive);
-  const arrivalKey = mapArrivalKey(activeSessionId, turns, liveArtifacts, runLive);
+
+  // Another session: its maps are not this one's.
+  useEffect(() => setMapKey(null), [activeSessionId]);
 
   // Follow new output only while the user is near the bottom, so reading
-  // history on a phone is not interrupted. Sending always follows.
+  // history is not interrupted. Sending always follows.
   useEffect(() => {
     if (sending) {
       followRef.current = true;
     }
   }, [sending]);
+  // Content grows frame by frame while a reply is revealed; follow its size.
   useEffect(() => {
-    const element = scrollRef.current;
-    if (element && followRef.current) {
-      element.scrollTop = element.scrollHeight;
-    }
-  }, [turns, loading, sending, streamItems, streamReply, liveRound, awaitingAssistant, runLive]);
-
-  // A soft keyboard leaves little room: fold the map away while it is up.
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) {
+    const scroller = scrollRef.current;
+    const content = contentRef.current;
+    if (!scroller || !content) {
       return;
     }
-    const onResize = () => {
-      if (window.innerHeight - viewport.height > KEYBOARD_THRESHOLD_PX) {
-        useRunStore.getState().setMapDock({ open: false });
+    const observer = new ResizeObserver(() => {
+      if (followRef.current) {
+        scroller.scrollTop = scroller.scrollHeight;
       }
-    };
-    viewport.addEventListener("resize", onResize);
-    return () => viewport.removeEventListener("resize", onResize);
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
   }, []);
 
   return (
-    <div className="chat-view">
-      <MapDock artifacts={mapArtifacts} arrivalKey={arrivalKey} />
-
+    <div className="relative flex min-h-0 flex-1 flex-col" data-testid="chat-view">
       <div
-        className="chat-scroll"
         ref={scrollRef}
+        data-testid="chat-scroll"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
         onScroll={(event) => {
           const element = event.currentTarget;
           followRef.current =
             element.scrollHeight - element.scrollTop - element.clientHeight < FOLLOW_THRESHOLD_PX;
         }}
       >
-        {showEmptyState ? (
-          <div className="chat-empty">
-            <p className="chat-empty-title">今天想查哪家机厅？</p>
-            <p className="chat-empty-subtitle">你可以直接提问，也可以先点一个预设问题。</p>
-            <div className="chat-quick-grid">
-              {quickPrompts.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  className="quick-chip"
-                  onClick={() => onQuickAsk(prompt)}
-                  disabled={composerBusy}
-                >
-                  {prompt}
-                </button>
-              ))}
+        <div ref={contentRef} className="mx-auto w-full max-w-3xl px-4 pt-6 pb-8 sm:px-6">
+          {showEmptyState ? (
+            <div className="flex flex-col items-center gap-6 pt-[12vh] text-center">
+              <div className="grid size-14 place-items-center rounded-2xl bg-accent text-primary shadow-sm">
+                <Sparkles className="size-7" aria-hidden="true" />
+              </div>
+              <div className="space-y-2">
+                <p className="text-2xl font-semibold tracking-tight">今天想查哪家机厅？</p>
+                <p className="text-sm text-muted-foreground">你可以直接提问，也可以先点一个预设问题。</p>
+              </div>
+              <div className="grid w-full max-w-xl gap-2 sm:grid-cols-3">
+                {quickPrompts.map(({ icon: Icon, text }) => (
+                  <button
+                    key={text}
+                    type="button"
+                    onClick={() => onQuickAsk(text)}
+                    disabled={composerBusy}
+                    className="flex flex-col items-start gap-2 rounded-xl border bg-card p-3 text-left text-sm shadow-xs transition hover:border-primary/40 hover:bg-accent/40 disabled:opacity-50"
+                  >
+                    <Icon className="size-4 text-primary" aria-hidden="true" />
+                    <span>{text}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ) : (
-          <RoundList runLive={runLive} streamReply={streamReply} streamReplyActive={streamReplyActive} />
-        )}
+          ) : (
+            <ChatFeedList runLive={awaitingAssistant} onOpenMap={setMapKey} />
+          )}
 
-        {loading ? (
-          <div className="chat-loading" role="status" aria-label="加载会话中">
-            <svg className="chat-loading-spinner" viewBox="0 0 24 24" width="32" height="32" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" fill="none" strokeWidth="2.6" strokeLinecap="round" strokeDasharray="30 30" />
-            </svg>
-          </div>
-        ) : null}
+          {loading ? (
+            <div className="flex justify-center py-10" role="status" aria-label="加载会话中">
+              <Loader2 className="size-7 animate-spin text-primary" aria-hidden="true" />
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      {error ? <div className="chat-error">{error}</div> : null}
+      <div className="mx-auto w-full max-w-3xl px-3 pb-[max(0.75rem,var(--safe-bottom))] sm:px-6">
+        <ChatComposer busy={composerBusy} sending={sending} onSubmit={onSubmit} />
+      </div>
 
-      <form className="chat-composer" onSubmit={(event) => void onSubmit(event)}>
-        <input
-          value={inputValue}
-          onChange={(event) => setInputValue(event.target.value)}
-          placeholder="尽管问机厅相关问题"
-          disabled={composerBusy}
-        />
-        <button type="submit" disabled={composerBusy || inputValue.trim().length === 0}>
-          {sending ? "发送中..." : awaitingAssistant ? "处理中..." : "发送"}
-        </button>
-      </form>
+      <MapPanel itemKey={mapKey} onClose={() => setMapKey(null)} />
     </div>
   );
 }

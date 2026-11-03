@@ -9,8 +9,6 @@ import { useAppStore } from "./stores/appStore";
 
 export function App() {
   const viewMode = useAppStore((state) => state.viewMode);
-  const sidebarOpen = useAppStore((state) => state.sidebarOpen);
-  const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
   const chat = useChatSessionController();
 
   useEffect(() => {
@@ -23,7 +21,7 @@ export function App() {
   }, []);
 
   return (
-    <div className="app-shell">
+    <div className="flex h-dvh overflow-hidden pt-[var(--safe-top)] pr-[var(--safe-right)] pl-[var(--safe-left)]">
       <AppSidebar
         onStartNewSession={chat.startNewSession}
         onOpenChatView={chat.openChatView}
@@ -33,24 +31,11 @@ export function App() {
         onDeleteSession={(sessionId) => void chat.removeSession(sessionId)}
       />
 
-      <button
-        type="button"
-        className={`sidebar-backdrop ${sidebarOpen ? "is-open" : ""}`}
-        aria-label="关闭侧边栏"
-        onClick={() => setSidebarOpen(false)}
-      />
-
-      <main className="app-main">
+      <main className="flex min-w-0 flex-1 flex-col">
         <AppTopbar />
 
         {viewMode === "chat" ? (
-          <ChatPanel
-            city={chat.currentCity}
-            onSubmit={chat.submitChat}
-            onQuickAsk={chat.quickAsk}
-            streamReply={chat.streamReply}
-            streamReplyActive={chat.streamReplyActive}
-          />
+          <ChatPanel city={chat.currentCity} onSubmit={chat.submitChat} onQuickAsk={chat.quickAsk} />
         ) : (
           <ArcadeBrowser />
         )}

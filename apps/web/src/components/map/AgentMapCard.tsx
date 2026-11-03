@@ -1,4 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import {
   approximateWgs84ToGcj02,
   getArcadeGcjPoint,
@@ -6,7 +8,7 @@ import {
   normalizeRouteToGcj02
 } from "../../lib/amap/coords";
 import { buildAmapMarkerUri, buildAmapNavigationUri } from "../../lib/amap/uri";
-import { hasMapContent } from "../../lib/mapDock";
+import { hasMapContent } from "../../lib/mapArtifacts";
 import type { AgentMapScene, ArcadeSummary, ChatMapArtifacts, GeoPoint, RouteSummary } from "../../types";
 import { AmapMapCanvas, type AmapRuntime } from "./AmapMapCanvas";
 import { AmapRouteOverlay } from "./AmapRouteOverlay";
@@ -20,6 +22,8 @@ type MapStatus = {
 
 type AgentMapCardProps = {
   artifacts: ChatMapArtifacts;
+  // "preview": only the map with its route or markers, as a static thumbnail.
+  variant?: "full" | "preview";
 };
 
 function readPayloadString(payload: Record<string, unknown> | null | undefined, key: string): string | null {
@@ -93,7 +97,7 @@ function routeDestinationPoint(route: RouteSummary | null, destination?: ArcadeS
   return getArcadeGcjPoint(destination) ?? normalizePointToGcj02(route?.destination);
 }
 
-export const AgentMapCard = memo(function AgentMapCard({ artifacts }: AgentMapCardProps) {
+export const AgentMapCard = memo(function AgentMapCard({ artifacts, variant = "full" }: AgentMapCardProps) {
   const [mapRuntime, setMapRuntime] = useState<AmapRuntime | null>(null);
   const [mapStatus, setMapStatus] = useState<MapStatus>({ state: "idle", message: "" });
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(() => {
@@ -245,88 +249,120 @@ export const AgentMapCard = memo(function AgentMapCard({ artifacts }: AgentMapCa
     return null;
   }
 
+  if (variant === "preview") {
+    return (
+      <div className="relative" data-testid="map-preview">
+        <AmapMapCanvas
+          center={mapCenter}
+          zoom={mapZoom}
+          fallbackRegionName={getFallbackRegionName(fallbackShop)}
+          emptyMessage={hasRoute ? "路线地图" : "候选机厅地图"}
+          onRuntimeChange={handleMapRuntimeChange}
+          onStatusChange={handleMapStatusChange}
+          interactive={false}
+          className="min-h-0 h-40 rounded-none border-0 sm:h-48"
+        />
+        {hasRoute ? (
+          <AmapRouteOverlay runtime={mapRuntime} route={normalizedRoute} />
+        ) : !isRouteScene ? (
+          <AmapShopMarkers
+            runtime={mapRuntime}
+            shops={artifacts.shops}
+            selectedSourceId={selectedSourceId}
+            onSelectShop={() => undefined}
+          />
+        ) : null}
+      </div>
+    );
+  }
+
   return (
-    <section
-      className={`agent-map-card ${isRouteScene ? "is-route" : "is-candidates"}`}
-      data-testid={isRouteScene ? "agent-route-card" : "agent-candidates-card"}
-    >
-      <div className="agent-map-head">
-        <div>
-          <p className="agent-map-kicker">{isRouteScene ? "路线卡片" : "候选地图"}</p>
-          <h3>{title}</h3>
-          <span>{subtitle}</span>
+    <section className="grid gap-3" data-testid={isRouteScene ? "agent-route-card" : "agent-candidates-card"}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs tracking-wider text-muted-foreground">{isRouteScene ? "路线卡片" : "候选地图"}</p>
+          <h3 className="mt-0.5 text-base font-semibold">{title}</h3>
+          <span className="text-sm text-muted-foreground">{subtitle}</span>
         </div>
-        {artifacts.route_pending ? <small>渐进展示</small> : null}
+        {artifacts.route_pending ? (
+          <Badge variant="outline" className="shrink-0 border-highlight/40 bg-highlight-soft text-highlight-foreground">
+            渐进展示
+          </Badge>
+        ) : null}
       </div>
 
-      <div className="agent-map-grid">
-        <div className="agent-map-canvas-wrap">
-          {isRoutePending ? (
-            <div className="amap-canvas-shell browser-map-placeholder" data-testid="agent-route-pending">
-              <div className="amap-empty-copy">正在计算导航路线...</div>
-            </div>
-          ) : (
-            <AmapMapCanvas
-              center={mapCenter}
-              zoom={mapZoom}
-              fallbackRegionName={getFallbackRegionName(fallbackShop)}
-              emptyMessage={hasRoute ? "路线地图" : "候选机厅地图"}
-              onRuntimeChange={handleMapRuntimeChange}
-              onStatusChange={handleMapStatusChange}
-            />
-          )}
+      <div className="relative min-w-0">
+        {isRoutePending ? (
+          <div className="amap-canvas-shell" data-testid="agent-route-pending">
+            <div className="amap-empty-copy">正在计算导航路线...</div>
+          </div>
+        ) : (
+          <AmapMapCanvas
+            center={mapCenter}
+            zoom={mapZoom}
+            fallbackRegionName={getFallbackRegionName(fallbackShop)}
+            emptyMessage={hasRoute ? "路线地图" : "候选机厅地图"}
+            onRuntimeChange={handleMapRuntimeChange}
+            onStatusChange={handleMapStatusChange}
+          />
+        )}
+        {hasRoute ? (
+          <AmapRouteOverlay runtime={mapRuntime} route={normalizedRoute} />
+        ) : !isRouteScene ? (
+          <AmapShopMarkers
+            runtime={mapRuntime}
+            shops={artifacts.shops}
+            selectedSourceId={selectedSourceId}
+            onSelectShop={(shop) => setSelectedSourceId(shop.source_id)}
+          />
+        ) : null}
+        {mapStatusText ? (
+          <p className="mt-2 rounded-md bg-highlight-soft px-3 py-2 text-sm text-highlight-foreground">{mapStatusText}</p>
+        ) : null}
+      </div>
+
+      {isRouteScene ? (
+        <div className="grid gap-2 rounded-lg border bg-card p-3">
+          <strong className="font-medium">{isRoutePending ? "正在准备导航" : destination?.name ?? "目标机厅"}</strong>
+          <p className="text-sm text-muted-foreground">
+            {isRoutePending ? "路线结果生成后会自动更新此卡片。" : destination?.address ?? "终点地址待补充"}
+          </p>
           {hasRoute ? (
-            <AmapRouteOverlay runtime={mapRuntime} route={normalizedRoute} />
-          ) : !isRouteScene ? (
-            <AmapShopMarkers
-              runtime={mapRuntime}
-              shops={artifacts.shops}
-              selectedSourceId={selectedSourceId}
-              onSelectShop={(shop) => setSelectedSourceId(shop.source_id)}
-            />
-          ) : null}
-          {mapStatusText ? <div className="agent-map-state">{mapStatusText}</div> : null}
-        </div>
-
-        <div className="agent-map-side">
-          {isRouteScene ? (
-            <div className="agent-route-summary">
-              <strong>{isRoutePending ? "正在准备导航" : destination?.name ?? "目标机厅"}</strong>
-              <p>{isRoutePending ? "路线结果生成后会自动更新此卡片。" : destination?.address ?? "终点地址待补充"}</p>
-              {hasRoute ? (
-                <div className="agent-route-metrics">
-                  <span>{formatDistance(normalizedRoute?.distance_m)}</span>
-                  <span>{formatDuration(normalizedRoute?.duration_s)}</span>
-                  <span>{normalizedRoute?.provider ?? "provider 待确认"}</span>
-                </div>
-              ) : null}
-              {normalizedRoute?.hint ? <small>{normalizedRoute.hint}</small> : null}
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary" className="bg-accent text-primary">{formatDistance(normalizedRoute?.distance_m)}</Badge>
+              <Badge variant="secondary" className="bg-accent text-primary">{formatDuration(normalizedRoute?.duration_s)}</Badge>
+              <Badge variant="secondary" className="bg-accent text-primary">{normalizedRoute?.provider ?? "provider 待确认"}</Badge>
             </div>
-          ) : (
-            <ul className="agent-candidate-list">
-              {artifacts.shops.slice(0, 6).map((shop) => {
-                const mapped = Boolean(getArcadeGcjPoint(shop));
-                const active = shop.source_id === selectedSourceId;
-                return (
-                  <li key={shop.source_id}>
-                    <button
-                      type="button"
-                      className={`agent-candidate-btn${active ? " is-active" : ""}`}
-                      onClick={() => setSelectedSourceId(shop.source_id)}
-                      data-testid={`agent-candidate-${shop.source_id}`}
-                    >
-                      <b>{shop.name}</b>
-                      <span>{shop.address || "暂无地址"}</span>
-                      <small>{mapped ? "地图已定位" : "暂无地图定位"}</small>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <MapActionBar actions={actions} />
+          ) : null}
+          {normalizedRoute?.hint ? <small className="text-xs text-muted-foreground">{normalizedRoute.hint}</small> : null}
         </div>
-      </div>
+      ) : (
+        <ul className="grid gap-2">
+          {artifacts.shops.slice(0, 6).map((shop) => {
+            const mapped = Boolean(getArcadeGcjPoint(shop));
+            const active = shop.source_id === selectedSourceId;
+            return (
+              <li key={shop.source_id}>
+                <button
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setSelectedSourceId(shop.source_id)}
+                  data-testid={`agent-candidate-${shop.source_id}`}
+                  className={cn(
+                    "grid w-full gap-0.5 rounded-lg border bg-card px-3 py-2 text-left transition hover:border-primary/40",
+                    active && "border-primary/60 ring-2 ring-primary/15"
+                  )}
+                >
+                  <b className="font-medium">{shop.name}</b>
+                  <span className="text-sm text-muted-foreground">{shop.address || "暂无地址"}</span>
+                  <small className="text-xs text-muted-foreground">{mapped ? "地图已定位" : "暂无地图定位"}</small>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <MapActionBar actions={actions} />
     </section>
   );
 });

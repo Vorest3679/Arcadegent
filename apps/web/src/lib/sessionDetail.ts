@@ -1,5 +1,5 @@
 import type { ChatHistoryTurn, ChatMapArtifacts, ChatSessionDetail } from "../types";
-import { hasMapContent } from "./mapDock";
+import { hasMapContent } from "./mapArtifacts";
 import { toVisibleTurns } from "./sse/chatStream";
 import { isTerminalRunStatus } from "./sse/runStream";
 

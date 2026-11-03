@@ -4,7 +4,7 @@ AmapMapCanvas 组件负责在 Web 端渲染高德地图，
 组件会根据传入的中心点和缩放级别初始化地图，并在地图加载状态发生变化时通过回调通知父组件。
 同时，组件会处理地图资源的加载和销毁，确保在组件卸载时正确释放资源，避免内存泄漏。
 */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GeoPoint } from "../../types";
 import { toLngLatTuple } from "../../lib/amap/coords";
 import { isAmapConfigured, loadAmapSdk } from "../../lib/amap/loader";
@@ -21,6 +21,9 @@ type AmapMapCanvasProps = {
   emptyMessage?: string;
   onRuntimeChange: (runtime: AmapRuntime | null) => void;
   onStatusChange?: (status: "idle" | "loading" | "ready" | "disabled" | "error", message?: string) => void;
+  // false: a static thumbnail (no gestures, no controls).
+  interactive?: boolean;
+  className?: string;
 };
 
 export function AmapMapCanvas({
@@ -29,13 +32,18 @@ export function AmapMapCanvas({
   fallbackRegionName,
   emptyMessage = "暂无地图数据",
   onRuntimeChange,
-  onStatusChange
+  onStatusChange,
+  interactive = true,
+  className
 }: AmapMapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const runtimeRef = useRef<AmapRuntime | null>(null);
   const centerRef = useRef(center);
   const fallbackRegionNameRef = useRef(fallbackRegionName);
   const zoomRef = useRef(zoom);
+  const interactiveRef = useRef(interactive);
+  // The placeholder label only covers the map until it is drawn.
+  const [ready, setReady] = useState(false);
 
   function moveToFallbackRegion(regionName?: string | null): void {
     const trimmedRegionName = regionName?.trim();
@@ -78,12 +86,15 @@ export function AmapMapCanvas({
         const map = new AMap.Map(containerRef.current, {
           zoom: zoomRef.current,
           center: toLngLatTuple(centerRef.current) ?? undefined,
-          resizeEnable: true
+          resizeEnable: true,
+          ...(interactiveRef.current
+            ? {}
+            : { dragEnable: false, zoomEnable: false, doubleClickZoom: false, scrollWheel: false, keyboardEnable: false })
         });
-        if (AMap.Scale) {
+        if (interactiveRef.current && AMap.Scale) {
           map.addControl(new AMap.Scale());
         }
-        if (AMap.ToolBar) {
+        if (interactiveRef.current && AMap.ToolBar) {
           map.addControl(new AMap.ToolBar());
         }
         runtimeRef.current = { AMap, map };
@@ -91,6 +102,7 @@ export function AmapMapCanvas({
           moveToFallbackRegion(fallbackRegionNameRef.current);
         }
         onRuntimeChange(runtimeRef.current);
+        setReady(true);
         onStatusChange?.("ready");
       } catch (error) {
         if (disposed) {
@@ -114,6 +126,7 @@ export function AmapMapCanvas({
         }
       }
       runtimeRef.current = null;
+      setReady(false);
       onRuntimeChange(null);
     };
   }, [onRuntimeChange, onStatusChange]);
@@ -139,11 +152,14 @@ export function AmapMapCanvas({
   }, [fallbackRegionName]);
 
   return (
-    <div className="amap-canvas-shell">
-      <div ref={containerRef} className="amap-canvas" data-testid="arcade-map-canvas" />
-      <div className="amap-empty-copy">
-        {emptyMessage}
+    <div className={className ? `amap-canvas-shell ${className}` : "amap-canvas-shell"}>
+      {/* AMap adds `amap-container` (position: relative) to the element it
+          mounts into, which would cancel an absolute layout; size it inline
+          inside an absolutely placed wrapper instead. */}
+      <div className="amap-canvas">
+        <div ref={containerRef} style={{ width: "100%", height: "100%" }} data-testid="arcade-map-canvas" />
       </div>
+      {ready ? null : <div className="amap-empty-copy">{emptyMessage}</div>}
     </div>
   );
 }

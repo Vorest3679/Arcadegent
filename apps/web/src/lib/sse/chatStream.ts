@@ -10,6 +10,8 @@ const SUBAGENT_LABEL: Record<string, string> = {
   summary_agent: "总结阶段"
 };
 
+// Whitelisted tools: shown with their alias and a tool icon. Any other tool
+// (e.g. an MCP tool) is still listed, under its own name and without an icon.
 const TOOL_LABEL: Record<string, string> = {
   invoke_worker: "派发任务",
   db_query_tool: "数据检索",
@@ -19,14 +21,6 @@ const TOOL_LABEL: Record<string, string> = {
   result_selection_tool: "结果筛选",
   list_skills: "查看技能列表",
   read_skill: "读取技能"
-};
-
-export type StreamProgressItem = {
-  id: number;
-  // Server event label, or "stream.reconnecting" for local transport status.
-  event: string;
-  text: string;
-  at: string;
 };
 
 export function formatTimeLabel(value: string): string {
@@ -52,58 +46,14 @@ export function formatAgentName(agent: string | null | undefined, fallback = "�
   return agent ? SUBAGENT_LABEL[agent] ?? agent : fallback;
 }
 
+export function isWhitelistedTool(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(TOOL_LABEL, name);
+}
+
 export function formatToolName(name: string | null | undefined, fallback = "工具"): string {
   return name ? TOOL_LABEL[name] ?? name : fallback;
 }
 
-
-export function toProgressText(envelope: ChatStreamEnvelope): string {
-  const toolNameRaw = envelope.data.tool;
-  const toolName = typeof toolNameRaw === "string" ? toolNameRaw : undefined;
-
-  if (envelope.event === "session.started") {
-    return "会话开始";
-  }
-  if (envelope.event === "subagent.changed") {
-    const nextRaw = envelope.data.to_subagent ?? envelope.data.active_subagent;
-    const next = typeof nextRaw === "string" ? nextRaw : null;
-    return `切换到 ${formatAgentName(next)}`;
-  }
-  if (envelope.event === "worker.started") {
-    const worker = typeof envelope.data.worker === "string" ? envelope.data.worker : null;
-    return `${formatAgentName(worker)} 已启动`;
-  }
-  if (envelope.event === "worker.completed") {
-    const worker = typeof envelope.data.worker === "string" ? envelope.data.worker : null;
-    return `${formatAgentName(worker)} 已完成`;
-  }
-  if (envelope.event === "worker.failed") {
-    const worker = typeof envelope.data.worker === "string" ? envelope.data.worker : null;
-    return `${formatAgentName(worker)} 失败`;
-  }
-  if (envelope.event === "assistant.token") {
-    return "正在生成回复";
-  }
-  if (envelope.event === "tool.started") {
-    return `${formatToolName(toolName)} 执行中`;
-  }
-  if (envelope.event === "tool.completed") {
-    return `${formatToolName(toolName)} 已完成`;
-  }
-  if (envelope.event === "tool.failed") {
-    return `${formatToolName(toolName)} 失败`;
-  }
-  if (envelope.event === "navigation.route_ready") {
-    return "路线已生成";
-  }
-  if (envelope.event === "assistant.completed") {
-    return "最终回复已生成";
-  }
-  if (envelope.event === "session.failed") {
-    return "会话执行失败";
-  }
-  return envelope.event;
-}
 
 export function coerceStreamRoute(data: Record<string, unknown>): RouteSummary | null {
   const provider = data.provider;
@@ -180,10 +130,3 @@ export function mapArtifactsForEvent(
   }
   return undefined;
 }
-
-export const STEP_STATUS_LABEL = {
-  running: "执行中",
-  completed: "已完成",
-  failed: "失败",
-  cancelled: "已取消"
-} as const;
