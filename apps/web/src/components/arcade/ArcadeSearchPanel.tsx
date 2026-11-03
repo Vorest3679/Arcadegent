@@ -1,8 +1,27 @@
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, Loader2, MapPin, Search } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { cn } from "@/lib/utils";
 import { getArcadeGcjPoint } from "../../lib/amap/coords";
 import { useArcadeBrowserStore } from "../../stores/arcadeBrowserStore";
 import type { ArcadeSortBy, ArcadeSummary, SortOrder } from "../../types";
 import { ARCADE_TITLE_OPTIONS } from "./titleOptions";
+
+function Field({ label, children }: { label: string; children: (id: string) => ReactNode }) {
+  const id = useId();
+  return (
+    <div className="grid gap-1.5">
+      <Label htmlFor={id} className="text-xs text-muted-foreground">{label}</Label>
+      {children(id)}
+    </div>
+  );
+}
 
 type ArcadeSearchPanelProps = {
   pageHint: string;
@@ -75,103 +94,101 @@ export function ArcadeSearchPanel({
     }
   }
 
+  const regionSelect = (
+    id: string,
+    value: string,
+    onChange: (value: string) => void,
+    rows: { code: string; name: string }[],
+    disabled = false
+  ) => (
+    <NativeSelect id={id} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="bg-card">
+      <NativeSelectOption value="">全部</NativeSelectOption>
+      {rows.map((row) => (
+        <NativeSelectOption value={row.code} key={row.code}>
+          {row.name}
+        </NativeSelectOption>
+      ))}
+    </NativeSelect>
+  );
+
   return (
-    <section className="browser-card browser-controls">
-      <form onSubmit={(event) => void onSubmit(event)} className="browser-filter-grid">
-        <label className="browser-field">
-          机厅名称
-          <input value={shopName} onChange={(e) => setShopName(e.target.value)} placeholder="星际传奇" />
-        </label>
-        <label className="browser-field">
-          省份
-          <select value={provinceCode} onChange={(e) => setProvinceCode(e.target.value)}>
-            <option value="">全部</option>
-            {provinces.map((row) => (
-              <option value={row.code} key={row.code}>
-                {row.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="browser-field">
-          城市
-          <select value={cityCode} onChange={(e) => setCityCode(e.target.value)} disabled={!provinceCode}>
-            <option value="">全部</option>
-            {cities.map((row) => (
-              <option value={row.code} key={row.code}>
-                {row.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="browser-field">
-          区县
-          <select value={countyCode} onChange={(e) => setCountyCode(e.target.value)} disabled={!cityCode}>
-            <option value="">全部</option>
-            {counties.map((row) => (
-              <option value={row.code} key={row.code}>
-                {row.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="browser-field">
-          排序字段
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as ArcadeSortBy)}>
-            <option value="default">默认</option>
-            <option value="distance">距离</option>
-            <option value="title_quantity">指定机种机台数</option>
-            <option value="arcade_count">机种数</option>
-            <option value="updated_at">更新时间</option>
-            <option value="source_id">来源 ID</option>
-          </select>
-        </label>
-        <label className="browser-field">
-          排序方向
-          <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)}>
-            <option value="desc">降序</option>
-            <option value="asc">升序</option>
-          </select>
-        </label>
-        <label className="browser-field">
-          机种
-          <select
-            data-testid="arcade-title-filter"
-            value={titleName}
-            onChange={(e) => setTitleName(e.target.value)}
-          >
-            <option value="">全部</option>
-            {ARCADE_TITLE_OPTIONS.map((title) => (
-              <option value={title} key={title}>
-                {title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="browser-check">
-          <input
-            type="checkbox"
+    <Card className="gap-4 p-4 sm:p-5">
+      <form onSubmit={(event) => void onSubmit(event)} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="col-span-2">
+          <Field label="机厅名称">
+            {(id) => (
+              <Input id={id} value={shopName} onChange={(e) => setShopName(e.target.value)} placeholder="星际传奇" className="bg-card" />
+            )}
+          </Field>
+        </div>
+        <div className="col-span-2">
+          <Field label="机种">
+            {(id) => (
+              <NativeSelect
+                id={id}
+                data-testid="arcade-title-filter"
+                value={titleName}
+                onChange={(e) => setTitleName(e.target.value)}
+                className="bg-card"
+              >
+                <NativeSelectOption value="">全部</NativeSelectOption>
+                {ARCADE_TITLE_OPTIONS.map((title) => (
+                  <NativeSelectOption value={title} key={title}>
+                    {title}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            )}
+          </Field>
+        </div>
+        <Field label="省份">{(id) => regionSelect(id, provinceCode, setProvinceCode, provinces)}</Field>
+        <Field label="城市">{(id) => regionSelect(id, cityCode, setCityCode, cities, !provinceCode)}</Field>
+        <Field label="区县">{(id) => regionSelect(id, countyCode, setCountyCode, counties, !cityCode)}</Field>
+        <Field label="排序字段">
+          {(id) => (
+            <NativeSelect id={id} value={sortBy} onChange={(e) => setSortBy(e.target.value as ArcadeSortBy)} className="bg-card">
+              <NativeSelectOption value="default">默认</NativeSelectOption>
+              <NativeSelectOption value="distance">距离</NativeSelectOption>
+              <NativeSelectOption value="title_quantity">指定机种机台数</NativeSelectOption>
+              <NativeSelectOption value="arcade_count">机种数</NativeSelectOption>
+              <NativeSelectOption value="updated_at">更新时间</NativeSelectOption>
+              <NativeSelectOption value="source_id">来源 ID</NativeSelectOption>
+            </NativeSelect>
+          )}
+        </Field>
+        <Field label="排序方向">
+          {(id) => (
+            <NativeSelect id={id} value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)} className="bg-card">
+              <NativeSelectOption value="desc">降序</NativeSelectOption>
+              <NativeSelectOption value="asc">升序</NativeSelectOption>
+            </NativeSelect>
+          )}
+        </Field>
+        <div className="col-span-2 flex items-center gap-2 self-end pb-2 sm:col-span-1">
+          <Checkbox
+            id="arcade-has-arcades"
             checked={hasArcadesOnly}
-            onChange={(e) => setHasArcadesOnly(e.target.checked)}
+            onCheckedChange={(checked) => setHasArcadesOnly(checked === true)}
           />
-          仅看有机台
-        </label>
-        <button type="submit" disabled={loading} className="browser-primary-btn">
+          <Label htmlFor="arcade-has-arcades" className="font-normal">仅看有机台</Label>
+        </div>
+        <Button type="submit" disabled={loading} className="col-span-2 self-end sm:col-span-2">
+          {loading ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Search aria-hidden="true" />}
           {loading ? "检索中..." : "检索"}
-        </button>
+        </Button>
       </form>
 
-      {error ? <div className="browser-error">{error}</div> : null}
+      {error ? <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
 
-      <div className="browser-list-header">
-        <strong>检索结果</strong>
-        <span>
+      <div className="flex items-baseline justify-between border-t pt-3">
+        <h2 className="text-sm font-semibold">检索结果</h2>
+        <span className="text-xs text-muted-foreground">
           {pageHint}
           {sortHint}
         </span>
       </div>
 
-      <ul className="browser-result-list">
+      <ul className="grid gap-2">
         {paged.items.map((item) => {
           const mapped = Boolean(getArcadeGcjPoint(item));
           const active = item.source_id === selectedSourceId;
@@ -186,20 +203,31 @@ export function ArcadeSearchPanel({
               <button
                 type="button"
                 onClick={() => onSelectShop(item)}
-                className={`browser-item-btn${active ? " is-active" : ""}`}
+                aria-pressed={active}
                 data-testid={`arcade-list-item-${item.source_id}`}
+                className={cn(
+                  "grid w-full gap-1 rounded-lg border bg-card p-3 text-left transition hover:border-primary/40",
+                  active && "border-primary/60 bg-accent/50 ring-2 ring-primary/15"
+                )}
               >
-                <div className="browser-item-topline">
-                  <h3>{item.name}</h3>
-                  <span className={`browser-geo-pill${mapped ? " is-ready" : " is-empty"}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="font-medium leading-snug">{item.name}</h3>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "shrink-0 font-normal",
+                      mapped ? "border-primary/30 bg-accent text-primary" : "text-muted-foreground"
+                    )}
+                  >
+                    {mapped ? <MapPin aria-hidden="true" /> : null}
                     {mapped ? "地图已定位" : "暂无地图定位"}
-                  </span>
+                  </Badge>
                 </div>
-                <p>{item.address || "暂无地址"}</p>
-                <small>
-                  {item.province_name || "-"} / {item.city_name || "-"} / {item.county_name || "-"} | 机种{" "}
+                <p className="text-sm text-muted-foreground">{item.address || "暂无地址"}</p>
+                <small className="text-xs text-muted-foreground">
+                  {item.province_name || "-"} / {item.city_name || "-"} / {item.county_name || "-"} · 机种{" "}
                   {item.arcade_count}
-                  {distanceText ? ` | ${distanceText}` : ""}
+                  {distanceText ? ` · ${distanceText}` : ""}
                 </small>
               </button>
             </li>
@@ -207,20 +235,22 @@ export function ArcadeSearchPanel({
         })}
       </ul>
 
-      <div className="browser-pager">
-        <button
+      <div className="flex items-center justify-between gap-2">
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           disabled={paged.page <= 1 || loading}
           onClick={() => onSearchPage(Math.max(1, paged.page - 1))}
-          className="browser-secondary-btn"
+          className="bg-card"
         >
+          <ChevronLeft aria-hidden="true" />
           上一页
-        </button>
-        <span className="browser-page-control">
+        </Button>
+        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
           第
-          <input
+          <Input
             aria-label="页码"
-            className="browser-page-input"
             inputMode="numeric"
             pattern="[0-9]*"
             value={pageInput}
@@ -228,18 +258,22 @@ export function ArcadeSearchPanel({
             onChange={(event) => setPageInput(event.target.value.replace(/\D/g, ""))}
             onBlur={submitPageInput}
             onKeyDown={onPageInputKeyDown}
+            className="h-8 w-14 bg-card text-center"
           />
           / {totalPages} 页
         </span>
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           disabled={paged.page >= paged.total_pages || loading || paged.total_pages === 0}
           onClick={() => onSearchPage(paged.page + 1)}
-          className="browser-secondary-btn"
+          className="bg-card"
         >
           下一页
-        </button>
+          <ChevronRight aria-hidden="true" />
+        </Button>
       </div>
-    </section>
+    </Card>
   );
 }

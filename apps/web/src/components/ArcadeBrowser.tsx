@@ -365,13 +365,11 @@ export function ArcadeBrowser() {
   ]);
 
   return (
-    <div className="browser-shell">
-      <header className="browser-hero">
-        <h2>机厅检索</h2>
-        <p>筛选机厅、在地图上看点位，并直接跳转到高德查看或导航。</p>
-      </header>
-
-      <main className="browser-layout">
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto grid w-full max-w-7xl gap-4 p-4 sm:p-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:items-start">
+        <p className="text-sm text-muted-foreground lg:col-span-2">
+          筛选机厅、在地图上看点位，并直接跳转到高德查看或导航。
+        </p>
         <ArcadeSearchPanel
           pageHint={pageHint}
           onSubmit={onSubmit}
@@ -384,7 +382,7 @@ export function ArcadeBrowser() {
           view={detailView}
           onMarkerSelect={handleMarkerSelect}
         />
-      </main>
+      </div>
     </div>
   );
 }
