@@ -260,31 +260,49 @@ export async function installAmapMock(page: Page) {
 // connection opens. Envelope fields left out (session_id, run_id, kind, at)
 // are filled from the connection URL, so a frame may override run_id to
 // simulate a late frame of another run. `error` drops the connection.
-export type StreamFrame =
+export type StreamFrame = (
   | { at: number; envelope: Record<string, unknown> }
-  | { at: number; error: true };
+  | { at: number; error: true }
+) & { hold?: string };
 
 export const E2E_RUN_ID = "r_e2e1";
 export const DEFAULT_REPLY = "路线已经准备好了，建议步行前往 Arcade One。";
 
-export function eventFrame(at: number, id: number, event: string, data: object = {}, extra: object = {}): StreamFrame {
-  return { at, envelope: { id, kind: "event", event, data, ...extra } };
+export function eventFrame(
+  at: number,
+  id: number,
+  event: string,
+  data: object = {},
+  extra: object = {},
+  hold?: string
+): StreamFrame {
+  return { at, envelope: { id, kind: "event", event, data, ...extra }, hold };
 }
 
-export function runStateFrame(at: number, id: number, status: string): StreamFrame {
-  return { at, envelope: { id, kind: "control", event: "run.state", status, data: {} } };
+export function runStateFrame(at: number, id: number, status: string, hold?: string): StreamFrame {
+  return { at, envelope: { id, kind: "control", event: "run.state", status, data: {} }, hold };
 }
 
 // Route run, in ms after the connection opens. The "route pending" card exists only
 // between worker.started and route_ready, so a test asserting it must delay `routeAt`
 // enough for a slow machine to still see it.
-export function routeRunScript({ routeAt = 180, doneAt = 500 } = {}): StreamFrame[] {
+export function routeRunScript({
+  routeAt = 180,
+  doneAt = 500,
+  holdRoute,
+  holdDone
+}: {
+  routeAt?: number;
+  doneAt?: number;
+  holdRoute?: string;
+  holdDone?: string;
+} = {}): StreamFrame[] {
   return [
     runStateFrame(10, 1, "running"),
     eventFrame(20, 2, "worker.started", { worker: "navigation_worker" }),
-    eventFrame(routeAt, 3, "navigation.route_ready", CHAT_ROUTE),
-    eventFrame(doneAt, 4, "assistant.completed", { reply: DEFAULT_REPLY, active_subagent: "main_agent" }),
-    runStateFrame(doneAt, 5, "completed")
+    eventFrame(routeAt, 3, "navigation.route_ready", CHAT_ROUTE, {}, holdRoute),
+    eventFrame(doneAt, 4, "assistant.completed", { reply: DEFAULT_REPLY, active_subagent: "main_agent" }, {}, holdDone),
+    runStateFrame(doneAt, 5, "completed", holdDone)
   ];
 }
 
@@ -322,8 +340,14 @@ export async function installStreamMock(page: Page, scripts: StreamFrame[][] = D
           this.readyState = MockEventSource.OPEN;
           this.onopen?.(new Event("open"));
         }, 5);
+        const held = new Map<string, Array<() => void>>();
+        (window as any).__ARCADEGENT_RELEASE__ = (key: string) => {
+          const callbacks = held.get(key) ?? [];
+          held.delete(key);
+          callbacks.forEach((callback) => callback());
+        };
         script.forEach((frame: any) => {
-          window.setTimeout(() => {
+          const dispatch = () => {
             if (this.readyState === MockEventSource.CLOSED) {
               return;
             }
@@ -343,7 +367,14 @@ export async function installStreamMock(page: Page, scripts: StreamFrame[][] = D
             }
             const event = new MessageEvent("message", { data: JSON.stringify(envelope) });
             this.listeners.get("message")?.forEach((handler) => handler(event));
-          }, 5 + frame.at);
+          };
+          if (frame.hold) {
+            const callbacks = held.get(frame.hold) ?? [];
+            callbacks.push(dispatch);
+            held.set(frame.hold, callbacks);
+          } else {
+            window.setTimeout(dispatch, 5 + frame.at);
+          }
         });
       }
 
@@ -368,6 +399,11 @@ export async function installStreamMock(page: Page, scripts: StreamFrame[][] = D
 
 export async function readStreamUrls(page: Page): Promise<string[]> {
   return page.evaluate(() => (window as any).__ARCADEGENT_SSE_URLS__ as string[]);
+}
+
+/// Releases frames declared with `hold` (both event and control frames).
+export async function releaseStreamFrame(page: Page, key: string) {
+  await page.evaluate((name) => (window as any).__ARCADEGENT_RELEASE__?.(name), key);
 }
 
 export async function installApiMocks(page: Page, options: { totalPages?: number } = {}) {
@@ -545,13 +581,28 @@ export async function installChatApiMocks(page: Page, options: ChatApiMockOption
   };
 }
 
-// The map dock starts folded; open it from its summary bar.
-export async function openMapDock(page: Page) {
-  const bar = page.getByTestId("map-dock").locator(".map-dock-bar");
-  await bar.waitFor();
-  if ((await bar.getAttribute("aria-expanded")) === "false") {
-    await bar.click();
+// Feed items carry their kind and state as data attributes.
+export const feedItems = (page: Page) => page.getByTestId("chat-feed");
+export const streamingReply = (page: Page) => page.locator('[data-kind="assistant"][data-streaming="true"]');
+export const finalReply = (page: Page) => page.locator('[data-kind="assistant"][data-final="true"]');
+export const intermediateReplies = (page: Page) =>
+  page.locator('[data-kind="assistant"][data-final="false"][data-streaming="false"]');
+export const toolRows = (page: Page) => page.locator('[data-kind="tool"]');
+export const mapCards = (page: Page) => page.locator('[data-kind="map"]').getByRole("button", { name: /查看地图/ });
+export const toolGroups = (page: Page) => page.getByTestId("tool-group");
+
+// Opens every folded tool group.
+export async function expandToolGroups(page: Page) {
+  const folded = page.locator('[data-testid="tool-group"] > button[aria-expanded="false"]');
+  while (await folded.count()) {
+    await folded.first().click();
   }
+}
+
+// Opens the large map of the last map item of the feed.
+export async function openMapPanel(page: Page) {
+  await mapCards(page).last().click();
+  await expect(page.getByTestId("map-panel")).toBeVisible();
 }
 
 export const CHAT_INPUT = "尽管问机厅相关问题";
@@ -562,11 +613,11 @@ export async function sendChat(page: Page, message = "给我一条到 Arcade One
   await page.getByRole("button", { name: "发送" }).click();
 }
 
-// Waits for the round to end (the process area folds itself), then opens it.
-export async function expandFinishedSteps(page: Page) {
-  const toggle = page.locator(".round-steps-toggle").first();
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await toggle.click();
+// The run was handed over to history: the composer is released.
+export async function waitForHandOver(page: Page) {
+  await expect(page.getByTestId("run-indicator")).toHaveCount(0);
+  await expect(page.getByPlaceholder(CHAT_INPUT)).toBeEnabled();
+  await expect(streamingReply(page)).toHaveCount(0);
 }
 
 // Every session detail request fails, so the run cannot be handed over.
@@ -578,7 +629,7 @@ export async function failSessionDetail(page: Page) {
 
 // Clicks the delete button of the listed session; small screens open the drawer first.
 export async function clickDeleteSession(page: Page) {
-  const menu = page.locator(".menu-btn");
+  const menu = page.getByRole("button", { name: "打开侧边栏" });
   if (await menu.isVisible()) {
     await menu.click();
   }

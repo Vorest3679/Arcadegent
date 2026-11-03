@@ -31,7 +31,7 @@ test("ArcadeBrowser keeps list, map, and actions in sync", async ({ page }) => {
   expect(navHref).toContain("callnative=0");
 
   await page.getByTestId("arcade-list-item-103").click();
-  await expect(page.getByTestId("arcade-list-item-103")).toHaveClass(/is-active/);
+  await expect(page.getByTestId("arcade-list-item-103")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("map-marker-101")).toHaveCount(0);
   await expect(page.getByTestId("map-marker-103")).toBeVisible();
   await expect(page.getByTestId("browser-detail-title")).toHaveText("Arcade Three");
@@ -88,7 +88,7 @@ test("ArcadeBrowser renders detailed cabinet information", async ({ page }) => {
   await expect(page.getByTestId("browser-detail-title")).toHaveText("Arcade One");
   await expect(page.getByText("First detail")).toBeVisible();
   await expect(page.getByRole("heading", { name: "机台信息（1）" })).toBeVisible();
-  await expect(page.locator(".browser-title-list b", { hasText: "maimai DX" })).toBeVisible();
+  await expect(page.getByTestId("arcade-title-list").getByText("maimai DX", { exact: true })).toBeVisible();
   await expect(page.getByText("数量：2", { exact: true })).toBeVisible();
   await expect(page.getByText("版本：2026", { exact: true })).toBeVisible();
 });
@@ -102,10 +102,10 @@ test("sidebar switches between chat and arcade views", async ({ page }) => {
 
   await page.getByRole("button", { name: "机厅检索" }).click();
   await expect(page).toHaveURL(/\/arcades$/);
-  await expect(page.locator(".topbar").getByRole("heading", { name: "机厅检索" })).toBeVisible();
+  await expect(page.getByTestId("app-topbar").getByRole("heading", { name: "机厅检索" })).toBeVisible();
 
   await page.getByRole("button", { name: "Agent 对话" }).click();
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.locator(".topbar").getByRole("heading", { name: "Agent 对话" })).toBeVisible();
+  await expect(page.getByTestId("app-topbar").getByRole("heading", { name: "Agent 对话" })).toBeVisible();
 });
 
