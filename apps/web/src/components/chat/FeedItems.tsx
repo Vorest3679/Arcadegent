@@ -42,28 +42,22 @@ export function UserMessage({ item }: { item: UserItem }) {
   );
 }
 
-// Final replies sit in a card; intermediate replies are lighter so the
-// answer stands out, but stay visible after the run ends.
+// Replies are plain text with no bubble or side rule, so the live stream and
+// the stored history render the same. Only the final reply carries its time.
 export const AssistantMessage = memo(function AssistantMessage({ item }: { item: AssistantItem }) {
   const content = useSmoothText(item.content, item.streaming);
-  const intermediate = !item.final && !item.streaming;
   return (
     <div
       data-kind="assistant"
       data-final={item.final ? "true" : "false"}
       data-streaming={item.streaming ? "true" : "false"}
-      className={cn(
-        "max-w-full",
-        intermediate
-          ? "border-l-2 border-primary/25 pl-3 text-muted-foreground [&_.chat-markdown]:text-sm [&_.chat-markdown]:leading-6"
-          : "rounded-2xl rounded-bl-md border bg-card px-4 py-3 shadow-sm"
-      )}
+      className="max-w-full"
     >
       {content.trim() ? (
         <MarkdownMessage content={content} className={item.streaming ? "is-streaming" : undefined} />
       ) : null}
       {item.final ? (
-        <time className="mt-2 block text-xs text-muted-foreground">{formatTimeLabel(item.at)}</time>
+        <time className="mt-1.5 block text-xs text-muted-foreground">{formatTimeLabel(item.at)}</time>
       ) : null}
     </div>
   );
