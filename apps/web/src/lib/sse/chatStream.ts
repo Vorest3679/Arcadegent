@@ -11,7 +11,8 @@ const SUBAGENT_LABEL: Record<string, string> = {
 };
 
 // Whitelisted tools: shown with their alias and a tool icon. Any other tool
-// (e.g. an MCP tool) is still listed, under its own name and without an icon.
+// (e.g. an MCP tool) is still listed, under its own name and with a generic
+// tool icon.
 const TOOL_LABEL: Record<string, string> = {
   invoke_worker: "派发任务",
   db_query_tool: "数据检索",

@@ -14,6 +14,7 @@ import {
   Map as MapIcon,
   MapPin,
   Maximize2,
+  Pickaxe,
   Route,
   Workflow,
   type LucideProps
@@ -24,7 +25,7 @@ import { useInView } from "@/hooks/useInView";
 import { useSmoothText } from "@/hooks/useSmoothText";
 import type { AssistantItem, ErrorItem, MapItem, ToolItem, ToolStatus, UserItem } from "@/lib/chatFeed";
 import { mapSummary } from "@/lib/mapArtifacts";
-import { formatAgentName, formatTimeLabel, formatToolName, isWhitelistedTool } from "@/lib/sse/chatStream";
+import { formatAgentName, formatTimeLabel, formatToolName } from "@/lib/sse/chatStream";
 import { cn } from "@/lib/utils";
 import { useChatFeedStore } from "@/stores/chatFeedStore";
 import { useRunStore } from "@/stores/runStore";
@@ -63,7 +64,8 @@ export const AssistantMessage = memo(function AssistantMessage({ item }: { item:
   );
 });
 
-// Icons of the whitelisted tools; any other tool is listed without one.
+// Icons of the whitelisted tools; any other tool (e.g. an MCP tool) shares
+// the pickaxe so every call still reads as a tool.
 const TOOL_ICON: Record<string, ComponentType<LucideProps>> = {
   invoke_worker: Workflow,
   db_query_tool: Database,
@@ -74,6 +76,8 @@ const TOOL_ICON: Record<string, ComponentType<LucideProps>> = {
   list_skills: BookOpen,
   read_skill: BookOpenText
 };
+
+const EXTERNAL_TOOL_ICON = Pickaxe;
 
 const STATUS_LABEL: Record<ToolStatus, string> = {
   running: "执行中",
@@ -100,7 +104,7 @@ function ToolStatusIcon({ status }: { status: ToolStatus }) {
 // of a call arrives later, and only that entry changes.
 export function ToolCallRow({ item }: { item: ToolItem }) {
   const status = useChatFeedStore((state) => state.toolStatus[item.key]) ?? "running";
-  const Icon = isWhitelistedTool(item.name) ? TOOL_ICON[item.name] : undefined;
+  const Icon = TOOL_ICON[item.name] ?? EXTERNAL_TOOL_ICON;
   const running = status === "running";
   return (
     <div data-kind="tool" data-status={status} title={item.name} className="flex">
@@ -204,9 +208,10 @@ export function ToolGroup({ items, open, onToggle }: {
   const running = statuses.some((status) => status === "running");
   const failed = statuses.filter((status) => status === "failed").length;
   const icons = [...new Set(items.map((item) => item.name))]
-    .filter(isWhitelistedTool)
-    .slice(0, 4)
-    .map((name) => ({ name, Icon: TOOL_ICON[name] }));
+    .map((name) => ({ name, Icon: TOOL_ICON[name] ?? EXTERNAL_TOOL_ICON }))
+    // One badge per icon: external tools share the pickaxe.
+    .filter(({ Icon }, index, all) => all.findIndex((entry) => entry.Icon === Icon) === index)
+    .slice(0, 4);
   return (
     <div data-kind="tool-group" data-testid="tool-group" className="grid gap-2">
       <button

@@ -50,11 +50,12 @@ test("a reloaded session folds tool calls and lists names, agents and status ico
   await expect(rows.nth(1)).toContainText("路线规划");
   await expect(rows.nth(1)).toContainText("导航执行");
   await expect(rows.nth(1).getByRole("img", { name: "已完成" })).toBeVisible();
-  // Whitelisted tools carry a tool icon; any other tool shows its own name without one.
+  // Whitelisted tools carry their own icon; any other tool shows its own name
+  // with the generic (pickaxe) icon.
   await expect(rows.nth(0).getByTestId("tool-icon")).toBeVisible();
   await expect(rows.nth(2)).toContainText("mcp_weather");
   await expect(rows.nth(2)).toHaveAttribute("title", "mcp_weather");
-  await expect(rows.nth(2).getByTestId("tool-icon")).toHaveCount(0);
+  await expect(rows.nth(2).getByTestId("tool-icon")).toBeVisible();
   await expect(feedItems(page)).toContainText("我先查一下。");
 });
 
