@@ -3,7 +3,8 @@ import type { ChatSessionStatus, ChatSessionSummary } from "../types";
 import { resolveUpdater, type Updater } from "./updater";
 
 // Session list and the active session. Its messages live in chatFeedStore,
-// the run being followed in runStore.
+// the run being followed in runStore. Pin state travels with each summary
+// (`pinned_at`), so the store needs no pin-specific fields.
 type SessionStore = {
   sessions: ChatSessionSummary[];
   activeSessionId: string | null;

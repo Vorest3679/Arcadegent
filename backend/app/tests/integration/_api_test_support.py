@@ -8,6 +8,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -45,6 +46,7 @@ class InMemorySessionStateRepository:
 
     def __init__(self) -> None:
         self._states: dict[str, AgentSessionState] = {}
+        self._pins: dict[str, str] = {}
 
     def health(self) -> dict[str, object]:
         return {"backend": "memory", "rows": len(self._states)}
@@ -79,7 +81,10 @@ class InMemorySessionStateRepository:
     ) -> list[ChatSessionSummaryRecord]:
         states = [state for state in self._states.values() if _client_matches_list_scope(state.client_id, client_id)]
         states.sort(key=lambda s: s.updated_at, reverse=True)
-        return [summary_record_from_state(state) for state in states[:limit]]
+        return [
+            summary_record_from_state(state).model_copy(update={"pinned_at": self._pins.get(state.session_id)})
+            for state in states[:limit]
+        ]
 
     def delete_session(self, session_id: str, *, client_id: str | None = None) -> bool:
         state = self._states.get(session_id)
@@ -88,7 +93,23 @@ class InMemorySessionStateRepository:
         if not _client_can_access(state.client_id, client_id):
             return False
         del self._states[session_id]
+        self._pins.pop(session_id, None)
         return True
+
+    def set_session_pinned(
+        self, session_id: str, *, pinned: bool, client_id: str | None = None
+    ) -> ChatSessionSummaryRecord | None:
+        state = self._states.get(session_id)
+        if state is None:
+            return None
+        if not _client_can_access(state.client_id, client_id):
+            return None
+        pinned_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z") if pinned else None
+        if pinned_at is None:
+            self._pins.pop(session_id, None)
+        else:
+            self._pins[session_id] = pinned_at
+        return summary_record_from_state(state).model_copy(update={"pinned_at": pinned_at})
 
     def save_session(self, state: AgentSessionState) -> None:
         from copy import deepcopy

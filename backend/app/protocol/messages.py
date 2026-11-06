@@ -293,6 +293,9 @@ class ChatSessionSummaryDto(BaseModel):
     turn_count: int
     created_at: str
     updated_at: str
+    # Server-side pin state; the frontend sorts pinned sessions first, newest
+    # pin on top. `None` means not pinned.
+    pinned_at: str | None = None
 
 
 class ChatSessionDetailDto(BaseModel):

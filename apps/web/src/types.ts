@@ -190,6 +190,8 @@ export type ChatSessionSummary = {
   turn_count: number;
   created_at: string;
   updated_at: string;
+  // Server-side pin timestamp; the sidebar lists pinned sessions first.
+  pinned_at?: string | null;
 };
 
 export type ChatSessionDetail = {

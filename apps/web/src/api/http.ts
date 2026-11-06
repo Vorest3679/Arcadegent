@@ -72,6 +72,21 @@ export async function postJson<T>(
   return parseJsonResponse<T>(resp, path);
 }
 
+export async function putJson<T>(
+  path: string,
+  payload: unknown,
+  query?: QueryParams
+): Promise<T> {
+  const resp = await fetch(buildUrl(path, query), {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  return parseJsonResponse<T>(resp, path);
+}
+
 export async function deleteJson(
   path: string,
   query?: QueryParams

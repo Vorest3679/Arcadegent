@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
@@ -23,6 +24,11 @@ from app.services.chat_session_summary import summary_record_from_state
 _SUMMARY_COLUMNS = (
     "session_id,client_id,intent,status,title,preview,visible_turn_count,created_at,updated_at"
 )
+
+
+def _utc_now_iso() -> str:
+    """Pin timestamp, ISO 8601 UTC with microseconds."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class SupabaseSessionStateRepository:
@@ -116,6 +122,7 @@ class SupabaseSessionStateRepository:
             for row in rows
             if isinstance(row, dict) and _client_matches_list_scope(row.get("client_id"), client_id)
         ]
+        pinned_by_id = self._fetch_pinned_at([row["session_id"] for row in rows])
         # Rows saved before the summary columns existed: summarize them from turns.
         legacy_ids = [row["session_id"] for row in rows if row.get("title") is None]
         legacy: dict[str, ChatSessionSummaryRecord] = {}
@@ -126,7 +133,9 @@ class SupabaseSessionStateRepository:
                 params={"select": "*", "session_id": f"in.({id_list})"},
             )
             for state in self._parse_state_list(response.json()):
-                legacy[state.session_id] = summary_record_from_state(state)
+                legacy[state.session_id] = summary_record_from_state(state).model_copy(
+                    update={"pinned_at": pinned_by_id.get(state.session_id)}
+                )
         summaries: list[ChatSessionSummaryRecord] = []
         for row in rows:
             if row["session_id"] in legacy:
@@ -143,9 +152,40 @@ class SupabaseSessionStateRepository:
                         turn_count=int(row.get("visible_turn_count") or 0),
                         created_at=row["created_at"],
                         updated_at=row["updated_at"],
+                        pinned_at=pinned_by_id.get(row["session_id"]),
                     )
                 )
         return summaries
+
+    def set_session_pinned(
+        self, session_id: str, *, pinned: bool, client_id: str | None = None
+    ) -> ChatSessionSummaryRecord | None:
+        """Pin/unpin in `chat_session_pins`; never touches `chat_sessions.updated_at`."""
+        ownership = self._http_get(
+            "/chat_sessions",
+            params={
+                "select": "session_id,client_id",
+                "session_id": f"eq.{quote(session_id, safe='')}",
+                "limit": "1",
+            },
+        )
+        rows = ownership.json()
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            return None
+        if not _client_can_access(rows[0].get("client_id"), client_id):
+            return None
+
+        pinned_at = _utc_now_iso() if pinned else None
+        if pinned:
+            self._http_post(
+                "/chat_session_pins",
+                payload={"session_id": session_id, "pinned_at": pinned_at},
+                params={"on_conflict": "session_id"},
+                prefer="resolution=merge-duplicates,return=minimal",
+            )
+        else:
+            self._http_delete(f"/chat_session_pins?session_id=eq.{quote(session_id, safe='')}")
+        return self._fetch_summary(session_id, pinned_at=pinned_at)
 
     def delete_session(self, session_id: str, *, client_id: str | None = None) -> bool:
         # Ownership check on the two columns it needs, not the whole row.
@@ -185,6 +225,59 @@ class SupabaseSessionStateRepository:
         )
         states = self._parse_state_list(response.json())
         return states[0] if states else None
+
+    def _fetch_pinned_at(self, session_ids: list[str]) -> dict[str, str]:
+        """Pinned timestamps for the listed sessions, keyed by session id."""
+        ids = [sid for sid in session_ids if '"' not in sid and "," not in sid]
+        if not ids:
+            return {}
+        id_list = ",".join(f'"{sid}"' for sid in ids)
+        response = self._http_get(
+            "/chat_session_pins",
+            params={"select": "session_id,pinned_at", "session_id": f"in.({id_list})"},
+        )
+        payload = response.json()
+        if not isinstance(payload, list):
+            raise RuntimeError("supabase_session_invalid_response")
+        pins: dict[str, str] = {}
+        for row in payload:
+            if isinstance(row, dict) and isinstance(row.get("session_id"), str) and row.get("pinned_at"):
+                pins[row["session_id"]] = str(row["pinned_at"])
+        return pins
+
+    def _fetch_summary(
+        self, session_id: str, *, pinned_at: str | None
+    ) -> ChatSessionSummaryRecord | None:
+        response = self._http_get(
+            "/chat_sessions",
+            params={
+                "select": _SUMMARY_COLUMNS,
+                "session_id": f"eq.{quote(session_id, safe='')}",
+                "limit": "1",
+            },
+        )
+        rows = response.json()
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            return None
+        row = rows[0]
+        if row.get("title") is None:
+            # A legacy row: its summary columns were never backfilled.
+            state = self._fetch_by_id(session_id)
+            if state is None:
+                return None
+            return summary_record_from_state(state).model_copy(update={"pinned_at": pinned_at})
+        return ChatSessionSummaryRecord(
+            session_id=row["session_id"],
+            client_id=row.get("client_id"),
+            intent=row.get("intent") or "search",
+            status=row.get("status") or "idle",
+            title=row["title"],
+            preview=row.get("preview"),
+            turn_count=int(row.get("visible_turn_count") or 0),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            pinned_at=pinned_at,
+        )
 
     def _parse_state_list(self, payload: Any) -> list[AgentSessionState]:
         if not isinstance(payload, list):

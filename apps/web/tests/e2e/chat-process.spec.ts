@@ -264,7 +264,8 @@ test("deleting a session updates locally without re-listing sessions", async ({ 
     await menu.click();
   }
   await expect(page.getByTestId("session-row")).toHaveCount(1);
-  await page.getByRole("button", { name: /删除会话/ }).click();
+  await page.getByRole("button", { name: /会话操作/ }).first().click();
+  await page.getByRole("menuitem", { name: "删除会话", exact: true }).click();
 
   await expect(page.getByTestId("session-row")).toHaveCount(0);
   if (drawer) {

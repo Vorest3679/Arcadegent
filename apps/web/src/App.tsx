@@ -28,6 +28,7 @@ export function App() {
         onOpenArcadesView={chat.openArcadesView}
         onRefresh={chat.refreshSessions}
         onSelectSession={chat.selectSession}
+        onToggleSessionPin={(sessionId) => void chat.toggleSessionPin(sessionId)}
         onDeleteSession={(sessionId) => void chat.removeSession(sessionId)}
       />
 

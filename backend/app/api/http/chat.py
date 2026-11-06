@@ -7,7 +7,7 @@ from ipaddress import ip_address
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
-from pydantic import StringConstraints
+from pydantic import BaseModel, StringConstraints
 
 from app.agent.runtime.session_state import AgentSessionState, SessionOwnershipError
 from app.api.deps import get_container
@@ -41,6 +41,12 @@ class ChatSubmissionRequest(ChatRequest):
     """HTTP submissions require an identity; internal runtime calls may omit it."""
 
     client_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+
+
+class ChatSessionPinRequest(BaseModel):
+    """Pin/unpin one history session; `pinned_at` is server-assigned."""
+
+    pinned: bool
 
 
 def _limit_chat(request: ChatSubmissionRequest, http_request: Request, container: AppContainer) -> None:
@@ -215,3 +221,25 @@ def delete_chat_session(
         raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
     container.run_manager.forget(session_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/chat/sessions/{session_id}/pin", response_model=ChatSessionSummaryDto)
+def pin_chat_session(
+    session_id: str,
+    request: ChatSessionPinRequest,
+    client_id: str | None = Query(default=None, min_length=1, max_length=128),
+    container: AppContainer = Depends(get_container),
+) -> ChatSessionSummaryDto:
+    """Pin a history session to the top of the list, or clear its pin."""
+    record = container.session_store.set_session_pinned(
+        session_id, pinned=request.pinned, client_id=client_id
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"session '{session_id}' not found")
+    return ChatSessionSummaryDto.model_validate(
+        {
+            **record.model_dump(),
+            "intent": normalize_intent(record.intent),
+            "status": _live_status(record.session_id, record.status, container=container),
+        }
+    )

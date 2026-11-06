@@ -369,3 +369,52 @@ def test_session_detail_hides_model_evidence_turns(tmp_path: Path) -> None:
     detail = client.get("/api/chat/sessions/s_visible123").json()
     assert [turn["content"] for turn in detail["turns"]] == ["hello", "only show once"]
     assert detail["turn_count"] == 2
+
+
+def test_chat_session_pin_round_trip(tmp_path: Path, chat_clock) -> None:
+    client = _build_client(tmp_path, chat_clock=chat_clock)
+    _stub_provider_adapter(client)
+
+    first = client.post("/api/chat", json={"client_id": "client-a", "message": "find Gamma", "page_size": 3})
+    assert first.status_code == 200
+    first_id = first.json()["session_id"]
+    chat_clock.advance()  # Pass the submission cooldown without sleeping.
+    second = client.post("/api/chat", json={"client_id": "client-a", "message": "find another", "page_size": 3})
+    assert second.status_code == 200
+    second_id = second.json()["session_id"]
+
+    before = client.get("/api/chat/sessions", params={"client_id": "client-a"}).json()
+    before_order = [row["session_id"] for row in before]
+    assert set(before_order) == {first_id, second_id}
+    assert all(row["pinned_at"] is None for row in before)
+
+    pinned = client.put(
+        f"/api/chat/sessions/{first_id}/pin", json={"pinned": True}, params={"client_id": "client-a"}
+    )
+    assert pinned.status_code == 200
+    pinned_payload = pinned.json()
+    assert pinned_payload["session_id"] == first_id
+    assert pinned_payload["pinned_at"]
+    before_first = next(row for row in before if row["session_id"] == first_id)
+    # A pin is UI state: it must not bump updated_at or reorder the API list.
+    assert pinned_payload["updated_at"] == before_first["updated_at"]
+
+    after = client.get("/api/chat/sessions", params={"client_id": "client-a"}).json()
+    assert [row["session_id"] for row in after] == before_order
+    pins = {row["session_id"]: row["pinned_at"] for row in after}
+    assert pins[first_id] == pinned_payload["pinned_at"]
+    assert pins[second_id] is None
+
+    foreign = client.put(
+        f"/api/chat/sessions/{first_id}/pin", json={"pinned": False}, params={"client_id": "client-b"}
+    )
+    assert foreign.status_code == 404
+    missing = client.put("/api/chat/sessions/s_missing/pin", json={"pinned": True})
+    assert missing.status_code == 404
+
+    unpinned = client.put(
+        f"/api/chat/sessions/{first_id}/pin", json={"pinned": False}, params={"client_id": "client-a"}
+    )
+    assert unpinned.status_code == 200
+    assert unpinned.json()["pinned_at"] is None
+    assert all(row["pinned_at"] is None for row in client.get("/api/chat/sessions").json())

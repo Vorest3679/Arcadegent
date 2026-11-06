@@ -5,7 +5,7 @@ import type {
   ChatSessionSummary
 } from "../types";
 import { assertChatSessionDetail } from "../lib/sessionSchema";
-import { buildUrl, deleteJson, fetchJson, postJson } from "./http";
+import { buildUrl, deleteJson, fetchJson, postJson, putJson } from "./http";
 
 export async function dispatchChatSession(payload: ChatRequest): Promise<ChatSessionDispatch> {
   return postJson<ChatSessionDispatch>("/api/chat/sessions", payload);
@@ -45,5 +45,19 @@ export async function getChatSession(sessionId: string, clientId?: string): Prom
 
 export async function deleteChatSession(sessionId: string, clientId?: string): Promise<void> {
   return deleteJson(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, { client_id: clientId });
+}
+
+// Pin state lives on the server; the response is the updated summary, whose
+// `pinned_at` the caller uses to settle the optimistic update.
+export async function setChatSessionPinned(
+  sessionId: string,
+  pinned: boolean,
+  clientId?: string
+): Promise<ChatSessionSummary> {
+  return putJson<ChatSessionSummary>(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/pin`,
+    { pinned },
+    { client_id: clientId }
+  );
 }
 

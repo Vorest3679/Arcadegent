@@ -629,11 +629,13 @@ export async function failSessionDetail(page: Page) {
   });
 }
 
-// Clicks the delete button of the listed session; small screens open the drawer first.
+// Opens the row actions menu, then clicks its delete item; small screens open
+// the drawer first.
 export async function clickDeleteSession(page: Page) {
   const menu = page.getByRole("button", { name: "打开侧边栏" });
   if (await menu.isVisible()) {
     await menu.click();
   }
-  await page.getByRole("button", { name: /删除会话/ }).click();
+  await page.getByRole("button", { name: /会话操作/ }).first().click();
+  await page.getByRole("menuitem", { name: "删除会话", exact: true }).click();
 }

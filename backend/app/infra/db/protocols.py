@@ -99,3 +99,13 @@ class SessionStateRepository(SessionStore, Protocol):
     def delete_session(self, session_id: str, *, client_id: str | None = None) -> bool:
         """Delete one session by id; return True when it existed."""
         ...
+
+    def set_session_pinned(
+        self, session_id: str, *, pinned: bool, client_id: str | None = None
+    ) -> ChatSessionSummaryRecord | None:
+        """Pin or unpin one session and return its updated summary.
+
+        Returns ``None`` when the session is missing or owned by another client.
+        Pin changes must not alter the session's ``updated_at``.
+        """
+        ...

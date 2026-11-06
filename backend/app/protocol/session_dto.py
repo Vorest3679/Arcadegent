@@ -70,6 +70,9 @@ class ChatSessionSummaryRecord(BaseModel):
     turn_count: int = 0
     created_at: str
     updated_at: str
+    # From the `chat_session_pins` table (NULL when not pinned); the UI orders
+    # pinned sessions first, newest pin on top.
+    pinned_at: str | None = None
 
 
 class ChatSessionCreateDto(BaseModel):

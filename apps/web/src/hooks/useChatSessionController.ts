@@ -4,7 +4,8 @@ import {
   deleteChatSession,
   dispatchChatSession,
   getChatSession,
-  listChatSessions
+  listChatSessions,
+  setChatSessionPinned
 } from "../api/sessionApi";
 import {
   loadCachedClientLocation,
@@ -45,6 +46,8 @@ export function useChatSessionController() {
   // Only the latest detail request may apply; an older response (e.g. the
   // running snapshot requested on stream.reset) must not overwrite a newer one.
   const detailRequestRef = useRef(0);
+  // One pin request per session at a time: a double click must not race itself.
+  const pinRequestsRef = useRef(new Set<string>());
   // Last loaded detail per session: shown at once on switching while the fresh one loads.
   const detailCacheRef = useRef(new Map<string, ChatSessionDetail>());
   const clientIdRef = useRef("");
@@ -397,6 +400,37 @@ export function useChatSessionController() {
     store.setDeletingSessionId(null);
   }
 
+  function applySessionPin(sessionId: string, pinnedAt: string | null): void {
+    sessionState().setSessions((sessions) =>
+      sessions.map((item) => (item.session_id === sessionId ? { ...item, pinned_at: pinnedAt } : item))
+    );
+  }
+
+  // Pin state is server-owned: update the row at once, then settle with the
+  // timestamp the server returns (or roll back and report the failure).
+  async function toggleSessionPin(sessionId: string): Promise<void> {
+    if (pinRequestsRef.current.has(sessionId)) {
+      return;
+    }
+    const session = sessionState().sessions.find((item) => item.session_id === sessionId);
+    if (!session) {
+      return;
+    }
+    const pinned = !session.pinned_at;
+    const previousPinnedAt = session.pinned_at ?? null;
+    pinRequestsRef.current.add(sessionId);
+    applySessionPin(sessionId, pinned ? new Date().toISOString() : null);
+    try {
+      const updated = await setChatSessionPinned(sessionId, pinned, clientIdRef.current);
+      applySessionPin(sessionId, updated.pinned_at ?? null);
+    } catch (err) {
+      applySessionPin(sessionId, previousPinnedAt);
+      pushError(err instanceof Error ? err.message : pinned ? "置顶会话失败" : "取消置顶失败");
+    } finally {
+      pinRequestsRef.current.delete(sessionId);
+    }
+  }
+
   function selectSession(sessionId: string): void {
     sessionGenerationRef.current += 1;
     const app = appState();
@@ -430,6 +464,7 @@ export function useChatSessionController() {
     quickAsk,
     removeSession,
     selectSession,
-    refreshSessions
+    refreshSessions,
+    toggleSessionPin
   };
 }
