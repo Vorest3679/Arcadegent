@@ -47,7 +47,10 @@ jobs:
 
   frontend:
     name: Frontend build and E2E
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest now resolves to 26.04, which Playwright 1.59 does not
+    # recognise ("Playwright does not support chromium on ubuntu26.04-x64").
+    # Move back to ubuntu-latest once @playwright/test is upgraded to >= 1.61.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/web
