@@ -23,7 +23,6 @@ type SidebarSessionItemProps = {
   active: boolean;
   pinned: boolean;
   deleting: boolean;
-  searchResult: boolean;
   onClick: () => void;
   onTogglePin: () => void;
   onDelete: () => void;
@@ -34,49 +33,26 @@ function SidebarSessionItem({
   active,
   pinned,
   deleting,
-  searchResult,
   onClick,
   onTogglePin,
   onDelete
 }: SidebarSessionItemProps) {
-  // Search results invert the normal row: green surface, white on hover.
-  // Selecting a result drops back to the regular active style.
-  const inverted = searchResult && !active;
   return (
     <li
       data-testid="session-row"
       data-active={active ? "true" : "false"}
       data-pinned={pinned ? "true" : "false"}
-      data-search-result={searchResult ? "true" : "false"}
     >
       <div
         className={cn(
-          "group flex items-center gap-1 rounded-lg border border-transparent transition-colors",
-          inverted
-            ? "border-primary/50 bg-primary text-primary-foreground hover:border-primary hover:bg-white hover:text-primary"
-            : "hover:bg-accent/60",
+          "group flex items-center gap-1 rounded-lg border border-transparent transition-colors hover:bg-accent/60",
           active && "border-primary/30 bg-accent"
         )}
       >
         <button type="button" onClick={onClick} className="min-w-0 flex-1 px-3 py-2 text-left">
           <span className="line-clamp-2 text-sm leading-snug font-medium">{item.title}</span>
-          <span
-            className={cn(
-              "mt-0.5 flex items-center gap-1 text-xs",
-              inverted
-                ? "text-primary-foreground/75 group-hover:text-primary/75"
-                : "text-muted-foreground"
-            )}
-          >
-            {pinned ? (
-              <Pin
-                className={cn(
-                  "size-3 shrink-0 fill-current",
-                  inverted ? "text-primary-foreground group-hover:text-primary" : "text-primary"
-                )}
-                aria-hidden="true"
-              />
-            ) : null}
+          <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+            {pinned ? <Pin className="size-3 shrink-0 fill-current text-primary" aria-hidden="true" /> : null}
             <span className="truncate">{formatTimeLabel(item.updated_at)}</span>
           </span>
         </button>
@@ -88,12 +64,7 @@ function SidebarSessionItem({
             aria-label={`会话操作：${item.title}`}
             title="更多操作"
             disabled={deleting}
-            className={cn(
-              "mr-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
-              inverted
-                ? "text-primary-foreground/80 group-hover:text-primary hover:bg-white/20 group-hover:hover:bg-primary/10 data-[state=open]:bg-white data-[state=open]:text-primary"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
-            )}
+            className="mr-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=open]:bg-accent data-[state=open]:text-foreground disabled:pointer-events-none disabled:opacity-50"
           >
             {deleting ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -334,7 +305,6 @@ function SidebarContent({
               active={item.session_id === activeSessionId}
               pinned={Boolean(item.pinned_at)}
               deleting={deletingSessionId === item.session_id}
-              searchResult={isSearching}
               onClick={() => handleSelectSession(item.session_id)}
               onTogglePin={() => onToggleSessionPin(item.session_id)}
               onDelete={() => onDeleteSession(item.session_id)}

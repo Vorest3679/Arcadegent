@@ -146,19 +146,15 @@ test("键盘拼音组合输入期间不提前过滤，提交后才检索", async
   await expect(rows).toContainText("周末出行");
 });
 
-test("搜索结果反色显示，选中后回到普通会话样式", async ({ page }) => {
+test("搜索结果使用普通会话样式，选中后收起搜索框", async ({ page }) => {
   await page.getByRole("button", { name: "搜索会话" }).click();
   await page.getByRole("textbox", { name: "搜索会话或机厅" }).fill("银河");
 
   const row = page.getByTestId("session-row").filter({ hasText: "周末出行" });
   const surface = row.locator("div").first();
-  await expect(row).toHaveAttribute("data-search-result", "true");
-  await expect(surface).toHaveClass(/bg-primary/);
-  const green = await surface.evaluate((element) => getComputedStyle(element).backgroundColor);
-  expect(green).not.toBe("rgb(255, 255, 255)");
-
-  await surface.hover();
-  await expect(surface).toHaveCSS("background-color", "rgb(255, 255, 255)");
+  await expect(row).toHaveCount(1);
+  await expect(surface).not.toHaveClass(/bg-primary/);
+  await expect(row).not.toHaveAttribute("data-search-result");
 
   await row.locator("button").first().click();
   await expect(row).toHaveAttribute("data-active", "true");
