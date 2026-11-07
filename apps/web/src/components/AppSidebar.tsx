@@ -1,5 +1,5 @@
-import { Fragment, useMemo } from "react";
-import { Loader2, MessageSquareText, MoreHorizontal, Pin, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, MessageSquareText, MoreHorizontal, Pin, Plus, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -11,6 +11,7 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { formatTimeLabel } from "@/lib/sse/chatStream";
+import { filterSessionsByKeyword } from "@/lib/sessionSearch";
 import { orderSessionsByPins } from "@/lib/sessionPins";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/appStore";
@@ -22,6 +23,7 @@ type SidebarSessionItemProps = {
   active: boolean;
   pinned: boolean;
   deleting: boolean;
+  searchResult: boolean;
   onClick: () => void;
   onTogglePin: () => void;
   onDelete: () => void;
@@ -32,22 +34,49 @@ function SidebarSessionItem({
   active,
   pinned,
   deleting,
+  searchResult,
   onClick,
   onTogglePin,
   onDelete
 }: SidebarSessionItemProps) {
+  // Search results invert the normal row: green surface, white on hover.
+  // Selecting a result drops back to the regular active style.
+  const inverted = searchResult && !active;
   return (
-    <li data-testid="session-row" data-active={active ? "true" : "false"} data-pinned={pinned ? "true" : "false"}>
+    <li
+      data-testid="session-row"
+      data-active={active ? "true" : "false"}
+      data-pinned={pinned ? "true" : "false"}
+      data-search-result={searchResult ? "true" : "false"}
+    >
       <div
         className={cn(
-          "group flex items-center gap-1 rounded-lg border border-transparent transition-colors hover:bg-accent/60",
+          "group flex items-center gap-1 rounded-lg border border-transparent transition-colors",
+          inverted
+            ? "border-primary/50 bg-primary text-primary-foreground hover:border-primary hover:bg-white hover:text-primary"
+            : "hover:bg-accent/60",
           active && "border-primary/30 bg-accent"
         )}
       >
         <button type="button" onClick={onClick} className="min-w-0 flex-1 px-3 py-2 text-left">
           <span className="line-clamp-2 text-sm leading-snug font-medium">{item.title}</span>
-          <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-            {pinned ? <Pin className="size-3 shrink-0 fill-current text-primary" aria-hidden="true" /> : null}
+          <span
+            className={cn(
+              "mt-0.5 flex items-center gap-1 text-xs",
+              inverted
+                ? "text-primary-foreground/75 group-hover:text-primary/75"
+                : "text-muted-foreground"
+            )}
+          >
+            {pinned ? (
+              <Pin
+                className={cn(
+                  "size-3 shrink-0 fill-current",
+                  inverted ? "text-primary-foreground group-hover:text-primary" : "text-primary"
+                )}
+                aria-hidden="true"
+              />
+            ) : null}
             <span className="truncate">{formatTimeLabel(item.updated_at)}</span>
           </span>
         </button>
@@ -59,7 +88,12 @@ function SidebarSessionItem({
             aria-label={`会话操作：${item.title}`}
             title="更多操作"
             disabled={deleting}
-            className="mr-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=open]:bg-accent data-[state=open]:text-foreground disabled:pointer-events-none disabled:opacity-50"
+            className={cn(
+              "mr-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
+              inverted
+                ? "text-primary-foreground/80 group-hover:text-primary hover:bg-white/20 group-hover:hover:bg-primary/10 data-[state=open]:bg-white data-[state=open]:text-primary"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+            )}
           >
             {deleting ? (
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -88,7 +122,6 @@ type AppSidebarProps = {
   onStartNewSession: () => void;
   onOpenChatView: () => void;
   onOpenArcadesView: () => void;
-  onRefresh: () => void;
   onSelectSession: (sessionId: string) => void;
   onToggleSessionPin: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
@@ -98,7 +131,6 @@ function SidebarContent({
   onStartNewSession,
   onOpenChatView,
   onOpenArcadesView,
-  onRefresh,
   onSelectSession,
   onToggleSessionPin,
   onDeleteSession
@@ -109,11 +141,40 @@ function SidebarContent({
   const sessionsLoading = useSessionStore((state) => state.sessionsLoading);
   const deletingSessionId = useSessionStore((state) => state.deletingSessionId);
   const orderedSessions = useMemo(() => orderSessionsByPins(sessions), [sessions]);
-  const pinnedCount = orderedSessions.filter((item) => item.pinned_at).length;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [searchResults, setSearchResults] = useState<ChatSessionSummary[]>([]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchTriggerRef = useRef<HTMLButtonElement>(null);
+  const isSearching = searchOpen && keyword.trim().length > 0;
+  const visibleSessions = isSearching ? searchResults : orderedSessions;
+  const pinnedCount = visibleSessions.filter((item) => item.pinned_at).length;
   const navItems = [
     { key: "chat", label: "Agent 对话", icon: MessageSquareText, onClick: onOpenChatView },
-    { key: "arcades", label: "机厅检索", icon: Search, onClick: onOpenArcadesView }
+    { key: "arcades", label: "机厅查找", icon: Search, onClick: onOpenArcadesView }
   ] as const;
+
+  useEffect(() => {
+    if (searchOpen) {
+      searchInputRef.current?.focus();
+    }
+  }, [searchOpen]);
+
+  // Each keyword edit reruns the match against title/preview and the compact
+  // artifact index (Chinese name first, then the separate pinyin branch).
+  useEffect(() => {
+    if (!isSearching) {
+      setSearchResults(orderedSessions);
+      return;
+    }
+    setSearchResults(filterSessionsByKeyword(orderedSessions, keyword));
+  }, [isSearching, keyword, orderedSessions]);
+
+  function closeSearch(): void {
+    setSearchOpen(false);
+    setKeyword("");
+    requestAnimationFrame(() => searchTriggerRef.current?.focus());
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4">
@@ -145,19 +206,68 @@ function SidebarContent({
         ))}
       </nav>
 
-      <div className="flex items-center justify-between px-1">
-        <span className="text-xs font-medium tracking-wide text-muted-foreground">历史会话</span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onRefresh}
-          disabled={sessionsLoading}
-          className="h-7 px-2 text-xs text-muted-foreground"
+      <div className="relative flex h-8 items-center px-1">
+        <span
+          className={cn(
+            "text-xs font-medium tracking-wide text-muted-foreground transition-opacity duration-200",
+            searchOpen && "opacity-0"
+          )}
         >
-          <RefreshCw className={cn("size-3.5", sessionsLoading && "animate-spin")} aria-hidden="true" />
-          {sessionsLoading ? "同步中" : "刷新"}
-        </Button>
+          历史会话
+        </span>
+        {/* Anchored right so expanding the bar towards the label also slides
+            the left-aligned search icon leftwards. */}
+        <div
+          className={cn(
+            "absolute inset-y-0 right-0 flex items-center overflow-hidden transition-[width] duration-300 ease-out",
+            searchOpen ? "w-full" : "w-[4.5rem]"
+          )}
+        >
+          {searchOpen ? (
+            <div className="flex h-7 w-full items-center gap-1 rounded-md border border-border bg-card px-2 shadow-sm focus-within:ring-2 focus-within:ring-ring/40">
+              <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    closeSearch();
+                  }
+                }}
+                placeholder="搜索会话或机厅"
+                aria-label="搜索会话或机厅"
+                inputMode="search"
+                enterKeyHint="search"
+                autoComplete="off"
+                spellCheck={false}
+                className="h-6 min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+              />
+              <button
+                type="button"
+                onClick={closeSearch}
+                aria-label="取消搜索"
+                title="取消搜索"
+                className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <X className="size-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          ) : (
+            <button
+              ref={searchTriggerRef}
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              aria-label="搜索会话"
+              title="搜索会话"
+              className="inline-flex h-7 w-full items-center justify-end gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+            >
+              <Search className="size-3.5" aria-hidden="true" />
+              搜索
+            </button>
+          )}
+        </div>
       </div>
 
       <ul className="-mx-1 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-1">
@@ -167,7 +277,10 @@ function SidebarContent({
         {!sessionsLoading && sessions.length === 0 ? (
           <li className="px-3 py-2 text-sm text-muted-foreground">暂无历史会话</li>
         ) : null}
-        {orderedSessions.map((item, index) => (
+        {!sessionsLoading && sessions.length > 0 && isSearching && visibleSessions.length === 0 ? (
+          <li className="px-3 py-2 text-sm text-muted-foreground">没有匹配的会话</li>
+        ) : null}
+        {visibleSessions.map((item, index) => (
           <Fragment key={item.session_id}>
             {pinnedCount > 0 && index === pinnedCount ? (
               <li aria-hidden="true" className="mx-1 my-1 border-t border-border/70" />
@@ -177,6 +290,7 @@ function SidebarContent({
               active={item.session_id === activeSessionId}
               pinned={Boolean(item.pinned_at)}
               deleting={deletingSessionId === item.session_id}
+              searchResult={isSearching}
               onClick={() => onSelectSession(item.session_id)}
               onTogglePin={() => onToggleSessionPin(item.session_id)}
               onDelete={() => onDeleteSession(item.session_id)}

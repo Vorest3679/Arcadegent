@@ -18,6 +18,13 @@
 | `stores/sessionStore.ts` | 会话列表、当前会话 id/状态、加载与发送标记 |
 | `stores/appStore.ts` | 视图模式、侧边栏、输入框内容 |
 
+## 侧栏：会话搜索
+
+- “历史会话”右侧是搜索入口；点击后入口向右展开为输入框，图标随左边界左移，右侧出现取消按钮。取消或按 Escape 清空关键词并恢复历史列表。
+- 搜索状态只存在于 `AppSidebar`（`searchOpen`、`keyword`、`searchResults`）。关键词变化触发 `useEffect`，用 `lib/sessionSearch.ts` 过滤当前会话列表；会话列表因发送、删除或后台刷新变化时，同一 effect 重新计算。
+- 命中范围是标题、预览和 `ChatSessionSummary.artifact_shops`。机厅名称按普通文本匹配；带拼音的机厅再走一个独立分支，先去掉 `-`、空格等分隔符，再比较 `name_pinyin`，因此 `yin-he`、`yinhe` 都能命中“银河电玩城”。
+- 搜索结果采用反色行：绿色背景、白色文字，悬停变白底；点击某条结果后该行回到普通激活样式，搜索词和结果列表保留。没有命中时显示“没有匹配的会话”。
+
 ## 信息流条目
 
 定义在 `lib/chatFeed.ts`：
@@ -114,7 +121,7 @@ key 由轮次和条目在轮次中的位置推出，实时与历史两条路径�
 
 | 组件文件 | 本项目使用位置与用途 | 底层实现 | 官网文档 |
 | --- | --- | --- | --- |
-| `button.tsx` | `AppSidebar`、`AppTopbar`、`chat/ChatComposer`、`arcade/ArcadeSearchPanel`、`map/MapActionBar`：新建、刷新、发送、分页、地图操作等按钮 | 原生 button；本地变体表；`asChild` 使用 Radix Slot | [Button](https://ui.shadcn.com/docs/components/radix/button) |
+| `button.tsx` | `AppSidebar`、`AppTopbar`、`chat/ChatComposer`、`arcade/ArcadeSearchPanel`、`map/MapActionBar`：新建、搜索、发送、分页、地图操作等按钮 | 原生 button；本地变体表；`asChild` 使用 Radix Slot | [Button](https://ui.shadcn.com/docs/components/radix/button) |
 | `input.tsx` | `arcade/ArcadeSearchPanel`：机厅名称、页码等输入 | 原生 input | [Input](https://ui.shadcn.com/docs/components/radix/input) |
 | `textarea.tsx` | `chat/ChatComposer`：多行聊天输入，配合业务组件处理高度、发送和输入法行为 | 原生 textarea；本地使用 `forwardRef` 适配 React 18 | [Textarea](https://ui.shadcn.com/docs/components/radix/textarea) |
 | `native-select.tsx` | `arcade/ArcadeSearchPanel`：省市区、游戏、排序等选择 | 原生 select、option、optgroup，配合 Lucide 下拉图标 | [Native Select](https://ui.shadcn.com/docs/components/radix/native-select) |

@@ -10,7 +10,7 @@ export function AppTopbar() {
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
   const activeSession = sessions.find((session) => session.session_id === activeSessionId) ?? null;
-  const title = viewMode === "chat" ? activeSession?.title || "Agent 对话" : "机厅检索";
+  const title = viewMode === "chat" ? activeSession?.title || "Agent 对话" : "机厅查找";
 
   return (
     <header data-testid="app-topbar" className="flex h-14 shrink-0 items-center gap-3 border-b bg-white/50 px-4 backdrop-blur-md">

@@ -2,18 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from app.agent.llm.provider_adapter import ModelResponse
-from app.agent.runtime.session_state import AgentSessionState, state_from_dict
-from app.infra.db.protocols import SessionStateRepository
+from app.agent.runtime.session_state import AgentSessionState, AgentTurn, state_from_dict
 from backend.app.tests.integration._api_test_support import (
     InMemorySessionStateRepository,
     _build_client,
-    _build_client_with_rows,
     _stub_provider_adapter,
     _wait_for_session_status,
 )
@@ -143,6 +138,39 @@ def test_chat_session_detail_supports_legacy_route_payload(tmp_path: Path) -> No
     assert body["turns"][-1]["map_artifacts"]["destination"]["source_id"] == 10
     assert "client_location" in body
     assert "view_payload" in body
+
+def test_session_list_exposes_artifact_shop_search_index(tmp_path: Path) -> None:
+    store = InMemorySessionStateRepository()
+    store.seed(
+        AgentSessionState(
+            session_id="s_artifacts",
+            status="completed",
+            turns=[
+                AgentTurn(role="user", content="星极怎么走"),
+                AgentTurn(
+                    role="assistant",
+                    content="路线已经准备好了",
+                    payload={
+                        "map_artifacts": {
+                            "shops": [
+                                {"name": "星极游戏中心", "name_pinyin": "xing-ji-you-xi-zhong-xin"}
+                            ]
+                        }
+                    },
+                ),
+            ],
+        )
+    )
+    client = _build_client(tmp_path, session_store=store)
+
+    response = client.get("/api/chat/sessions")
+
+    assert response.status_code == 200
+    [summary] = response.json()
+    assert summary["artifact_shops"] == [
+        {"name": "星极游戏中心", "name_pinyin": "xing-ji-you-xi-zhong-xin"}
+    ]
+
 
 def test_chat_reuses_session_context(tmp_path: Path, chat_clock) -> None:
     client = _build_client(tmp_path, chat_clock=chat_clock)

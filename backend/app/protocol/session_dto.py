@@ -17,6 +17,17 @@ TurnScopeType = Literal["conversation", "worker"]
 SessionStatusType = Literal["idle", "running", "completed", "failed"]
 
 
+class ChatSessionArtifactShopRecord(BaseModel):
+    """One arcade shop referenced by a session's persisted map artifacts.
+
+    The summary row keeps only the name and pinyin so history search can match
+    arcade names without reading the full `turns` payload.
+    """
+
+    name: str
+    name_pinyin: str | None = None
+
+
 class AgentTurnRecord(BaseModel):
     """One persisted turn item inside `chat_sessions.turns`."""
 
@@ -54,6 +65,9 @@ class ChatSessionRecord(BaseModel):
     title: str | None = None
     preview: str | None = None
     visible_turn_count: int | None = None
+    # Arcade names/pinyin found in the session's map artifacts, kept compact
+    # for client-side history search.
+    artifact_shops: list[ChatSessionArtifactShopRecord] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
@@ -68,6 +82,9 @@ class ChatSessionSummaryRecord(BaseModel):
     title: str
     preview: str | None = None
     turn_count: int = 0
+    # Arcade names/pinyin found in the session's map artifacts, used by the
+    # history search. Empty for sessions without map results.
+    artifact_shops: list[ChatSessionArtifactShopRecord] = Field(default_factory=list)
     created_at: str
     updated_at: str
     # From the `chat_session_pins` table (NULL when not pinned); the UI orders
@@ -98,3 +115,4 @@ class ChatSessionUpdateDto(BaseModel):
     previous_response_id: str | None = None
     working_memory: dict[str, Any] = Field(default_factory=dict)
     turns: list[AgentTurnRecord] = Field(default_factory=list)
+    artifact_shops: list[ChatSessionArtifactShopRecord] = Field(default_factory=list)

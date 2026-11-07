@@ -16,19 +16,42 @@ from app.agent.runtime.session_state import (
 )
 from app.infra.db.online.config import SupabaseRepositoryConfig
 from app.infra.db.protocols import SessionStateRepository
-from app.protocol.session_dto import ChatSessionCreateDto, ChatSessionRecord, ChatSessionSummaryRecord
+from app.protocol.session_dto import (
+    ChatSessionArtifactShopRecord,
+    ChatSessionCreateDto,
+    ChatSessionRecord,
+    ChatSessionSummaryRecord,
+)
 from app.services.chat_session_mapper import ChatSessionMapper
 from app.services.chat_session_summary import summary_record_from_state
 
 
 _SUMMARY_COLUMNS = (
-    "session_id,client_id,intent,status,title,preview,visible_turn_count,created_at,updated_at"
+    "session_id,client_id,intent,status,title,preview,visible_turn_count,artifact_shops,"
+    "created_at,updated_at"
 )
 
 
 def _utc_now_iso() -> str:
     """Pin timestamp, ISO 8601 UTC with microseconds."""
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _parse_artifact_shops(raw: Any) -> list[ChatSessionArtifactShopRecord]:
+    """Parse the compact search index stored on a summary row."""
+    if not isinstance(raw, list):
+        return []
+    shops: list[ChatSessionArtifactShopRecord] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        raw_pinyin = item.get("name_pinyin")
+        pinyin = raw_pinyin.strip() if isinstance(raw_pinyin, str) and raw_pinyin.strip() else None
+        shops.append(ChatSessionArtifactShopRecord(name=name.strip(), name_pinyin=pinyin))
+    return shops
 
 
 class SupabaseSessionStateRepository:
@@ -150,6 +173,7 @@ class SupabaseSessionStateRepository:
                         title=row["title"],
                         preview=row.get("preview"),
                         turn_count=int(row.get("visible_turn_count") or 0),
+                        artifact_shops=_parse_artifact_shops(row.get("artifact_shops")),
                         created_at=row["created_at"],
                         updated_at=row["updated_at"],
                         pinned_at=pinned_by_id.get(row["session_id"]),
@@ -274,6 +298,7 @@ class SupabaseSessionStateRepository:
             title=row["title"],
             preview=row.get("preview"),
             turn_count=int(row.get("visible_turn_count") or 0),
+            artifact_shops=_parse_artifact_shops(row.get("artifact_shops")),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             pinned_at=pinned_at,

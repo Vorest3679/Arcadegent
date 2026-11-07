@@ -11,7 +11,7 @@ QQ群：1091316877
 - 实时过程展示：会话会推送 `session.started`、`subagent.changed`、`tool.*`、`navigation.route_ready`、`domain.arcade.results_ready`（候选机厅）、`assistant.token`、`assistant.completed` 等事件；每次派发对应一个 run，流中的 `run.state` 控制事件标记运行状态，详见 [会话运行生命周期与 SSE](docs/dev-details/会话运行生命周期与SSE.md)。
 - 地图化结果：聊天路线和机厅浏览都能渲染高德地图点位、路线卡片，并提供 Web 高德查看和唤起高德导航链接。
 - 机厅浏览器：支持机厅名称、地区级联、省市区筛选、只看有机台、更新时间/机种数/指定机种机台数排序、分页和门店详情。
-- 会话管理：支持历史会话列表、详情加载、运行中重连和删除会话。
+- 会话管理：支持历史会话列表、按标题/预览/机厅 artifacts 搜索（含拼音）、详情加载、运行中重连和删除会话。
 - 地理能力：支持浏览器定位缓存、高德逆地理编码、机厅坐标缓存、无坐标机厅的区域级地图回退。
 - Agent 工具系统：内置 DB 查询、地理解析、路线规划、总结工具，同时支持启动时发现 MCP 工具并投影为 `mcp__*`。
 - 评测工作台：`evaluate/` 提供离线契约回归和真实模型在线评测，硬约束判分与 LLM judge 质量判分分离，证据全量落盘。
@@ -412,7 +412,7 @@ SSE 事件流依赖长连接，Nginx 配置里 `/api/stream/` 已关闭 bufferin
 - `POST /api/chat/sessions`：异步派发 Agent 会话，返回 `session_id` 与 `run_id`，前端默认使用
 - `POST /api/chat/sessions/{session_id}/runs/{run_id}/cancel`：取消会话中指定的 run
 - `GET /api/stream/{session_id}`：SSE 实时事件流，必填 `run_id`，支持 `last_event_id` 和 `Last-Event-ID`；帧名固定为 `message`，业务事件名在 JSON 外壳的 `event` 字段
-- `GET /api/chat/sessions`：历史会话列表
+- `GET /api/chat/sessions`：历史会话列表（摘要含 `artifact_shops`，供按机厅中文名/拼音搜索）
 - `GET /api/chat/sessions/{session_id}`：会话详情、历史 turns、地图 artifacts
 - `DELETE /api/chat/sessions/{session_id}`：删除会话
 

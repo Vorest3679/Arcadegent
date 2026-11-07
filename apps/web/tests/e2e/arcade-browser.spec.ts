@@ -100,9 +100,9 @@ test("sidebar switches between chat and arcade views", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Agent 对话" })).toBeVisible();
 
-  await page.getByRole("button", { name: "机厅检索" }).click();
+  await page.getByRole("button", { name: "机厅查找" }).click();
   await expect(page).toHaveURL(/\/arcades$/);
-  await expect(page.getByTestId("app-topbar").getByRole("heading", { name: "机厅检索" })).toBeVisible();
+  await expect(page.getByTestId("app-topbar").getByRole("heading", { name: "机厅查找" })).toBeVisible();
 
   await page.getByRole("button", { name: "Agent 对话" }).click();
   await expect(page).toHaveURL(/\/$/);

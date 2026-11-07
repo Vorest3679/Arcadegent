@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.agent.runtime.session_state import (
     AgentSessionState,
     AgentTurn,
@@ -41,6 +39,7 @@ class ChatSessionMapper:
             title=summary.title,
             preview=summary.preview,
             visible_turn_count=summary.visible_turn_count,
+            artifact_shops=summary.artifact_shops,
             created_at=state.created_at or _utc_now_iso(),
             updated_at=state.updated_at or _utc_now_iso(),
         )

@@ -451,10 +451,6 @@ export function useChatSessionController() {
     void loadSession(sessionId);
   }
 
-  function refreshSessions(): void {
-    void loadSessionList(sessionState().activeSessionId || undefined);
-  }
-
   return {
     currentCity: clientLocation?.city?.trim() || "南京",
     openChatView,
@@ -464,7 +460,6 @@ export function useChatSessionController() {
     quickAsk,
     removeSession,
     selectSession,
-    refreshSessions,
     toggleSessionPin
   };
 }

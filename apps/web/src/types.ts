@@ -181,6 +181,11 @@ export type ChatHistoryTurn = {
   created_at: string;
 };
 
+export type ChatSessionArtifactShop = {
+  name: string;
+  name_pinyin?: string | null;
+};
+
 export type ChatSessionSummary = {
   session_id: string;
   title: string;
@@ -188,6 +193,9 @@ export type ChatSessionSummary = {
   intent: IntentType;
   status: ChatSessionStatus;
   turn_count: number;
+  // Arcade names/pinyin from the session's map artifacts, projected by the
+  // summary API so the sidebar can match them without loading details.
+  artifact_shops?: ChatSessionArtifactShop[];
   created_at: string;
   updated_at: string;
   // Server-side pin timestamp; the sidebar lists pinned sessions first.

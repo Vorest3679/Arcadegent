@@ -282,6 +282,13 @@ class ChatHistoryTurnDto(BaseModel):
     created_at: str
 
 
+class ChatSessionArtifactShopDto(BaseModel):
+    """Arcade name/pinyin kept on a session summary for history search."""
+
+    name: str
+    name_pinyin: str | None = None
+
+
 class ChatSessionSummaryDto(BaseModel):
     """Session summary card shown in sidebar/history list."""
 
@@ -291,6 +298,9 @@ class ChatSessionSummaryDto(BaseModel):
     intent: IntentType
     status: ChatSessionStatusType
     turn_count: int
+    # Arcade names/pinyin from the session's map artifacts; the client matches
+    # them alongside title/preview (including pinyin queries).
+    artifact_shops: list[ChatSessionArtifactShopDto] = Field(default_factory=list)
     created_at: str
     updated_at: str
     # Server-side pin state; the frontend sorts pinned sessions first, newest
