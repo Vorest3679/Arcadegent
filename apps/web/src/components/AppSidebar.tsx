@@ -142,10 +142,14 @@ function SidebarContent({
   const deletingSessionId = useSessionStore((state) => state.deletingSessionId);
   const orderedSessions = useMemo(() => orderSessionsByPins(sessions), [sessions]);
   const [searchOpen, setSearchOpen] = useState(false);
+  // `inputValue` follows the native input (including raw IME pinyin);
+  // `keyword` is the committed search term the effect consumes.
+  const [inputValue, setInputValue] = useState("");
   const [keyword, setKeyword] = useState("");
   const [searchResults, setSearchResults] = useState<ChatSessionSummary[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchTriggerRef = useRef<HTMLButtonElement>(null);
+  const composingRef = useRef(false);
   const isSearching = searchOpen && keyword.trim().length > 0;
   const visibleSessions = isSearching ? searchResults : orderedSessions;
   const pinnedCount = visibleSessions.filter((item) => item.pinned_at).length;
@@ -160,8 +164,10 @@ function SidebarContent({
     }
   }, [searchOpen]);
 
-  // Each keyword edit reruns the match against title/preview and the compact
-  // artifact index (Chinese name first, then the separate pinyin branch).
+  // Each committed keyword edit reruns the match against title/preview and the
+  // compact artifact index (Chinese name first, then the separate pinyin
+  // branch). IME composition is committed in the handlers below, so raw
+  // keyboard pinyin does not briefly filter the list as Chinese text.
   useEffect(() => {
     if (!isSearching) {
       setSearchResults(orderedSessions);
@@ -171,7 +177,9 @@ function SidebarContent({
   }, [isSearching, keyword, orderedSessions]);
 
   function closeSearch(): void {
+    composingRef.current = false;
     setSearchOpen(false);
+    setInputValue("");
     setKeyword("");
     requestAnimationFrame(() => searchTriggerRef.current?.focus());
   }
@@ -224,15 +232,42 @@ function SidebarContent({
           )}
         >
           {searchOpen ? (
-            <div className="flex h-7 w-full items-center gap-1 rounded-md border border-border bg-card px-2 shadow-sm focus-within:ring-2 focus-within:ring-ring/40">
+            <div className="flex h-7 w-full items-center gap-1 rounded-md border border-border bg-card px-2 shadow-sm transition-colors focus-within:border-ring">
               <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               <input
                 ref={searchInputRef}
                 type="text"
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
+                value={inputValue}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setInputValue(next);
+                  // During IME composition `next` is raw keyboard pinyin; only
+                  // the committed text becomes the search keyword.
+                  if (!composingRef.current) {
+                    setKeyword(next);
+                  }
+                }}
+                onCompositionStart={() => {
+                  composingRef.current = true;
+                }}
+                onCompositionEnd={(event) => {
+                  composingRef.current = false;
+                  const next = event.currentTarget.value;
+                  setInputValue(next);
+                  setKeyword(next);
+                }}
+                onBlur={(event) => {
+                  // Some mobile IMEs cancel composition without compositionend.
+                  if (!composingRef.current) {
+                    return;
+                  }
+                  composingRef.current = false;
+                  const next = event.currentTarget.value;
+                  setInputValue(next);
+                  setKeyword(next);
+                }}
                 onKeyDown={(event) => {
-                  if (event.key === "Escape") {
+                  if (event.key === "Escape" && !composingRef.current) {
                     closeSearch();
                   }
                 }}

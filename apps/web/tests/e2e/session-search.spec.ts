@@ -128,6 +128,24 @@ test("关键词动态命中标题、artifacts 机厅与拼音", async ({ page })
   await expect(page.getByText("没有匹配的会话")).toBeVisible();
 });
 
+test("键盘拼音组合输入期间不提前过滤，提交后才检索", async ({ page }) => {
+  await page.getByRole("button", { name: "搜索会话" }).click();
+  const input = page.getByRole("textbox", { name: "搜索会话或机厅" });
+  const rows = page.getByTestId("session-row");
+
+  await input.dispatchEvent("compositionstart");
+  await input.fill("yinhe");
+  await expect(input).toHaveValue("yinhe");
+  // Raw keyboard pinyin is visible in the input, but the committed keyword is
+  // still empty, so the full history list stays in place.
+  await expect(rows).toHaveCount(SESSIONS.length);
+
+  await input.fill("银河");
+  await input.dispatchEvent("compositionend");
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText("周末出行");
+});
+
 test("搜索结果反色显示，选中后回到普通会话样式", async ({ page }) => {
   await page.getByRole("button", { name: "搜索会话" }).click();
   await page.getByRole("textbox", { name: "搜索会话或机厅" }).fill("银河");
