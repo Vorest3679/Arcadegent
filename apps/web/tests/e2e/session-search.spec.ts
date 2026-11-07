@@ -150,7 +150,7 @@ test("搜索结果反色显示，选中后回到普通会话样式", async ({ pa
   await page.getByRole("button", { name: "搜索会话" }).click();
   await page.getByRole("textbox", { name: "搜索会话或机厅" }).fill("银河");
 
-  const row = page.getByTestId("session-row");
+  const row = page.getByTestId("session-row").filter({ hasText: "周末出行" });
   const surface = row.locator("div").first();
   await expect(row).toHaveAttribute("data-search-result", "true");
   await expect(surface).toHaveClass(/bg-primary/);
@@ -164,4 +164,20 @@ test("搜索结果反色显示，选中后回到普通会话样式", async ({ pa
   await expect(row).toHaveAttribute("data-active", "true");
   await expect(surface).toHaveClass(/bg-accent/);
   await expect(surface).not.toHaveClass(/bg-primary/);
+  // Selecting a result leaves search mode even with a keyword present.
+  await expect(page.getByRole("textbox", { name: "搜索会话或机厅" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "搜索会话" })).toBeVisible();
+});
+
+test("空关键词选中会话后收起搜索框", async ({ page }) => {
+  await page.getByRole("button", { name: "搜索会话" }).click();
+  const input = page.getByRole("textbox", { name: "搜索会话或机厅" });
+  await expect(input).toBeVisible();
+
+  const row = page.getByTestId("session-row").first();
+  await row.locator("button").first().click();
+
+  await expect(row).toHaveAttribute("data-active", "true");
+  await expect(page.getByRole("textbox", { name: "搜索会话或机厅" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "搜索会话" })).toBeVisible();
 });

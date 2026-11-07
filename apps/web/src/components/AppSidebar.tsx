@@ -184,6 +184,15 @@ function SidebarContent({
     requestAnimationFrame(() => searchTriggerRef.current?.focus());
   }
 
+  function handleSelectSession(sessionId: string): void {
+    // Selecting a session leaves search mode regardless of whether a keyword
+    // is present: the input collapses back to the trigger in both cases.
+    if (searchOpen) {
+      closeSearch();
+    }
+    onSelectSession(sessionId);
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4">
       <div className="flex items-center gap-2 px-1">
@@ -326,7 +335,7 @@ function SidebarContent({
               pinned={Boolean(item.pinned_at)}
               deleting={deletingSessionId === item.session_id}
               searchResult={isSearching}
-              onClick={() => onSelectSession(item.session_id)}
+              onClick={() => handleSelectSession(item.session_id)}
               onTogglePin={() => onToggleSessionPin(item.session_id)}
               onDelete={() => onDeleteSession(item.session_id)}
             />
