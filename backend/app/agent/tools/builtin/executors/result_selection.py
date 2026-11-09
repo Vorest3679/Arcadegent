@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent.artifacts.model import Artifact
-from app.agent.tools.base import ToolOutcome
+from app.agent.tools.base import ToolArgumentPreparationError, ToolOutcome
 from app.agent.tools.builtin.provider import BuiltinToolContext
 
 
@@ -23,12 +23,15 @@ def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, 
     args = dict(raw_arguments)
     ids = args.get("selected_shop_ids")
     if not isinstance(ids, list) or any(type(item) is not int for item in ids):
-        raise ValueError("selected_shop_ids must be an array of integers")
+        raise ToolArgumentPreparationError("selected_shop_ids must be an array of integers")
     if len(ids) != len(set(ids)):
-        raise ValueError("selected_shop_ids must not contain duplicates")
+        raise ToolArgumentPreparationError("selected_shop_ids must not contain duplicates")
     candidates = _artifact(runtime_context, "search_candidates")
     if not isinstance(candidates, list):
-        raise ValueError("no current-turn search candidates are available")
+        raise ToolArgumentPreparationError(
+            "no current-turn search candidates are available; "
+            "run db_query_tool in this turn before result_selection_tool"
+        )
     by_id = {
         item.get("source_id"): item
         for item in candidates
@@ -36,7 +39,10 @@ def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, 
     }
     unknown = [source_id for source_id in ids if source_id not in by_id]
     if unknown:
-        raise ValueError(f"selected_shop_ids are not current-turn candidates: {unknown}")
+        raise ToolArgumentPreparationError(
+            "selected_shop_ids are not current-turn candidates: "
+            f"{unknown}; select ids returned by this turn's db_query_tool"
+        )
     args["selected_shops"] = [by_id[source_id] for source_id in ids]
     return args, ["selected_shops"]
 

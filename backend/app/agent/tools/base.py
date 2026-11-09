@@ -25,6 +25,16 @@ class ToolInputValidationError(Exception):
         return self.message
 
 
+class ToolArgumentPreparationError(ValueError):
+    """Argument preparation failed with a model-facing, log-safe reason.
+
+    Preparers raise this when the message is derived from validated inputs
+    (for example unknown candidate ids) rather than from an upstream payload.
+    The dispatcher may log the message verbatim; other preparation exceptions
+    are correlated by reference only.
+    """
+
+
 @dataclass(frozen=True)
 class ToolDescriptor:
     """Provider-neutral tool metadata used by the runtime registry."""

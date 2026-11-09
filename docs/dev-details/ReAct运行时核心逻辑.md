@@ -323,6 +323,8 @@ tool.started（submit，模型顺序）
 
 worker 的合法名单来自当前节点的 `AgentNode.spawnable`；非法派发在 `prepare` 之前返回失败信封，不产生 `worker.started`。
 
+派发所有权：`main_agent` 的提示词约定“一个任务只派发一个 worker；派发后不再自己执行同一请求的 `db_query_tool`/`result_selection_tool`，以 worker 信封、`worker_runs` 和 `context_payload` 为准”。候选集仍保持 worker 局部（`promote=False`），因此主 agent 在 worker 返回后重复 `result_selection_tool` 会因为没有本轮候选而失败；这是提示词必须明确约束的边界，不在运行时做隐式兜底。`tool.prepare_failed` 现在记录 `error_type` 与经过安全分类的 `error_message`：只有 `ToolArgumentPreparationError` 的消息会原样输出，其他异常仅记录引用，避免上游错误文本或带凭据的 URL 进入日志。
+
 产物来源：`ArtifactSink.promote` 在 `artifact_meta` 写入 `source_run_id`；父级通过 `ArtifactSink.apply` 或直接 `set_working_memory_artifact` 覆盖同名值时，默认清除旧的 `source_run_id`，避免把父级新值误标成某个 worker 的产物。
 
 `backend/app/tests/integration/test_worker_runner.py` 覆盖“worker 工具执行中取消后父状态恢复、已完成工具证据只出现一次、无悬挂 task”“`start` 期间不合并父记忆、`commit` 幂等”和“派发异常转成失败工具结果”。并行行为见 `test_runtime_supervisor.py`。共享的测试替身放在 `_runtime_kernel_test_support.py`。

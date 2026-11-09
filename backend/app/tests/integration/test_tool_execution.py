@@ -11,7 +11,7 @@ import pytest
 
 from app.agent.llm.provider_adapter import ModelToolCall
 from app.agent.skills.execution import SkillExecution
-from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
+from app.agent.tools.base import ProviderExecutionResult, ToolArgumentPreparationError, ToolDescriptor
 from app.agent.tools.builtin import BuiltinToolProvider
 from app.agent.tools.execution import ToolDispatcher, ToolTask
 from app.agent.tools.permission import ToolPermissionChecker
@@ -154,6 +154,66 @@ def test_dispatcher_reports_preparation_failure_as_a_failed_result(tmp_path: Pat
     # Preparation failures keep the parsed arguments as the attempted payload.
     assert task.argument_evidence["prepared_arguments"] == {"value": 1}
     assert task.argument_evidence["preparation_error"] == "ValueError: bad args"
+
+
+def test_prepare_failure_logs_the_safe_reason(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    registry = _registry(tmp_path)
+
+    async def broken(**kwargs: Any) -> None:
+        raise ToolArgumentPreparationError("no current-turn search candidates are available")
+
+    registry.prepare_arguments = broken  # type: ignore[method-assign]
+    dispatcher = ToolDispatcher(tool_registry=registry, hooks=_RecordingHooks())
+
+    with caplog.at_level("WARNING", logger="app.agent.tools.execution"):
+        result = asyncio.run(
+            dispatcher.execute(
+                _call("echo", value=1),
+                session_id="s_test",
+                runtime_context={},
+                allowed_tools=["echo"],
+                agent_name="main_agent",
+                skill_execution=SkillExecution(),
+            )
+        )
+
+    assert result.status == "failed"
+    messages = [record.getMessage() for record in caplog.records if record.name == "app.agent.tools.execution"]
+    assert any(
+        "tool.prepare_failed" in message
+        and "error_type=ToolArgumentPreparationError" in message
+        and "error_message=no current-turn search candidates are available" in message
+        for message in messages
+    )
+
+
+def test_prepare_failure_does_not_log_unexpected_error_text(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    registry = _registry(tmp_path)
+
+    async def broken(**kwargs: Any) -> None:
+        raise RuntimeError("upstream key=secret-value")
+
+    registry.prepare_arguments = broken  # type: ignore[method-assign]
+    dispatcher = ToolDispatcher(tool_registry=registry, hooks=_RecordingHooks())
+
+    with caplog.at_level("WARNING", logger="app.agent.tools.execution"):
+        asyncio.run(
+            dispatcher.execute(
+                _call("echo", value=1),
+                session_id="s_test",
+                runtime_context={},
+                allowed_tools=["echo"],
+                agent_name="main_agent",
+                skill_execution=SkillExecution(),
+            )
+        )
+
+    messages = [record.getMessage() for record in caplog.records if record.name == "app.agent.tools.execution"]
+    assert messages
+    assert all("secret-value" not in message for message in messages)
+    assert any("error_type=RuntimeError" in message and "error_message=ref:" in message for message in messages)
 
 
 def test_cancelling_a_settled_call_cancels_the_running_tool_task(tmp_path: Path) -> None:

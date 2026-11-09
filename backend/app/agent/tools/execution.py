@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from app.agent._logging import get_logger, log_ref
 from app.agent.skills.execution import SkillExecution, bind_skill_execution
+from app.agent.tools.base import ToolArgumentPreparationError
 from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
 
 if TYPE_CHECKING:
@@ -265,6 +266,7 @@ class ToolDispatcher:
         """Prepare arguments, validate and build the evidence attached to the tool turn."""
         call = task.call
         hydrated: list[str] = []
+        preparation_exc: Exception | None = None
         try:
             if call.parse_error:
                 raise ValueError(f"invalid tool arguments: {call.parse_error}")
@@ -274,6 +276,7 @@ class ToolDispatcher:
                 runtime_context=runtime_context,
             )
         except Exception as exc:
+            preparation_exc = exc
             task.prepared_args = dict(call.arguments)
             task.preparation_error = f"{type(exc).__name__}: {exc}"
         task.argument_evidence = {
@@ -286,11 +289,13 @@ class ToolDispatcher:
         }
         if task.preparation_error is not None:
             logger.warning(
-                "tool.prepare_failed session_ref=%s tool_ref=%s call_ref=%s agent_ref=%s",
+                "tool.prepare_failed session_ref=%s tool_ref=%s call_ref=%s agent_ref=%s error_type=%s error_message=%s",
                 log_ref(session_id),
                 log_ref(call.name),
                 log_ref(call.call_id),
                 log_ref(task.agent_name),
+                type(preparation_exc).__name__ if preparation_exc is not None else "unknown",
+                _preparation_log_text(preparation_exc),
             )
             return
         logger.info(
@@ -309,6 +314,24 @@ class ToolDispatcher:
                 log_ref(call.call_id),
                 len(hydrated),
             )
+
+
+def _preparation_log_text(exc: Exception | None, *, limit: int = 200) -> str:
+    """Loggable reason for a preparation failure.
+
+    Only :class:`ToolArgumentPreparationError` carries a message built from
+    validated tool inputs, so only that message is logged verbatim. Any other
+    exception is correlated by a reference: its text may contain upstream
+    payload or URLs with credentials.
+    """
+    if exc is None:
+        return "-"
+    if isinstance(exc, ToolArgumentPreparationError):
+        compact = " ".join(str(exc).split())
+        if not compact:
+            return "-"
+        return compact if len(compact) <= limit else f"{compact[: limit - 3].rstrip()}..."
+    return f"ref:{log_ref(str(exc))}" if str(exc) else "ref:-"
 
 
 def _cancelled_result(task: ToolTask, *, reason: str) -> ToolExecutionResult:
