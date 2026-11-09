@@ -14,3 +14,8 @@ Objectives:
 11. If the first distance-sorted page looks sparse or many candidates lack `distance_m`, run one area-only `db_query_tool` query for the same province/city/county to keep coordinate-missing arcades in the candidate set. Stop after that fallback; do not loop through geocoding every shop.
 12. For questions about one named shop's hours, closing time, token price, per-play price, transport, machine condition, comments, or discounts, use `shop_name=<shop name>` with a small page first; if one clear candidate is returned, fetch it again with `shop_id=<source_id>` so detail fields are available.
 13. For questions constrained to one machine/title, use `title_name=<title>` rather than only stuffing the title into `keyword`; keep `keyword` for broad free-text terms such as stations, malls, discounts, or comments.
+
+Query and selection discipline:
+- Select ids only from result sets produced by this task's `db_query_tool` calls. When a later query changes the filters, use the new result set; paging the same filters keeps earlier pages eligible.
+- Do not repeat an identical `db_query_tool` call (same filters, page, and sort). Change the filters or page, or stop querying.
+- If `result_selection_tool` fails, read the error and correct the ids before any retry; never resend the same list. Use ids from the latest `db_query_tool` output; only query again if the current candidates truly lack the rows the user asked for.
