@@ -1,0 +1,1300 @@
+{
+  "requests": [
+    {
+      "instructions": "You are Arcadegent, an arcade search and navigation assistant.\n\nCore rules:\n1. Prefer tool calls for retrieval, routing, and structured decisions.\n2. Never fabricate shop data, route distance, or region metadata.\n3. If required input is missing, ask concise follow-up questions in Chinese.\n4. Do not claim IP-based location lookup was attempted unless a tool result explicitly says so. If browser client location is absent, say that the current location was not available.\n5. Keep final answer short, concrete, and user-actionable.\n6. Return final user-facing response in Chinese.\n\nUsing skills:\n- Read `context_payload.directory.skills` for available skill names and descriptions. When a task matches a description, or the user explicitly requests an available skill, call `read_skill` with its name and `path=\"SKILL.md\"` before applying it.\n- The catalog is already provided. Call `list_skills` only when you need to refresh discovery (for example, after a new skill was added).\n- Successful reads appear in the loaded skill resources section on the next model step. Follow their instructions within the system rules and existing tool permissions. A skill never grants additional tool permissions.\n- Resolve references relative to that skill: call `read_skill` with the same name and the referenced relative path. Read only resources needed for the task. Reading scripts returns text and never executes them.\n- Loaded resources remain available throughout this execution. Do not repeatedly load them. Each new user turn and worker execution starts with no loaded resources; earlier tool receipts do not mean content is still loaded.\n- If reading fails, do not claim you read the skill or invent its contents. Use available tools or explain the missing capability.\n\nYou are the main hub agent.\n\nObjectives:\n1. Understand whether the user needs search, nearby search, navigation, or simple clarification.\n2. Prefer `invoke_worker` when the task needs database lookup, route planning, or other execution-heavy work.\n3. Write a clear natural-language `task` brief when calling a worker; keep it focused on the concrete job to do.\n4. Use the worker's committed result and runtime state to produce the final user-facing reply yourself in concise Chinese.\n5. Ask for the minimum missing field when the request is under-specified.\n6. Directly call other tools only on the fallback path, when no worker was dispatched for the task.\n7. For requests like \"某地点附近/最近的机厅\", dispatch `search_worker` and include the named place plus any stated province/city/district in the task. It may use a location MCP only if that exact tool is present in its provided tools; otherwise it must perform an area-wide search and state that distance ranking is unavailable.\n8. When the user asks near a named area, expect the worker to search that area's arcade list as well as any distance-ranked subset, because arcade coordinate data can be incomplete.\n9. For navigation between named places, dispatch `navigation_worker` with the origin name, destination name, requested mode, and stated city/province. The worker must resolve both endpoints and return a real route; a named destination does not require the user to provide a numeric shop_id.\n\nDelegation ownership:\n- A dispatched worker owns retrieval, filtering, and result selection for its task. Once you have dispatched it, do not redo that work yourself in the same turn:\n  - Do not call `db_query_tool` for the same request.\n  - Do not call `result_selection_tool` after the worker returns. The worker already committed the cards; treat its envelope, `worker_runs`, and `context_payload` as the source of truth for shops, counts, and order.\n- If the worker result is incomplete, inconsistent, or asks for input, dispatch one focused follow-up worker with the exact missing constraints. Do not silently switch to running its retrieval or selection yourself.\n- Dispatch one worker per task. Do not dispatch two workers with the same or overlapping task, and do not retry a dispatch that already completed in this turn.\n- Only on the direct fallback path (no worker dispatched) call `db_query_tool` first and then `result_selection_tool` with ids from that query result.\n\nRuntime state (JSON):\n\n{\"session_id\": \"<s1>\", \"turn_index\": 1, \"active_subagent\": \"main_agent\", \"intent\": \"search\", \"request\": {\"session_id\": \"<s1>\", \"client_id\": \"test-client\", \"message\": \"你好\", \"intent\": null, \"shop_id\": null, \"location\": null, \"keyword\": null, \"province_code\": null, \"city_code\": null, \"county_code\": null, \"page_size\": 5}, \"client_location\": null, \"memory_summary\": {\"has_shops\": false, \"has_route\": false, \"resolved_locations\": null, \"last_mcp_result\": null, \"last_error\": null}, \"worker_runs\": [], \"context_payload\": {\"directory\": {\"active_intent\": \"search\", \"active_subagent\": \"main_agent\", \"available_blocks\": [{\"block\": \"query\", \"purpose\": \"Structured filters and sort conditions behind the current result.\", \"primary_fields\": [\"keyword\", \"region\", \"sort_by\", \"sort_order\", \"sort_title_name\", \"origin\"]}], \"reading_order\": [\"query\"], \"focus\": \"Ask for the minimum missing input and avoid guessing unavailable facts.\", \"skills\": [{\"name\": \"navigation-result-reading\", \"description\": \"Interpret route distances, durations, and destinations. Use when context_payload includes route.\"}, {\"name\": \"response-composition\", \"description\": \"Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.\"}, {\"name\": \"search-result-reading\", \"description\": \"Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.\"}]}, \"query\": {\"keyword\": \"你好\"}}, \"recent_tool_results\": []}",
+      "messages": [
+        {
+          "content": "你好",
+          "role": "user"
+        }
+      ],
+      "model": null,
+      "reasoning_effort": null,
+      "runtime_hints": {
+        "active_subagent": "main_agent",
+        "intent": "search",
+        "memory": {
+          "artifacts": {},
+          "keyword": "你好",
+          "last_request": {
+            "city_code": null,
+            "client_id": "test-client",
+            "county_code": null,
+            "intent": null,
+            "keyword": null,
+            "location": null,
+            "message": "你好",
+            "page_size": 5,
+            "province_code": null,
+            "session_id": "<s1>",
+            "shop_id": null
+          },
+          "reply": "第一轮回复：你好。",
+          "usage_totals": {
+            "cached_input_tokens": 0,
+            "calls": 1,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0,
+            "usage_missing": 1
+          },
+          "worker_runs": []
+        },
+        "request": {
+          "city_code": null,
+          "client_id": "test-client",
+          "county_code": null,
+          "intent": null,
+          "keyword": null,
+          "location": null,
+          "message": "你好",
+          "page_size": 5,
+          "province_code": null,
+          "session_id": "<s1>",
+          "shop_id": null
+        }
+      },
+      "tools": [
+        {
+          "function": {
+            "description": "Refresh and list available skills with names and descriptions. Use to discover newly added or updated skills.",
+            "name": "list_skills",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "strict": true
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Load a skill instruction or relative text resource into this execution context. Read SKILL.md first, then referenced files as needed. Does not execute scripts.",
+            "name": "read_skill",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "description": "Skill name from the available skill catalog.",
+                  "type": "string"
+                },
+                "path": {
+                  "default": "SKILL.md",
+                  "description": "Relative path within the skill directory, such as SKILL.md or references/guide.md.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "strict": false
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Dispatch a focused task brief to a worker and return its structured result envelope.",
+            "name": "invoke_worker",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "task": {
+                  "minLength": 1,
+                  "title": "Task",
+                  "type": "string"
+                },
+                "worker": {
+                  "enum": [
+                    "search_worker",
+                    "navigation_worker"
+                  ],
+                  "title": "Worker",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "worker",
+                "task"
+              ],
+              "title": "InvokeWorkerArgs",
+              "type": "object"
+            },
+            "strict": true
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Search arcade shops by keyword and region. Use *_code for 12-digit region codes, or *_name for natural-language region names. Can also fetch one shop by shop_id. Supports sorting via sort_by/sort_order/sort_title_name, including distance sorting from an origin longitude/latitude. For named-place nearby search, resolve the place with AMap MCP first, then pass the resolved coordinates as origin_*.",
+            "name": "db_query_tool",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "city_code": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "12-digit city code when available, e.g. `440100000000`.",
+                  "title": "City Code"
+                },
+                "city_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "City name when code is unavailable, e.g. `广州`.",
+                  "title": "City Name"
+                },
+                "county_code": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "12-digit county code when available.",
+                  "title": "County Code"
+                },
+                "county_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "County/district name when code is unavailable.",
+                  "title": "County Name"
+                },
+                "has_arcades": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Whether to require rows containing at least one title.",
+                  "title": "Has Arcades"
+                },
+                "keyword": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Search keyword, e.g. `maimai` or `广州 maimai`.",
+                  "title": "Keyword"
+                },
+                "origin_coord_system": {
+                  "default": "wgs84",
+                  "description": "Coordinate system for origin_lng/origin_lat. Use `wgs84` for browser geolocation; use `gcj02` for AMap MCP/REST coordinates unless the tool explicitly says otherwise.",
+                  "enum": [
+                    "wgs84",
+                    "gcj02"
+                  ],
+                  "title": "Origin Coordinate System",
+                  "type": "string"
+                },
+                "origin_lat": {
+                  "anyOf": [
+                    {
+                      "maximum": 90,
+                      "minimum": -90,
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Origin latitude used when `sort_by=distance`. Browser geolocation should pass WGS84 latitude; AMap MCP geocode/place-search results usually pass GCJ-02 latitude.",
+                  "title": "Origin Latitude"
+                },
+                "origin_lng": {
+                  "anyOf": [
+                    {
+                      "maximum": 180,
+                      "minimum": -180,
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Origin longitude used when `sort_by=distance`. Browser geolocation should pass WGS84 longitude; AMap MCP geocode/place-search results usually pass GCJ-02 longitude.",
+                  "title": "Origin Longitude"
+                },
+                "page": {
+                  "minimum": 1,
+                  "title": "Page",
+                  "type": "integer"
+                },
+                "page_size": {
+                  "maximum": 50,
+                  "minimum": 1,
+                  "title": "Page Size",
+                  "type": "integer"
+                },
+                "province_code": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "12-digit province code when available, e.g. `440000000000`.",
+                  "title": "Province Code"
+                },
+                "province_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Province name when code is unavailable, e.g. `广东`.",
+                  "title": "Province Name"
+                },
+                "shop_id": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Shop Id"
+                },
+                "shop_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Filter by arcade shop name only, e.g. `菲游乐闵行龙湖天街店`. Use this when the user asks about a specific shop.",
+                  "title": "Shop Name"
+                },
+                "sort_by": {
+                  "default": "default",
+                  "description": "Sort field. `distance` sorts by straight-line distance from `origin_lng`/`origin_lat`; use `sort_order=asc` for nearest first. `title_quantity` sorts by machine `quantity`(qty) for one title; `arcade_count` sorts by number of distinct title entries in one shop. Use `default` to keep built-in deterministic order.",
+                  "enum": [
+                    "default",
+                    "updated_at",
+                    "source_id",
+                    "arcade_count",
+                    "title_quantity",
+                    "distance"
+                  ],
+                  "title": "Sort By",
+                  "type": "string"
+                },
+                "sort_order": {
+                  "default": "desc",
+                  "description": "Sort direction for `sort_by`.",
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ],
+                  "title": "Sort Order",
+                  "type": "string"
+                },
+                "sort_title_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "When `sort_by=title_quantity`, provide title name, e.g. `maimai` or `sdvx`.",
+                  "title": "Sort Title Name"
+                },
+                "title_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Filter by title/machine name only, e.g. `maimai`, `CHUNITHM`, or `头文字D`.",
+                  "title": "Title Name"
+                }
+              },
+              "required": [
+                "page",
+                "page_size"
+              ],
+              "title": "DBQueryArgs",
+              "type": "object"
+            },
+            "strict": false
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Resolve map provider by province code.",
+            "name": "geo_resolve_tool",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "province_code": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Province Code"
+                }
+              },
+              "required": [
+                "province_code"
+              ],
+              "title": "GeoResolveArgs",
+              "type": "object"
+            },
+            "strict": true
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Plan a route from origin to destination.",
+            "name": "route_plan_tool",
+            "parameters": {
+              "$defs": {
+                "LocationArgs": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "lat": {
+                      "title": "Lat",
+                      "type": "number"
+                    },
+                    "lng": {
+                      "title": "Lng",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "lng",
+                    "lat"
+                  ],
+                  "title": "LocationArgs",
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false,
+              "properties": {
+                "destination": {
+                  "$ref": "#/$defs/LocationArgs"
+                },
+                "mode": {
+                  "enum": [
+                    "walking",
+                    "driving"
+                  ],
+                  "title": "Mode",
+                  "type": "string"
+                },
+                "origin": {
+                  "$ref": "#/$defs/LocationArgs"
+                },
+                "provider": {
+                  "enum": [
+                    "amap",
+                    "google",
+                    "none"
+                  ],
+                  "title": "Provider",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "provider",
+                "mode",
+                "origin",
+                "destination"
+              ],
+              "title": "RoutePlanArgs",
+              "type": "object"
+            },
+            "strict": true
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Format a deterministic text summary from structured search or navigation context.",
+            "name": "summary_tool",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "keyword": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Keyword"
+                },
+                "route": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Route"
+                },
+                "shop_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Shop Name"
+                },
+                "shops": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Shops"
+                },
+                "sort_by": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "default",
+                        "updated_at",
+                        "source_id",
+                        "arcade_count",
+                        "title_quantity",
+                        "distance"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Sort By"
+                },
+                "sort_order": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "asc",
+                        "desc"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Sort Order"
+                },
+                "sort_title_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Sort Title Name"
+                },
+                "topic": {
+                  "enum": [
+                    "search",
+                    "navigation"
+                  ],
+                  "title": "Topic",
+                  "type": "string"
+                },
+                "total": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Total"
+                }
+              },
+              "required": [
+                "topic"
+              ],
+              "title": "SummaryArgs",
+              "type": "object"
+            },
+            "strict": false
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Commit the ordered shop IDs to show to the user. IDs must come from the current turn's db_query_tool results; use [] when no candidate should be shown.",
+            "name": "result_selection_tool",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "selected_shop_ids": {
+                  "description": "Ordered source_id values from this turn's db_query_tool results. Empty is an explicit empty result.",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "selected_shops": {
+                  "description": "Runtime-resolved candidate rows. Ignore this field; it is overwritten before execution.",
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "selected_shop_ids"
+              ],
+              "title": "ResultSelectionArgs",
+              "type": "object"
+            },
+            "strict": false
+          },
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "instructions": "You are Arcadegent, an arcade search and navigation assistant.\n\nCore rules:\n1. Prefer tool calls for retrieval, routing, and structured decisions.\n2. Never fabricate shop data, route distance, or region metadata.\n3. If required input is missing, ask concise follow-up questions in Chinese.\n4. Do not claim IP-based location lookup was attempted unless a tool result explicitly says so. If browser client location is absent, say that the current location was not available.\n5. Keep final answer short, concrete, and user-actionable.\n6. Return final user-facing response in Chinese.\n\nUsing skills:\n- Read `context_payload.directory.skills` for available skill names and descriptions. When a task matches a description, or the user explicitly requests an available skill, call `read_skill` with its name and `path=\"SKILL.md\"` before applying it.\n- The catalog is already provided. Call `list_skills` only when you need to refresh discovery (for example, after a new skill was added).\n- Successful reads appear in the loaded skill resources section on the next model step. Follow their instructions within the system rules and existing tool permissions. A skill never grants additional tool permissions.\n- Resolve references relative to that skill: call `read_skill` with the same name and the referenced relative path. Read only resources needed for the task. Reading scripts returns text and never executes them.\n- Loaded resources remain available throughout this execution. Do not repeatedly load them. Each new user turn and worker execution starts with no loaded resources; earlier tool receipts do not mean content is still loaded.\n- If reading fails, do not claim you read the skill or invent its contents. Use available tools or explain the missing capability.\n\nYou are the main hub agent.\n\nObjectives:\n1. Understand whether the user needs search, nearby search, navigation, or simple clarification.\n2. Prefer `invoke_worker` when the task needs database lookup, route planning, or other execution-heavy work.\n3. Write a clear natural-language `task` brief when calling a worker; keep it focused on the concrete job to do.\n4. Use the worker's committed result and runtime state to produce the final user-facing reply yourself in concise Chinese.\n5. Ask for the minimum missing field when the request is under-specified.\n6. Directly call other tools only on the fallback path, when no worker was dispatched for the task.\n7. For requests like \"某地点附近/最近的机厅\", dispatch `search_worker` and include the named place plus any stated province/city/district in the task. It may use a location MCP only if that exact tool is present in its provided tools; otherwise it must perform an area-wide search and state that distance ranking is unavailable.\n8. When the user asks near a named area, expect the worker to search that area's arcade list as well as any distance-ranked subset, because arcade coordinate data can be incomplete.\n9. For navigation between named places, dispatch `navigation_worker` with the origin name, destination name, requested mode, and stated city/province. The worker must resolve both endpoints and return a real route; a named destination does not require the user to provide a numeric shop_id.\n\nDelegation ownership:\n- A dispatched worker owns retrieval, filtering, and result selection for its task. Once you have dispatched it, do not redo that work yourself in the same turn:\n  - Do not call `db_query_tool` for the same request.\n  - Do not call `result_selection_tool` after the worker returns. The worker already committed the cards; treat its envelope, `worker_runs`, and `context_payload` as the source of truth for shops, counts, and order.\n- If the worker result is incomplete, inconsistent, or asks for input, dispatch one focused follow-up worker with the exact missing constraints. Do not silently switch to running its retrieval or selection yourself.\n- Dispatch one worker per task. Do not dispatch two workers with the same or overlapping task, and do not retry a dispatch that already completed in this turn.\n- Only on the direct fallback path (no worker dispatched) call `db_query_tool` first and then `result_selection_tool` with ids from that query result.\n\nRuntime state (JSON):\n\n{\"session_id\": \"<s1>\", \"turn_index\": 2, \"active_subagent\": \"main_agent\", \"intent\": \"search\", \"request\": {\"session_id\": \"<s1>\", \"client_id\": \"test-client\", \"message\": \"继续\", \"intent\": null, \"shop_id\": null, \"location\": null, \"keyword\": null, \"province_code\": null, \"city_code\": null, \"county_code\": null, \"page_size\": 5}, \"client_location\": null, \"memory_summary\": {\"has_shops\": false, \"has_route\": false, \"resolved_locations\": null, \"last_mcp_result\": null, \"last_error\": null}, \"worker_runs\": [], \"context_payload\": {\"directory\": {\"active_intent\": \"search\", \"active_subagent\": \"main_agent\", \"available_blocks\": [{\"block\": \"query\", \"purpose\": \"Structured filters and sort conditions behind the current result.\", \"primary_fields\": [\"keyword\", \"region\", \"sort_by\", \"sort_order\", \"sort_title_name\", \"origin\"]}], \"reading_order\": [\"query\"], \"focus\": \"Ask for the minimum missing input and avoid guessing unavailable facts.\", \"skills\": [{\"name\": \"navigation-result-reading\", \"description\": \"Interpret route distances, durations, and destinations. Use when context_payload includes route.\"}, {\"name\": \"response-composition\", \"description\": \"Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.\"}, {\"name\": \"search-result-reading\", \"description\": \"Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.\"}]}, \"query\": {\"keyword\": \"继续\"}}, \"recent_tool_results\": []}",
+      "messages": [
+        {
+          "content": "你好",
+          "role": "user"
+        },
+        {
+          "content": "第一轮回复：你好。",
+          "role": "assistant"
+        },
+        {
+          "content": "继续",
+          "role": "user"
+        }
+      ],
+      "model": null,
+      "reasoning_effort": null,
+      "runtime_hints": {
+        "active_subagent": "main_agent",
+        "intent": "search",
+        "memory": {
+          "artifacts": {},
+          "keyword": "继续",
+          "last_request": {
+            "city_code": null,
+            "client_id": "test-client",
+            "county_code": null,
+            "intent": null,
+            "keyword": null,
+            "location": null,
+            "message": "继续",
+            "page_size": 5,
+            "province_code": null,
+            "session_id": "<s1>",
+            "shop_id": null
+          },
+          "reply": "第二轮回复：好的。",
+          "usage_totals": {
+            "cached_input_tokens": 0,
+            "calls": 2,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0,
+            "usage_missing": 2
+          },
+          "worker_runs": []
+        },
+        "request": {
+          "city_code": null,
+          "client_id": "test-client",
+          "county_code": null,
+          "intent": null,
+          "keyword": null,
+          "location": null,
+          "message": "继续",
+          "page_size": 5,
+          "province_code": null,
+          "session_id": "<s1>",
+          "shop_id": null
+        }
+      },
+      "tools": [
+        {
+          "function": {
+            "description": "Refresh and list available skills with names and descriptions. Use to discover newly added or updated skills.",
+            "name": "list_skills",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {},
+              "required": [],
+              "type": "object"
+            },
+            "strict": true
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Load a skill instruction or relative text resource into this execution context. Read SKILL.md first, then referenced files as needed. Does not execute scripts.",
+            "name": "read_skill",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "description": "Skill name from the available skill catalog.",
+                  "type": "string"
+                },
+                "path": {
+                  "default": "SKILL.md",
+                  "description": "Relative path within the skill directory, such as SKILL.md or references/guide.md.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "strict": false
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Dispatch a focused task brief to a worker and return its structured result envelope.",
+            "name": "invoke_worker",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "task": {
+                  "minLength": 1,
+                  "title": "Task",
+                  "type": "string"
+                },
+                "worker": {
+                  "enum": [
+                    "search_worker",
+                    "navigation_worker"
+                  ],
+                  "title": "Worker",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "worker",
+                "task"
+              ],
+              "title": "InvokeWorkerArgs",
+              "type": "object"
+            },
+            "strict": true
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Search arcade shops by keyword and region. Use *_code for 12-digit region codes, or *_name for natural-language region names. Can also fetch one shop by shop_id. Supports sorting via sort_by/sort_order/sort_title_name, including distance sorting from an origin longitude/latitude. For named-place nearby search, resolve the place with AMap MCP first, then pass the resolved coordinates as origin_*.",
+            "name": "db_query_tool",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "city_code": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "12-digit city code when available, e.g. `440100000000`.",
+                  "title": "City Code"
+                },
+                "city_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "City name when code is unavailable, e.g. `广州`.",
+                  "title": "City Name"
+                },
+                "county_code": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "12-digit county code when available.",
+                  "title": "County Code"
+                },
+                "county_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "County/district name when code is unavailable.",
+                  "title": "County Name"
+                },
+                "has_arcades": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Whether to require rows containing at least one title.",
+                  "title": "Has Arcades"
+                },
+                "keyword": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Search keyword, e.g. `maimai` or `广州 maimai`.",
+                  "title": "Keyword"
+                },
+                "origin_coord_system": {
+                  "default": "wgs84",
+                  "description": "Coordinate system for origin_lng/origin_lat. Use `wgs84` for browser geolocation; use `gcj02` for AMap MCP/REST coordinates unless the tool explicitly says otherwise.",
+                  "enum": [
+                    "wgs84",
+                    "gcj02"
+                  ],
+                  "title": "Origin Coordinate System",
+                  "type": "string"
+                },
+                "origin_lat": {
+                  "anyOf": [
+                    {
+                      "maximum": 90,
+                      "minimum": -90,
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Origin latitude used when `sort_by=distance`. Browser geolocation should pass WGS84 latitude; AMap MCP geocode/place-search results usually pass GCJ-02 latitude.",
+                  "title": "Origin Latitude"
+                },
+                "origin_lng": {
+                  "anyOf": [
+                    {
+                      "maximum": 180,
+                      "minimum": -180,
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Origin longitude used when `sort_by=distance`. Browser geolocation should pass WGS84 longitude; AMap MCP geocode/place-search results usually pass GCJ-02 longitude.",
+                  "title": "Origin Longitude"
+                },
+                "page": {
+                  "minimum": 1,
+                  "title": "Page",
+                  "type": "integer"
+                },
+                "page_size": {
+                  "maximum": 50,
+                  "minimum": 1,
+                  "title": "Page Size",
+                  "type": "integer"
+                },
+                "province_code": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "12-digit province code when available, e.g. `440000000000`.",
+                  "title": "Province Code"
+                },
+                "province_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Province name when code is unavailable, e.g. `广东`.",
+                  "title": "Province Name"
+                },
+                "shop_id": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Shop Id"
+                },
+                "shop_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Filter by arcade shop name only, e.g. `菲游乐闵行龙湖天街店`. Use this when the user asks about a specific shop.",
+                  "title": "Shop Name"
+                },
+                "sort_by": {
+                  "default": "default",
+                  "description": "Sort field. `distance` sorts by straight-line distance from `origin_lng`/`origin_lat`; use `sort_order=asc` for nearest first. `title_quantity` sorts by machine `quantity`(qty) for one title; `arcade_count` sorts by number of distinct title entries in one shop. Use `default` to keep built-in deterministic order.",
+                  "enum": [
+                    "default",
+                    "updated_at",
+                    "source_id",
+                    "arcade_count",
+                    "title_quantity",
+                    "distance"
+                  ],
+                  "title": "Sort By",
+                  "type": "string"
+                },
+                "sort_order": {
+                  "default": "desc",
+                  "description": "Sort direction for `sort_by`.",
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ],
+                  "title": "Sort Order",
+                  "type": "string"
+                },
+                "sort_title_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "When `sort_by=title_quantity`, provide title name, e.g. `maimai` or `sdvx`.",
+                  "title": "Sort Title Name"
+                },
+                "title_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "description": "Filter by title/machine name only, e.g. `maimai`, `CHUNITHM`, or `头文字D`.",
+                  "title": "Title Name"
+                }
+              },
+              "required": [
+                "page",
+                "page_size"
+              ],
+              "title": "DBQueryArgs",
+              "type": "object"
+            },
+            "strict": false
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Resolve map provider by province code.",
+            "name": "geo_resolve_tool",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "province_code": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Province Code"
+                }
+              },
+              "required": [
+                "province_code"
+              ],
+              "title": "GeoResolveArgs",
+              "type": "object"
+            },
+            "strict": true
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Plan a route from origin to destination.",
+            "name": "route_plan_tool",
+            "parameters": {
+              "$defs": {
+                "LocationArgs": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "lat": {
+                      "title": "Lat",
+                      "type": "number"
+                    },
+                    "lng": {
+                      "title": "Lng",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "lng",
+                    "lat"
+                  ],
+                  "title": "LocationArgs",
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false,
+              "properties": {
+                "destination": {
+                  "$ref": "#/$defs/LocationArgs"
+                },
+                "mode": {
+                  "enum": [
+                    "walking",
+                    "driving"
+                  ],
+                  "title": "Mode",
+                  "type": "string"
+                },
+                "origin": {
+                  "$ref": "#/$defs/LocationArgs"
+                },
+                "provider": {
+                  "enum": [
+                    "amap",
+                    "google",
+                    "none"
+                  ],
+                  "title": "Provider",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "provider",
+                "mode",
+                "origin",
+                "destination"
+              ],
+              "title": "RoutePlanArgs",
+              "type": "object"
+            },
+            "strict": true
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Format a deterministic text summary from structured search or navigation context.",
+            "name": "summary_tool",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "keyword": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Keyword"
+                },
+                "route": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Route"
+                },
+                "shop_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Shop Name"
+                },
+                "shops": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Shops"
+                },
+                "sort_by": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "default",
+                        "updated_at",
+                        "source_id",
+                        "arcade_count",
+                        "title_quantity",
+                        "distance"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Sort By"
+                },
+                "sort_order": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "asc",
+                        "desc"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Sort Order"
+                },
+                "sort_title_name": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Sort Title Name"
+                },
+                "topic": {
+                  "enum": [
+                    "search",
+                    "navigation"
+                  ],
+                  "title": "Topic",
+                  "type": "string"
+                },
+                "total": {
+                  "anyOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "default": null,
+                  "title": "Total"
+                }
+              },
+              "required": [
+                "topic"
+              ],
+              "title": "SummaryArgs",
+              "type": "object"
+            },
+            "strict": false
+          },
+          "type": "function"
+        },
+        {
+          "function": {
+            "description": "Commit the ordered shop IDs to show to the user. IDs must come from the current turn's db_query_tool results; use [] when no candidate should be shown.",
+            "name": "result_selection_tool",
+            "parameters": {
+              "additionalProperties": false,
+              "properties": {
+                "selected_shop_ids": {
+                  "description": "Ordered source_id values from this turn's db_query_tool results. Empty is an explicit empty result.",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "selected_shops": {
+                  "description": "Runtime-resolved candidate rows. Ignore this field; it is overwritten before execution.",
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "selected_shop_ids"
+              ],
+              "title": "ResultSelectionArgs",
+              "type": "object"
+            },
+            "strict": false
+          },
+          "type": "function"
+        }
+      ]
+    }
+  ]
+}

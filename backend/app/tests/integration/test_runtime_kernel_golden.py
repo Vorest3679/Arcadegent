@@ -122,6 +122,21 @@ def _assert_golden(name: str, snapshot: dict[str, Any]) -> None:
     assert text == path.read_text(encoding="utf-8")
 
 
+_REQUEST_KEYS = ("instructions", "messages", "tools", "runtime_hints", "model", "reasoning_effort")
+
+
+def _assert_model_requests(name: str, captured: list[dict[str, Any]]) -> None:
+    """Golden of every provider request (prompt, messages, tool definitions, hints).
+
+    Plan 5 moves context sections and tools out of the agent package; this
+    snapshot is the byte-level proof that the model input did not change.
+    """
+    assert captured, "scenario made no model call"
+    normalize = _Normalizer()
+    requests = [normalize({key: call.get(key) for key in _REQUEST_KEYS}) for call in captured]
+    _assert_golden(f"model_requests/{name}", {"requests": requests})
+
+
 def _post(client, message: str, **extra: Any) -> dict[str, Any]:
     response = client.post("/api/chat", json={"client_id": "test-client", "message": message, **extra})
     assert response.status_code == 200, response.text
@@ -147,6 +162,27 @@ def test_golden_direct_reply_two_turns(tmp_path: Path, chat_clock) -> None:
     second_messages = captured[-1]["messages"]
     assert sum(1 for item in second_messages if item.get("content") == "第一轮回复：你好。") == 1
     _assert_golden("direct_reply_two_turns", _snapshot(client, [first, second]))
+    _assert_model_requests("direct_reply_two_turns", captured)
+
+
+def test_golden_client_location_context(tmp_path: Path) -> None:
+    """Request-level context the model sees: client location block and structured filters."""
+    client = _build_client(tmp_path)
+    captured: list[dict[str, Any]] = []
+    _install(client, lambda _kw: ModelResponse(text="附近有 Gamma Arcade。", status="completed"), captured)
+    payload = _post(
+        client,
+        "附近有什么",
+        keyword="Gamma",
+        province_code="110000000000",
+        location={
+            "lng": 116.3, "lat": 39.9, "accuracy_m": 35,
+            "province": "北京市", "city": "北京市", "district": "海淀区",
+            "formatted_address": "北京市海淀区测试路 1 号",
+        },
+    )
+    _assert_golden("client_location_context", _snapshot(client, [payload]))
+    _assert_model_requests("client_location_context", captured)
 
 
 def test_golden_search_then_select(tmp_path: Path) -> None:
@@ -156,8 +192,10 @@ def test_golden_search_then_select(tmp_path: Path) -> None:
         ModelResponse(tool_calls=[ModelToolCall("sel1", "result_selection_tool", {"selected_shop_ids": [10]})]),
         ModelResponse(text="找到 Gamma Arcade。", status="completed"),
     ])
-    _install(client, lambda _kw: next(steps), [])
+    captured: list[dict[str, Any]] = []
+    _install(client, lambda _kw: next(steps), captured)
     _assert_golden("search_then_select", _snapshot(client, [_post(client, "find Gamma", page_size=3)]))
+    _assert_model_requests("search_then_select", captured)
 
 
 def test_golden_search_worker_then_summary(tmp_path: Path) -> None:
@@ -173,8 +211,10 @@ def test_golden_search_worker_then_summary(tmp_path: Path) -> None:
         ModelResponse(tool_calls=[ModelToolCall("sel1", "result_selection_tool", {"selected_shop_ids": [10]})]),
         ModelResponse(text="worker found Gamma"),
     ])
-    _install(client, lambda kw: next(main_steps) if _main(kw) else next(worker_steps), [])
+    captured: list[dict[str, Any]] = []
+    _install(client, lambda kw: next(main_steps) if _main(kw) else next(worker_steps), captured)
     _assert_golden("search_worker_then_summary", _snapshot(client, [_post(client, "find Gamma", page_size=3)]))
+    _assert_model_requests("search_worker_then_summary", captured)
 
 
 def test_golden_navigation_worker_route(tmp_path: Path) -> None:
@@ -200,8 +240,10 @@ def test_golden_navigation_worker_route(tmp_path: Path) -> None:
         })]),
         ModelResponse(text="route ready"),
     ])
-    _install(client, lambda kw: next(main_steps) if _main(kw) else next(worker_steps), [])
+    captured: list[dict[str, Any]] = []
+    _install(client, lambda kw: next(main_steps) if _main(kw) else next(worker_steps), captured)
     _assert_golden("navigation_worker_route", _snapshot(client, [_post(client, "从起点走到 Gamma Arcade")]))
+    _assert_model_requests("navigation_worker_route", captured)
 
 
 def test_golden_tool_parse_error_then_recover(tmp_path: Path) -> None:
@@ -211,23 +253,30 @@ def test_golden_tool_parse_error_then_recover(tmp_path: Path) -> None:
                                                 parse_error="invalid JSON")]),
         ModelResponse(text="参数有误，已恢复。", status="completed"),
     ])
-    _install(client, lambda _kw: next(steps), [])
+    captured: list[dict[str, Any]] = []
+    _install(client, lambda _kw: next(steps), captured)
     _assert_golden("tool_parse_error_then_recover", _snapshot(client, [_post(client, "find Gamma")]))
+    _assert_model_requests("tool_parse_error_then_recover", captured)
 
 
 def test_golden_model_error(tmp_path: Path) -> None:
     client = _build_client(tmp_path)
+    captured: list[dict[str, Any]] = []
     _install(client, lambda _kw: ModelResponse(error={"type": "provider_error", "message": "fixture outage"},
-                                               status="failed"), [])
+                                               status="failed"), captured)
     _assert_golden("model_error", _snapshot(client, [_post(client, "find Gamma")]))
+    _assert_model_requests("model_error", captured)
 
 
 def test_golden_step_limit(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("AGENT_MAX_STEPS", "3")
     client = _build_client(tmp_path)
     counter = iter(range(100))
-    _install(client, lambda _kw: ModelResponse(tool_calls=[ModelToolCall(f"ls{next(counter)}", "list_skills", {})]), [])
+    captured: list[dict[str, Any]] = []
+    _install(client, lambda _kw: ModelResponse(tool_calls=[ModelToolCall(f"ls{next(counter)}", "list_skills", {})]),
+             captured)
     _assert_golden("step_limit", _snapshot(client, [_post(client, "find Gamma")]))
+    _assert_model_requests("step_limit", captured)
 
 
 def test_golden_streamed_reply(tmp_path: Path) -> None:
@@ -235,7 +284,10 @@ def test_golden_streamed_reply(tmp_path: Path) -> None:
     adapter = _adapter(client)
     adapter._config = replace(adapter._config, stream=True)
 
-    async def fake_stream(**_kwargs):
+    captured: list[dict[str, Any]] = []
+
+    async def fake_stream(**kwargs):
+        captured.append(kwargs)
         yield TextDelta("第一段，")
         yield TextDelta("第二段。")
         yield StreamDone(ModelResponse(text="第一段，第二段。", status="completed",
@@ -243,3 +295,4 @@ def test_golden_streamed_reply(tmp_path: Path) -> None:
 
     adapter.stream = fake_stream  # type: ignore[method-assign]
     _assert_golden("streamed_reply", _snapshot(client, [_post(client, "find Gamma")]))
+    _assert_model_requests("streamed_reply", captured)
