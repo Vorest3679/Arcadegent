@@ -10,6 +10,11 @@ from typing import Literal
 
 
 _WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+# parents[3] is the repository root. Agent resource defaults are anchored here so
+# they do not depend on the working directory (tests run from the repository
+# root, the container from ``backend/``).
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_AGENT_DIR = _PROJECT_ROOT / "backend" / "app" / "agent"
 
 
 def _is_absolute_path_like(path_like: str) -> bool:
@@ -97,13 +102,13 @@ class Settings:
     llm_stream: bool = False
     agent_max_steps: int = 20
     agent_context_window: int = 24
-    agent_nodes_definitions_dir: Path = Path("app/agent/nodes/definitions")
-    agent_tool_policy_file: Path = Path("app/agent/nodes/profiles/tool_policies.yaml")
+    agent_nodes_definitions_dir: Path = _AGENT_DIR / "nodes" / "definitions"
+    agent_tool_policy_file: Path = _AGENT_DIR / "nodes" / "profiles" / "tool_policies.yaml"
     agent_subagent_yaml_overlay_enabled: bool = True
-    agent_provider_profiles_file: Path = Path("app/agent/nodes/profiles/provider_profiles.yaml")
+    agent_provider_profiles_file: Path = _AGENT_DIR / "nodes" / "profiles" / "provider_profiles.yaml"
     agent_provider_profile: str = "default"
     mcp_default_timeout_seconds: float = 10.0
-    mcp_servers_dir: Path = Path("backend/app/agent/tools/mcp/servers")
+    mcp_servers_dir: Path = _AGENT_DIR / "tools" / "mcp" / "servers"
     amap_api_key: str = ""
     amap_base_url: str = "https://restapi.amap.com"
     amap_timeout_seconds: float = 8.0

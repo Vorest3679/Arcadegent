@@ -1,14 +1,18 @@
-"""LLM config resolver for ReAct runtime and provider adapter."""
+"""LLM configuration of the provider adapter.
+
+The agent package only knows ``LLMConfig``, provider-profile YAML files and how
+a profile combines with explicit host values. Reading environment variables or
+application settings is the host's job (see ``app.agent_host.llm``).
+"""
 
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
-
-from app.core.config import Settings
 
 
 @dataclass(frozen=True)
@@ -39,13 +43,14 @@ class LLMConfig:
         return self.profile_enabled and bool(self.api_key.strip())
 
 
-def _load_profile(profile_file: Path, profile_name: str) -> dict[str, Any]:
+def load_provider_profile(profile_file: Path, profile_name: str) -> dict[str, Any]:
+    """Load one profile from a provider-profiles YAML file.
+
+    ``profile_file`` is used as given; the caller resolves relative paths. A
+    missing or invalid file yields an empty profile, and an unknown name falls
+    back to the ``default`` profile. A nested ``llm`` mapping is merged on top.
+    """
     candidate = profile_file
-    if not candidate.exists() and not candidate.is_absolute():
-        project_root = Path(__file__).resolve().parents[3]
-        rooted = project_root / candidate
-        if rooted.exists():
-            candidate = rooted
     if not candidate.exists():
         return {}
     try:
@@ -120,64 +125,67 @@ def _pick_bool(payload: dict[str, Any], key: str, fallback: bool) -> bool:
     return fallback
 
 
-def resolve_llm_config(settings: Settings) -> LLMConfig:
-    """Build LLM config from app settings with defensive bounds."""
-    profile = _load_profile(
-        settings.agent_provider_profiles_file,
-        settings.agent_provider_profile,
-    )
-    enabled = _pick_bool(profile, "enabled", True)
-    default_settings = Settings()
-    profile_base_url = _pick_str(profile, "base_url", default_settings.llm_base_url)
-    profile_model = _pick_str(profile, "model", default_settings.llm_model)
-    profile_timeout = _pick_float(profile, "timeout_seconds", float(default_settings.llm_timeout_seconds))
-    profile_temperature = _pick_float(profile, "temperature", float(default_settings.llm_temperature))
-    profile_max_tokens = _pick_int(profile, "max_tokens", int(default_settings.llm_max_tokens))
+LLM_EXPLICIT_FIELDS = frozenset({"base_url", "model", "timeout_seconds", "temperature", "max_tokens"})
 
-    # Allow explicit runtime/env settings to override profile defaults.
-    selected_base_url = (
-        settings.llm_base_url
-        if settings.llm_base_url != default_settings.llm_base_url
-        else profile_base_url
-    )
-    selected_model = (
-        settings.llm_model
-        if settings.llm_model != default_settings.llm_model
-        else profile_model
-    )
+
+def build_llm_config(
+    profile: Mapping[str, Any],
+    *,
+    api_key: str,
+    profile_name: str,
+    base_url: str,
+    model: str,
+    timeout_seconds: float,
+    temperature: float,
+    max_tokens: int,
+    stream: bool = False,
+    explicit: Collection[str] = (),
+) -> LLMConfig:
+    """Combine a provider profile with host values, with defensive bounds.
+
+    For each field in ``LLM_EXPLICIT_FIELDS`` the host value wins when the field
+    is listed in ``explicit``; otherwise the profile value is used and the host
+    value is only the fallback. ``stream`` is on when either side enables it.
+    A profile with ``enabled: false`` clears the API key.
+    """
+    unknown = set(explicit) - LLM_EXPLICIT_FIELDS
+    if unknown:
+        raise ValueError(f"unknown_llm_explicit_fields:{','.join(sorted(unknown))}")
+    payload = dict(profile)
+    enabled = _pick_bool(payload, "enabled", True)
+    selected_base_url = base_url if "base_url" in explicit else _pick_str(payload, "base_url", base_url)
+    selected_model = model if "model" in explicit else _pick_str(payload, "model", model)
     selected_timeout = (
-        float(settings.llm_timeout_seconds)
-        if float(settings.llm_timeout_seconds) != float(default_settings.llm_timeout_seconds)
-        else profile_timeout
+        float(timeout_seconds)
+        if "timeout_seconds" in explicit
+        else _pick_float(payload, "timeout_seconds", float(timeout_seconds))
     )
     selected_temperature = (
-        float(settings.llm_temperature)
-        if float(settings.llm_temperature) != float(default_settings.llm_temperature)
-        else profile_temperature
+        float(temperature)
+        if "temperature" in explicit
+        else _pick_float(payload, "temperature", float(temperature))
     )
     selected_max_tokens = (
-        int(settings.llm_max_tokens)
-        if int(settings.llm_max_tokens) != int(default_settings.llm_max_tokens)
-        else profile_max_tokens
+        int(max_tokens) if "max_tokens" in explicit else _pick_int(payload, "max_tokens", int(max_tokens))
     )
 
     return LLMConfig(
-        api_key=settings.llm_api_key if enabled else "",
+        api_key=api_key if enabled else "",
         base_url=selected_base_url,
         model=selected_model,
         timeout_seconds=max(1.0, selected_timeout),
         temperature=max(0.0, selected_temperature),
         max_tokens=max(32, selected_max_tokens),
-        tool_choice=_pick_str(profile, "tool_choice", "auto"),
-        parallel_tool_calls=_pick_bool(profile, "parallel_tool_calls", False),
-        prefer_chat_completions=_pick_bool(profile, "prefer_chat_completions", False),
-        profile_name=settings.agent_provider_profile,
+        tool_choice=_pick_str(payload, "tool_choice", "auto"),
+        parallel_tool_calls=_pick_bool(payload, "parallel_tool_calls", False),
+        prefer_chat_completions=_pick_bool(payload, "prefer_chat_completions", False),
+        profile_name=profile_name,
         profile_enabled=enabled,
-        api_mode=_pick_str(profile, "api_mode", "auto"),
-        auth_header=_pick_str(profile, "auth_header", "Authorization"),
-        send_temperature=_pick_bool(profile, "send_temperature", True),
-        token_limit_parameter=_pick_str(profile, "token_limit_parameter", "max_tokens"),
-        supported_tool_choices=tuple(profile.get("supported_tool_choices", ["auto", "none", "required"])),
-        extra_parameters=dict(profile.get("extra_parameters") or {}),
-        stream=settings.llm_stream or _pick_bool(profile, "stream", False),
+        api_mode=_pick_str(payload, "api_mode", "auto"),
+        auth_header=_pick_str(payload, "auth_header", "Authorization"),
+        send_temperature=_pick_bool(payload, "send_temperature", True),
+        token_limit_parameter=_pick_str(payload, "token_limit_parameter", "max_tokens"),
+        supported_tool_choices=tuple(payload.get("supported_tool_choices", ["auto", "none", "required"])),
+        extra_parameters=dict(payload.get("extra_parameters") or {}),
+        stream=stream or _pick_bool(payload, "stream", False),
     )

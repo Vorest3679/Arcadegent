@@ -33,7 +33,7 @@ from app.agent.tools.mcp.models import (
     MCPToolDescriptor,
 )
 from app.agent.tools.schemas import load_json_schema
-from app.infra.observability.logger import get_logger, log_public_label, log_ref
+from app.agent._logging import get_logger, log_public_label, log_ref
 from app.protocol.messages import GeoPoint, Location, RouteSummaryDto
 
 logger = get_logger(__name__)

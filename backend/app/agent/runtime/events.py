@@ -98,7 +98,7 @@ def is_domain_event(event: str) -> bool:
 # Bound by ``run_chat`` for the duration of one run; concurrent runs keep their
 # own value because the variable is copied into each task's context.
 _run_events: ContextVar[RunPublisher] = ContextVar(
-    "arcadegent_run_events", default=NullPublisher()
+    "agent_run_events", default=NullPublisher()
 )
 
 

@@ -6,23 +6,7 @@
   "argument_preparer": "app.agent.tools.builtin.executors.route_plan:prepare_arguments",
   "capabilities": ["builtin", "read_only", "navigation"],
   "metadata": {
-    "tool_function": "app.agent.tools.builtin.executors.route_plan:execute",
-    "guide": {
-      "path": "app/agent/context/skills/navigation-result-reading/SKILL.md",
-      "base": "project_root",
-      "as_string": true
-    },
-    "runtime_config": {
-      "base_url": {
-        "env": "AMAP_BASE_URL",
-        "default": "https://restapi.amap.com"
-      },
-      "timeout_seconds": {
-        "env": "AMAP_TIMEOUT_SECONDS",
-        "default": 8.0,
-        "cast": "float"
-      }
-    }
+    "tool_function": "app.agent.tools.builtin.executors.route_plan:execute"
   },
   "input_schema": {
     "$defs": {

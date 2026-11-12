@@ -9,7 +9,7 @@ from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.context_builder import ContextBuilder
 from app.agent.skills.config import load_skill_config
 from app.agent.skills.registry import SkillRegistry
-from app.agent.llm.llm_config import resolve_llm_config
+from app.agent_host.llm import resolve_llm_config
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.react_runtime import ReactRuntime
 from app.agent.subagents.subagent_builder import SubAgentBuilder

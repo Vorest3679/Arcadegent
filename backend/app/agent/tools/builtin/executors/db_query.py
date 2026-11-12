@@ -10,7 +10,7 @@ from app.agent.tools.base import ToolOutcome
 from app.agent.tools.builtin.executor_utils import as_region_code_or_name
 from app.agent.tools.builtin.geo_outlier_filter import filter_geo_outliers, row_coordinates
 from app.agent.tools.builtin.provider import BuiltinToolContext
-from app.infra.observability.logger import get_logger
+from app.agent._logging import get_logger
 
 logger = get_logger(__name__)
 

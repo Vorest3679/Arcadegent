@@ -143,13 +143,13 @@ publish("assistant.completed" or "session.failed", {"reply": final_text, ...}, o
 | `SessionStore`（`get_or_create_session`、`save_session`） | `agent/runtime/ports.py` | `infra/db/protocols.SessionStateRepository` 继承它，并补充历史列表、详情读取等依赖应用 DTO 的方法 |
 | `RunPublisher`、`NullPublisher` | `agent/runtime/events.py` | `session/injector.py` 再导出 |
 | `KernelEvent`（内核发布的 11 个事件名） | `agent/runtime/events.py` | `session/events.py` 以 `RunEvent` 名称再导出，与 `AppEvent`、`ControlEvent` 组成目录 |
-| 日志 | `agent/_logging.py` | 目前转发 `infra.observability.logger`；外移时只换这一处 |
+| 日志 | `agent/_logging.py` | 只依赖标准库：`get_logger`，以及脱敏辅助 `log_ref`、`log_public_label`、`log_exception_frames`。`infra.observability.logger` 反向复用这些辅助（共用同一个 HMAC key，agent 与应用日志的引用值可以对应），自己负责 handler、`PrivacyFormatter`，并在导入时用 `configure_log_frame_root` 把栈帧根目录扩到 `backend/app` |
 
 `SessionStateRepository` 没有整体搬入 agent 包：`list_session_summaries` 返回 `protocol.session_dto` 的 DTO，搬进来会把应用 DTO 带进内核，因此只把内核实际调用的两个方法拆成端口。
 
 事件名分三类：内核事件（`KernelEvent`）、应用事件（`AppEvent`，目前只有沿用旧名的 `navigation.route_ready`）和领域事件。领域通过 `domain_event(namespace, name)` 得到 `domain.<namespace>.<name>`（两段都是 `[a-z][a-z0-9_]*`，不合法时在声明处抛 `ValueError`），再经 `ToolResultSignal.events` 发布；`session/events.is_known_event` 对整个命名空间放行，不必改目录。前端只认 `RUN_EVENT_NAMES` 中的事件，其余丢弃，领域事件需要界面支持时再在前端添加。
 
-`backend/app/tests/integration/test_runtime_package_boundary.py` 用 AST 扫描上述模块（含 `TYPE_CHECKING` 与函数内导入），允许清单只有 `react_runtime.py`（应用适配器）和 `_logging.py`，并检查允许清单中的模块确实仍需越界。
+`backend/app/tests/integration/test_runtime_package_boundary.py` 用 AST 扫描上述模块（含 `TYPE_CHECKING` 与函数内导入），允许清单只有 `react_runtime.py`（应用适配器），并检查允许清单中的模块确实仍需越界。整个 `app.agent` 包的越界 import 与业务标识由 `backend/app/tests/integration/test_agent_boundary.py` 按精确允许清单把关（二级计划5），清单只减不增。
 
 ## Artifacts（阶段 6）
 

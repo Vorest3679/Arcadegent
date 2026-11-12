@@ -20,8 +20,6 @@ from app.agent.tools.base import (
 )
 from app.agent.tools.schemas import build_json_schema_validator, load_json_schema
 
-_DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[4]
-
 def _import_object(import_path: str) -> Any:
     """Import a Python object given its full import path, e.g. "module.sub:object.attr".
     给定完整的导入路径（例如 "module.sub:object.attr"）导入 Python 对象。
@@ -96,7 +94,9 @@ class BuiltinToolProvider:
         services: Mapping[str, Any] | None = None,
         manifest_path: Path | None = None,
     ) -> None:
-        merged_runtime_services: dict[str, Any] = {"project_root": _DEFAULT_PROJECT_ROOT}
+        # No default project root: a manifest path value with ``base: project_root``
+        # needs the host to pass ``project_root`` in ``runtime_services``.
+        merged_runtime_services: dict[str, Any] = {}
         if services is not None:
             merged_runtime_services.update(services)
         if runtime_services is not None:

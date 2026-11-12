@@ -2,8 +2,8 @@
 
 The kernel modules may only import ``app.agent.*`` (plus the standard library
 and third-party packages). ``react_runtime.py`` is the application adapter and
-``_logging.py`` forwards to the application logger; they are the only allowed
-exceptions. The scan covers ``TYPE_CHECKING`` and function-local imports too.
+the only allowed exception; ``_logging.py`` uses the standard library only
+(plan 5, stage 1). The scan covers ``TYPE_CHECKING`` and function-local imports too.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ KERNEL_MODULES = (
 
 ALLOWED = {
     AGENT_DIR / "runtime" / "react_runtime.py",
-    AGENT_DIR / "_logging.py",
 }
 
 

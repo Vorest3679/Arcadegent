@@ -341,3 +341,26 @@ def test_invalid_builtin_execution_mode_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="invalid_builtin_tool_execution_mode"):
         BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
+
+
+def test_builtin_path_metadata_needs_a_host_provided_project_root(tmp_path: Path) -> None:
+    tool = {
+        "name": "list_skills",
+        "description": "list skills",
+        "executor": "app.agent.tools.builtin.executors.skills:list_skills",
+        "input_schema": {"type": "object"},
+        "metadata": {"guide": {"path": "docs/guide.md", "as_string": True}},
+    }
+    (tmp_path / "list_skills.json").write_text(json.dumps(tool), encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["list_skills.json"]}), encoding="utf-8")
+
+    # The agent package no longer guesses a project root from its own location.
+    with pytest.raises(ValueError, match="unknown_builtin_service:project_root"):
+        BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
+
+    provider = BuiltinToolProvider(
+        manifest_path=tmp_path / "manifest.json",
+        runtime_services={"project_root": tmp_path},
+    )
+    metadata = asyncio.run(provider.get_tools())["list_skills"].metadata
+    assert metadata["guide"] == str(tmp_path / "docs" / "guide.md")

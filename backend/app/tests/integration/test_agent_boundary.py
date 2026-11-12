@@ -28,30 +28,24 @@ BUSINESS_TOKENS = re.compile(
 )
 
 ALLOWED_APP_IMPORTS: dict[str, tuple[str, ...]] = {
-    "_logging.py": ("app.infra.observability.logger",),
     "context/context_builder.py": ("app.protocol.messages",),
-    "llm/llm_config.py": ("app.core.config",),
-    "llm/provider_adapter.py": ("app.infra.observability.logger",),
     "runtime/react_runtime.py": ("app.protocol.messages",),
     "tools/builtin/db_query_tool.py": ("app.infra.db.protocols",),
-    "tools/builtin/executors/db_query.py": ("app.infra.observability.logger",),
     "tools/builtin/executors/route_plan.py": ("app.protocol.messages", "app.services.coordinate_transform"),
     "tools/builtin/executors/summary.py": ("app.protocol.messages",),
     "tools/builtin/geo_resolve_tool.py": ("app.protocol.messages",),
     "tools/builtin/route_plan_tool.py": ("app.protocol.messages",),
-    "tools/builtin/summary_tool.py": ("app.infra.observability.logger", "app.protocol.messages"),
+    "tools/builtin/summary_tool.py": ("app.protocol.messages",),
     "tools/mcp/dispatcher.py": ("app.protocol.messages",),
-    "tools/mcp/gateway.py": ("app.infra.observability.logger", "app.protocol.messages"),
+    "tools/mcp/gateway.py": ("app.protocol.messages",),
 }
 
 ALLOWED_BUSINESS_TOKENS: dict[str, tuple[str, ...]] = {
     "context/context_builder.py": ("amap", "arcade", "shop"),
     "context/context_payload.py": ("arcade", "shop"),
-    "runtime/events.py": ("arcade",),
     "runtime/kernel.py": ("map_artifacts",),
     "runtime/react_runtime.py": ("arcade",),
     "runtime/session_state.py": ("navigation_worker", "search_worker"),
-    "skills/config.py": ("arcade",),
     "subagents/subagent_builder.py": (
         "db_query_tool", "geo_resolve_tool", "navigation_worker", "result_selection_tool",
         "route_plan_tool", "search_worker", "summary_tool",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from app.infra.observability.logger import get_logger
+from app.agent._logging import get_logger
 from app.protocol.messages import RouteSummaryDto
 
 logger = get_logger(__name__)
