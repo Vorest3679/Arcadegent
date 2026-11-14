@@ -24,7 +24,7 @@ See the [project README](../../README.md) for installation, running, deployment,
 | [Browser Geolocation and Reverse Geocoding](dev-details/浏览器定位与逆地理编码.md) | Geolocation, reverse geocoding, and Agent context injection |
 | [Session Run Lifecycle and SSE](dev-details/会话运行生命周期与SSE.md) | Accepting, cancelling, and finishing runs; SSE replay and termination |
 | [Session Loading Performance](dev-details/会话加载性能优化.md) | Loading states and database select projection for session list, detail and delete |
-| [ReAct Runtime Core Logic](dev-details/ReAct运行时核心逻辑.md) | Main-agent loop, streamed model output, and output_id rules |
+| [ReAct Runtime Core Logic](dev-details/ReAct运行时核心逻辑.md) | The runtime from ReAct up: tool calls, artifacts, multiple agents, lifecycle and domain injection, concurrency, SSE events |
 | [Agent Context Payload Design](dev-details/智能体上下文载荷设计.md) | Agent context payload structure and constraints |
 | [Dynamic Tool Registration: Implementation Notes](dev-details/动态工具注册实现.md) | Built-in and MCP tool registration flow |
 | [Skill Resource Directory Support](dev-details/技能资源目录支持.md) | Skill resource-directory capabilities and extension boundaries |
