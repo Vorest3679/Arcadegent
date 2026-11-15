@@ -15,6 +15,7 @@ See the [project README](../../README.md) for installation, running, deployment,
 | --- | --- |
 | [Writing the Built-in Tool Manifest](guidings/内建工具清单编写指南.md) | Manifest, services, and schema format for adding built-in tools |
 | [Skill Configuration and Extension Guide](guidings/技能配置与扩展指南.md) | Skill format, discovery, on-demand reading, and context isolation |
+| [Evaluation System Setup and Configuration](guidings/评测系统启动与配置指南.md) | Starting offline regression and online evaluation, multi-model and judge setup, every setting and its default |
 
 ## Engineering details
 
@@ -28,7 +29,7 @@ See the [project README](../../README.md) for installation, running, deployment,
 | [Agent Context Payload Design](dev-details/智能体上下文载荷设计.md) | Agent context payload structure and constraints |
 | [Dynamic Tool Registration: Implementation Notes](dev-details/动态工具注册实现.md) | Built-in and MCP tool registration flow |
 | [Skill Resource Directory Support](dev-details/技能资源目录支持.md) | Skill resource-directory capabilities and extension boundaries |
-| [Evaluation Workbench: Architecture and Implementation](dev-details/评测工作台架构与实现.md) | Offline contracts, online evaluation, evidence, and report boundaries |
+| [Evaluation Workbench: Architecture and Implementation](dev-details/评测工作台架构与实现.md) | Offline regression, online evaluation, concurrent multi-model runs, hard checks and LLM judge, metrics and reports |
 
 ## Public documentation boundary
 
