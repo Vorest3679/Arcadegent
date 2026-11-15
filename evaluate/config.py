@@ -19,6 +19,10 @@ from app.protocol.messages import ChatRequest
 
 BASE = Path(__file__).resolve().parent
 ROOT = BASE.parent
+# Keep these in line with .env.example: a small output ceiling truncates tool-call
+# and worker responses with finish_reason=length.
+DEFAULT_MAX_OUTPUT_TOKENS = 32768
+DEFAULT_ATTEMPT_TIMEOUT_S = 300
 
 
 class ConfigError(ValueError):
@@ -95,6 +99,8 @@ class Config:
     judge_max_requests: int
     quality_threshold: float
     map_mode: str
+    # Maximum profiles running at once; 0 runs every selected profile together.
+    model_concurrency: int = 0
 
     def ready(self, model: LLMConfig) -> bool:
         return bool(model.api_key and model.base_url and model.model)
@@ -143,7 +149,7 @@ def profile(values, prefix):
         api_key=values.get(prefix + "API_KEY", ""), base_url=url, model=values.get(prefix + "MODEL", ""),
         api_mode=mode, timeout_seconds=number(values, "EVAL_REQUEST_TIMEOUT_S", 45, minimum=0.1),
         temperature=number(values, prefix + "TEMPERATURE", 0.2),
-        max_tokens=number(values, prefix + "MAX_OUTPUT_TOKENS", 4096 if prefix == "EVAL_JUDGE_" else number(values, "EVAL_MAX_OUTPUT_TOKENS", 1024, integer=True, minimum=1), integer=True, minimum=1),
+        max_tokens=number(values, prefix + "MAX_OUTPUT_TOKENS", 4096 if prefix == "EVAL_JUDGE_" else number(values, "EVAL_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS, integer=True, minimum=1), integer=True, minimum=1),
         auth_header=values.get(prefix + "AUTH_HEADER", "Authorization"),
         send_temperature=boolean(values, prefix + "SEND_TEMPERATURE"),
         token_limit_parameter=values.get(prefix + "TOKEN_PARAMETER", "max_tokens"), extra_parameters=extra,
@@ -188,10 +194,11 @@ def load(env_file=BASE / ".env", models=None, cases_file=None, repeat=None) -> C
         number(values, "EVAL_MAX_REQUESTS", 40, integer=True, minimum=1),
         number(values, "EVAL_MAX_CALLS_PER_ATTEMPT", 40, integer=True, minimum=1),
         number(values, "EVAL_MAX_TOOL_CALLS", 40, integer=True, minimum=1),
-        number(values, "EVAL_ATTEMPT_TIMEOUT_S", 120, minimum=0.1),
+        number(values, "EVAL_ATTEMPT_TIMEOUT_S", DEFAULT_ATTEMPT_TIMEOUT_S, minimum=0.1),
         number(values, "EVAL_REQUEST_INTERVAL_S", 1), judge,
         number(values, "EVAL_JUDGE_MAX_REQUESTS", 20, integer=True, minimum=1),
-        number(values, "EVAL_QUALITY_THRESHOLD", 75), map_mode)
+        number(values, "EVAL_QUALITY_THRESHOLD", 75), map_mode,
+        number(values, "EVAL_MAX_MODEL_CONCURRENCY", 0, integer=True, minimum=0))
     if config.repeat < 1 or config.quality_threshold > 100:
         raise ValueError("invalid repeat or quality threshold")
     return config

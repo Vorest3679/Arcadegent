@@ -311,9 +311,15 @@ def plan(config):
             "judge_ready": bool(config.judge and config.ready(config.judge)),
             "max_judge_requests": config.judge_max_requests,
             "model_execution": "parallel_by_profile_ordered_within_profile",
-            "max_model_concurrency": len(config.models),
+            "max_model_concurrency": model_concurrency(config),
             "mode": "live_model_frozen_catalog", "data_sha256": hashlib.sha256(config.data.read_bytes()).hexdigest(),
             "case_sha256": hashlib.sha256(json.dumps([c.model_dump() for c in config.cases], sort_keys=True).encode()).hexdigest()}
+
+
+def model_concurrency(config):
+    """Profiles allowed to run at once; 0 (the default) means every selected profile."""
+    total = len(config.models)
+    return min(config.model_concurrency, total) if config.model_concurrency else total
 
 
 def judge_evidence(attempt):
@@ -493,7 +499,7 @@ def report(evidence, attempts):
              "清晰度 **20**、无臆造 **10**；分数达到配置阈值（本次为 75/100）才通过。"
              "Judge 只评回答质量，不能覆盖 Hard Pass 的结构化或工具失败。", "",
              "| Profile | 已运行/计划 | 完整通过得分 | 硬约束通过 | 质量通过 | Judge 平均分 | 加权硬通过率 |",
-             "| --- | --- | --- | --- | --- | --- |"]
+             "| --- | --- | --- | --- | --- | --- | --- |"]
     for name, m in summary["models"].items():
         judge_mean = "N/A" if m["judge_score_mean"] is None else f"{m['judge_score_mean']:.1f}/100"
         weighted_hard = "N/A" if m["weighted_hard_success"] is None else f"{m['weighted_hard_success'] * 100:.1f}%"
@@ -612,8 +618,15 @@ async def run(config, evidence):
             print(f"{attempt['model_profile']} / {case.id}: {attempt['status']}, hard_pass={attempt.get('hard_pass')}", flush=True)
 
     queues = {name: [attempt for attempt in attempts if attempt["model_profile"] == name] for name in config.models}
+    slots = asyncio.Semaphore(model_concurrency(config))
+
+    async def limited(name, queue):
+        # A whole profile queue holds one slot, so each model stays ordered.
+        async with slots:
+            await run_model_queue(name, queue)
+
     try:
-        await asyncio.gather(*(run_model_queue(name, queue) for name, queue in queues.items()))
+        await asyncio.gather(*(limited(name, queue) for name, queue in queues.items()))
     finally:
         for attempt in attempts:
             if attempt["attempt_id"] not in completed:

@@ -94,6 +94,60 @@ def test_model_queues_run_concurrently_but_keep_their_own_attempt_order(tmp_path
     assert peak == 2
 
 
+def test_model_concurrency_limit_serializes_profile_queues(tmp_path, monkeypatch):
+    cfg = config(tmp_path, monkeypatch, "EVAL_MAX_MODEL_CONCURRENCY=1\n")
+    cfg.models = {"alpha": cfg.models["default"], "beta": cfg.models["default"]}
+    cfg.cases = [Case(id="limited-models", group="retrieval", turns=[Turn(message="直接回答即可。")])]
+    cfg.max_requests = 4
+    active = peak = 0
+
+    async def handle(request):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(.03)
+            return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": "完成"},
+                "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 2}})
+        finally:
+            active -= 1
+
+    transport(monkeypatch, handle)
+    assert plan(cfg)["max_model_concurrency"] == 1
+    assert asyncio.run(run(cfg, Evidence(tmp_path, cfg.values))) == 0
+    rows = [json.loads(line) for line in (tmp_path / "attempts.jsonl").read_text().splitlines()]
+    assert {row["model_profile"] for row in rows} == {"alpha", "beta"}
+    assert peak == 1
+
+
+def test_defaults_match_the_template_output_and_attempt_limits(tmp_path, monkeypatch):
+    cfg = config(tmp_path, monkeypatch)
+    assert cfg.models["default"].max_tokens == 32768
+    assert cfg.wall_s == 300
+    assert cfg.model_concurrency == 0
+    assert plan(cfg)["max_model_concurrency"] == 1
+    template = {line.split("=", 1)[0]: line.split("=", 1)[1]
+                for line in (Path(__file__).resolve().parents[1] / ".env.example").read_text().splitlines()
+                if line and not line.startswith("#") and "=" in line}
+    assert template["EVAL_MAX_OUTPUT_TOKENS"] == "32768"
+    assert template["EVAL_ATTEMPT_TIMEOUT_S"] == "300"
+    assert template["EVAL_MAX_MODEL_CONCURRENCY"] == "0"
+    with pytest.raises(Exception):
+        config(tmp_path, monkeypatch, "EVAL_MAX_MODEL_CONCURRENCY=-1\n")
+
+
+def test_summary_tables_have_matching_header_and_separator_columns(tmp_path):
+    attempts = [{"attempt_id": "a", "model_profile": "m", "case_id": "c", "group": "retrieval",
+                 "status": "completed", "hard_pass": True, "quality_pass": None,
+                 "duration_ms": 1, "turn_scores": [{"failures": []}], "cost": None}]
+    report(Evidence(tmp_path, {}), attempts)
+    lines = (tmp_path / "summary.md").read_text().splitlines()
+    for index, line in enumerate(lines[:-1]):
+        following = lines[index + 1]
+        if line.startswith("| ") and following.startswith("| ---"):
+            assert line.count("|") == following.count("|"), line
+
+
 def test_missing_key_is_not_run_and_does_not_inherit_production_env(tmp_path, monkeypatch):
     cfg = config(tmp_path, monkeypatch, "EVAL_LLM_API_KEY=\n")
     monkeypatch.setenv("LLM_API_KEY", "production-key")
