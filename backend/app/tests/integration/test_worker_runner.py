@@ -25,6 +25,7 @@ from app.agent.subagents.agent_node import AgentNode
 from app.agent.subagents.subagent_builder import SubAgentProfile
 from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
 from app.agent.tools.execution import CAP_SPAWN_AGENT
+from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.domain.arcade.domain import ArcadeTurnDomain
@@ -100,6 +101,7 @@ def _kernel(tmp_path: Path, provider: _Provider, store: _Store, tools: _Tools) -
     registry = ToolRegistry(
         providers=[tools],
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        local_provider=LocalToolProvider(),
     )
     return AgentKernel(
         context_builder=_ContextBuilder(),  # type: ignore[arg-type]

@@ -14,6 +14,7 @@ from app.agent.skills.execution import SkillExecution
 from app.agent.tools.base import ProviderExecutionResult, ToolArgumentPreparationError, ToolDescriptor
 from app.agent.tools.builtin import BuiltinToolProvider
 from app.agent.tools.execution import ToolDispatcher, ToolTask
+from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 
@@ -89,6 +90,7 @@ def _registry(tmp_path: Path, provider: Any | None = None) -> ToolRegistry:
     return ToolRegistry(
         providers=[provider or _Tools()],
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        local_provider=LocalToolProvider(),
     )
 
 
@@ -315,8 +317,9 @@ def test_builtin_provider_reads_a_declared_parallel_mode(tmp_path: Path) -> None
     (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["list_skills.json"]}), encoding="utf-8")
     provider = BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
     registry = ToolRegistry(
-        providers=[provider],
+        providers=[],
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        local_provider=provider,
     )
 
     assert asyncio.run(provider.get_tools())["list_skills"].execution_mode == "parallel"
@@ -339,7 +342,8 @@ def test_invalid_builtin_execution_mode_is_rejected(tmp_path: Path) -> None:
     (tmp_path / "list_skills.json").write_text(json.dumps(tool), encoding="utf-8")
     (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["list_skills.json"]}), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="invalid_builtin_tool_execution_mode"):
+    # A bad mode is rejected when the manifest is parsed into a spec.
+    with pytest.raises(ValueError, match="invalid_tool_execution_mode:list_skills"):
         BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
 
 

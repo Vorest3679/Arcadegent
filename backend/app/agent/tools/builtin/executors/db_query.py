@@ -9,7 +9,7 @@ from app.agent.artifacts.model import Artifact
 from app.agent.tools.base import ToolOutcome
 from app.agent.tools.builtin.executor_utils import as_region_code_or_name
 from app.agent.tools.builtin.geo_outlier_filter import filter_geo_outliers, row_coordinates
-from app.agent.tools.builtin.provider import BuiltinToolContext
+from app.agent.tools.spec import ToolContext
 from app.agent._logging import get_logger
 
 logger = get_logger(__name__)
@@ -158,7 +158,7 @@ def _apply_geo_outlier_filter(
     return filter_geo_outliers(rows)
 
 
-def execute(context: BuiltinToolContext, args: dict[str, Any]) -> ToolOutcome:
+def execute(context: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     """Normalize region filters and execute the store-backed shop query."""
     tool = context.require("db_query_tool")
 

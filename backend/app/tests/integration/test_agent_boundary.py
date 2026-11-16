@@ -64,7 +64,6 @@ ALLOWED_BUSINESS_TOKENS: dict[str, tuple[str, ...]] = {
     "tools/mcp/discovery.py": ("导航", "路线"),
     "tools/mcp/dispatcher.py": ("amap", "gcj02", "geopoint", "routesummarydto", "导航", "路线"),
     "tools/mcp/gateway.py": ("amap", "gcj02", "geopoint", "routesummarydto", "路线"),
-    "tools/registry.py": ("db_query_tool", "geo_resolve_tool", "route_plan_tool", "summary_tool"),
 }
 
 

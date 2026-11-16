@@ -1,24 +1,29 @@
-"""Manifest-driven builtin tool provider with split manifest and per-tool JSON files.
-由 manifest 驱动的内置工具提供程序，具有分离的 manifest 和每个工具的 JSON 文件。
+"""Manifest adapter: builtin tools declared in a JSON manifest.
+
+``BuiltinToolProvider`` is a :class:`LocalToolProvider` whose tools come from
+``tools_manifest.json``: each manifest entry is a JSON tool definition with
+``executor`` / ``argument_preparer`` import strings, and the manifest
+``services`` section is a small factory container (import strings,
+environment variables, paths). It only translates its source into
+``ToolSpec`` objects; the catalog, the origin rules and the execution path are
+``LocalToolProvider``'s. Hosts that build ``ToolSpec`` objects in code can use
+a plain ``LocalToolProvider`` and register tools through
+``ToolRegistry.add_tools`` instead.
 """
 
 from __future__ import annotations
 
-import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import importlib
-import inspect
 import os
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping, cast
+from typing import Any
 
-from app.agent.tools.base import (
-    ExecutionMode,
-    ProviderExecutionResult,
-    ToolDescriptor,
-    ToolOutcome,
-)
-from app.agent.tools.schemas import build_json_schema_validator, load_json_schema
+from app.agent.tools.local import LocalToolProvider
+from app.agent.tools.schemas import load_json_schema
+from app.agent.tools.spec import ArgumentPreparer, ToolSpec
+
 
 def _import_object(import_path: str) -> Any:
     """Import a Python object given its full import path, e.g. "module.sub:object.attr".
@@ -43,49 +48,15 @@ def _coerce_bool(value: Any) -> bool:
 
 
 @dataclass(frozen=True)
-class BuiltinToolContext:
-    """Shared resolver exposed to builtin executors."""
-
-    resolver: Callable[[str], Any]
-
-    def require(self, service_name: str) -> Any:
-        return self.resolver(service_name)
-
-    def get(self, service_name: str) -> Any | None:
-        try:
-            return self.resolver(service_name)
-        except ValueError:
-            return None
-
-
-BuiltinToolExecutor = Callable[
-    [BuiltinToolContext, dict[str, Any]],
-    dict[str, Any] | ToolOutcome | Awaitable[dict[str, Any] | ToolOutcome],
-]
-BuiltinToolArgumentPreparer = Callable[
-    [dict[str, Any], dict[str, Any]],
-    tuple[dict[str, Any], list[str]],
-]
-
-
-@dataclass(frozen=True)
 class _BuiltinServiceSpec:
     factory: str
     dependencies: dict[str, Any] = field(default_factory=dict)
     singleton: bool = True # whether to cache the resolved instance for future use
 
 
-@dataclass(frozen=True)
-class _BuiltinToolBinding:
-    descriptor: ToolDescriptor
-    executor: BuiltinToolExecutor
-    argument_preparer: BuiltinToolArgumentPreparer | None
-    source_path: Path
-
-
-class BuiltinToolProvider:
-    """Load builtin tools from a manifest index plus per-tool JSON definitions.
-    从 manifest 索引和每个工具的 JSON 定义中加载内置工具。"""
+class BuiltinToolProvider(LocalToolProvider):
+    """Manifest-declared tools, reloadable through :meth:`refresh`.
+    manifest 声明的工具，可通过 refresh 重新加载；运行时注册的工具在 refresh 后保留。"""
 
     def __init__(
         self,
@@ -101,137 +72,61 @@ class BuiltinToolProvider:
             merged_runtime_services.update(services)
         if runtime_services is not None:
             merged_runtime_services.update(runtime_services)
-        self._runtime_services = merged_runtime_services
-        self._context = BuiltinToolContext(self._resolve_service)
+        super().__init__(
+            provider_name="builtin",
+            services=merged_runtime_services,
+            service_resolver=self._resolve_manifest_service,
+        )
         self._manifest_path = manifest_path or Path(__file__).with_name("tools_manifest.json")
-        self._bindings: dict[str, _BuiltinToolBinding] = {} # tool_name -> binding
+        self._tool_files: dict[str, Path] = {} # tool_name -> definition file
         self._service_specs: dict[str, _BuiltinServiceSpec] = {} # service_name -> spec
         self._service_cache: dict[str, Any] = {} # service_name -> instance
         self._resolving_services: set[str] = set() # service_names currently being resolved (for cycle detection)
-        self._bindings = self._load_bindings() # load tools and services on initialization
-
-    @property
-    def provider_name(self) -> str:
-        return "builtin"
+        self.load(self._load_manifest_specs())
 
     async def refresh(self) -> None:
-        self._service_specs = {} # service_name -> spec
-        self._service_cache = {} # service_name -> instance
-        self._resolving_services = set() # service_names currently being resolved (for cycle detection)
-        self._bindings = self._load_bindings()
-
-    async def get_tools(self) -> dict[str, ToolDescriptor]:
-        return {
-            name: binding.descriptor
-            for name, binding in self._bindings.items()
-        }
-
-    async def execute(
-        self,
-        *,
-        tool_name: str,
-        raw_arguments: dict[str, Any],
-        validated_arguments: Any | None = None,
-    ) -> ProviderExecutionResult:
-        """Execute a builtin tool by name with the given arguments, validating against the tool's declared JSON Schema.
-        根据工具声明的 JSON Schema 验证，使用给定的参数按名称执行内置工具。
-        """
-        _ = raw_arguments
-        binding = self._bindings.get(tool_name)
-        if binding is None:
-            raise ValueError(f"unknown_tool:{tool_name}")
-        payload = validated_arguments if isinstance(validated_arguments, dict) else raw_arguments
-        if inspect.iscoroutinefunction(binding.executor):
-            raw_output = await binding.executor(self._context, payload)
-        else:
-            raw_output = await asyncio.to_thread(binding.executor, self._context, payload)
-        if isinstance(raw_output, ToolOutcome):
-            return ProviderExecutionResult(
-                status="completed",
-                output=raw_output.output,
-                artifacts=raw_output.artifacts,
-            )
-        if not isinstance(raw_output, dict):
-            raise ValueError(f"invalid_builtin_tool_output:{tool_name}")
-        return ProviderExecutionResult(status="completed", output=raw_output)
-
-    def prepare_arguments(
-        self,
-        *,
-        tool_name: str,
-        raw_arguments: dict[str, Any],
-        runtime_context: dict[str, Any] | None = None,
-    ) -> tuple[dict[str, Any], list[str]]:
-        binding = self._bindings.get(tool_name)
-        if binding is None:
-            raise ValueError(f"unknown_tool:{tool_name}")
-        if binding.argument_preparer is None:
-            return dict(raw_arguments), []
-        return binding.argument_preparer(dict(raw_arguments), dict(runtime_context or {}))
+        """Reload the manifest; tools registered at runtime are kept."""
+        self._service_specs = {}
+        self._service_cache = {}
+        self._resolving_services = set()
+        self.load(self._load_manifest_specs())
 
     def health(self) -> dict[str, Any]:
         return {
-            "manifest_path": str(self._manifest_path),
-            "tool_count": len(self._bindings),
-            "tools": list(self._bindings),
-            "tool_files": {
-                name: str(binding.source_path)
-                for name, binding in self._bindings.items()
-            },
+            **super().health(),
+            "manifest_path": self._manifest_path.name,
+            "tool_files": {name: path.name for name, path in self._tool_files.items()},
             "service_count": len(self._service_specs),
             "service_specs": sorted(self._service_specs),
-            "runtime_services": sorted(self._runtime_services),
+            "runtime_services": sorted(self._services),
             "resolved_services": sorted(self._service_cache),
         }
 
-    def _load_bindings(self) -> dict[str, _BuiltinToolBinding]:
-        """Load tool bindings from manifest and tool definition files, resolving service dependencies as needed.
-        根据需要从 manifest 和工具定义文件加载工具绑定，解析服务依赖关系。"""
+    def _load_manifest_specs(self) -> list[ToolSpec]:
+        """Build specs from the manifest and its tool definition files, resolving metadata values.
+        根据 manifest 和工具定义文件构建 ToolSpec，并解析 metadata 中的引用值。"""
         raw_manifest = load_json_schema(self._manifest_path)
         tool_paths, service_specs = self._parse_manifest(raw_manifest)
         self._service_specs = service_specs
 
-        bindings: dict[str, _BuiltinToolBinding] = {}
+        specs: list[ToolSpec] = []
+        tool_files: dict[str, Path] = {}
         for tool_path in tool_paths:
             item = load_json_schema(tool_path)
-            name = str(item.get("name") or "").strip()
-            description = str(item.get("description") or "").strip()
             executor_import = str(item.get("executor") or "").strip()
-            kind = str(item.get("kind") or "function").strip() or "function"
-            input_schema = item.get("input_schema")
-            capabilities = tuple(
-                value.strip()
-                for value in item.get("capabilities", [])
-                if isinstance(value, str) and value.strip()
-            )
-            execution_mode = self._read_execution_mode(item, tool_path=tool_path)
-            if not name or not description or not executor_import or not isinstance(input_schema, dict):
-                raise ValueError(f"invalid_builtin_tool_definition:{tool_path}")
-            if name in bindings:
-                raise ValueError(f"duplicate_builtin_tool:{name}")
-
-            executor = _import_object(executor_import)
-            argument_preparer = self._load_argument_preparer(item)
             metadata = self._resolve_metadata_value(item.get("metadata"))
-            bindings[name] = _BuiltinToolBinding(
-                descriptor=ToolDescriptor(
-                    name=name,
-                    description=description,
-                    provider=self.provider_name,
-                    kind=kind,
-                    input_schema=input_schema,
-                    validator=build_json_schema_validator(input_schema, source=str(tool_path)),
-                    capabilities=capabilities,
-                    execution_mode=execution_mode,
-                    metadata=metadata if isinstance(metadata, dict) else {},
-                ),
-                executor=executor,
-                argument_preparer=argument_preparer,
-                source_path=tool_path,
+            spec = ToolSpec.from_definition(
+                item,
+                executor=_import_object(executor_import),
+                argument_preparer=self._load_argument_preparer(item),
+                metadata=metadata if isinstance(metadata, dict) else {},
             )
-        return bindings
+            specs.append(spec)
+            tool_files[spec.name] = tool_path
+        self._tool_files = tool_files
+        return specs
 
-    def _load_argument_preparer(self, item: dict[str, Any]) -> BuiltinToolArgumentPreparer | None:
+    def _load_argument_preparer(self, item: dict[str, Any]) -> ArgumentPreparer | None:
         import_path = str(item.get("argument_preparer") or "").strip()
         if not import_path:
             return None
@@ -239,14 +134,6 @@ class BuiltinToolProvider:
         if not callable(preparer):
             raise ValueError(f"invalid_builtin_tool_argument_preparer:{import_path}")
         return preparer
-
-    def _read_execution_mode(self, item: dict[str, Any], *, tool_path: Path) -> ExecutionMode:
-        """Declared concurrency mode; missing means the safe ``exclusive`` default."""
-        raw = item.get("execution_mode", "exclusive")
-        value = raw.strip().lower() if isinstance(raw, str) else ""
-        if value not in {"exclusive", "parallel"}:
-            raise ValueError(f"invalid_builtin_tool_execution_mode:{tool_path}")
-        return cast(ExecutionMode, value)
 
     def _parse_manifest(
         self,
@@ -296,14 +183,12 @@ class BuiltinToolProvider:
             )
         return tool_paths, service_specs
 
-    def _resolve_service(self, service_name: str) -> Any:
+    def _resolve_manifest_service(self, service_name: str) -> Any:
         """Resolve a service by name, instantiating it if needed based on its specification and dependencies.
         根据规范和依赖关系按名称解析服务，必要时实例化它。"""
         normalized_name = service_name.strip()
         if not normalized_name:
             raise ValueError("empty_builtin_service_name")
-        if normalized_name in self._runtime_services:
-            return self._runtime_services[normalized_name]
         if normalized_name in self._service_cache:
             return self._service_cache[normalized_name]
 

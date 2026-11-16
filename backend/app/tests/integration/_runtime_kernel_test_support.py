@@ -21,6 +21,7 @@ from app.agent.subagents.agent_node import AgentNode
 from app.agent.subagents.subagent_builder import SubAgentProfile
 from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
 from app.agent.tools.execution import CAP_CONCLUDES_TURN, CAP_SPAWN_AGENT
+from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.protocol.messages import ChatRequest
@@ -134,6 +135,7 @@ def _runtime(tmp_path: Path, provider: _Provider, store: _Store, domain: BaseTur
     registry = ToolRegistry(
         providers=[_Tools()],
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        local_provider=LocalToolProvider(),
     )
     return AgentKernel(
         context_builder=_ContextBuilder(),  # type: ignore[arg-type]

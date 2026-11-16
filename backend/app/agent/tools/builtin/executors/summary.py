@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agent.tools.builtin.provider import BuiltinToolContext
+from app.agent.tools.spec import ToolContext
 from app.protocol.messages import RouteSummaryDto
 
 
@@ -104,7 +104,7 @@ def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, 
     return args, hydrated
 
 
-def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, str]:
+def execute(context: ToolContext, args: dict[str, Any]) -> dict[str, str]:
     """Format either search or navigation context into a stable reply string."""
     tool = context.require("summary_tool")
     if args["topic"] == "navigation":

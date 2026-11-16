@@ -116,9 +116,10 @@ def build_container(
         }
     )
     tool_registry = ToolRegistry(
-        providers=[builtin_tool_provider, mcp_tool_gateway],
+        providers=[mcp_tool_gateway],
         permission_checker=permission_checker,
         strict_schema=True,
+        local_provider=builtin_tool_provider,
     )
     session_store = session_store if session_store is not None else _build_session_repository(settings)
     artifact_sink = ArtifactSink()

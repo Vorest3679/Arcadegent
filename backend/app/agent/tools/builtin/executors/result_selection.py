@@ -6,7 +6,7 @@ from typing import Any
 
 from app.agent.artifacts.model import Artifact
 from app.agent.tools.base import ToolArgumentPreparationError, ToolOutcome
-from app.agent.tools.builtin.provider import BuiltinToolContext
+from app.agent.tools.spec import ToolContext
 
 
 def _artifact(memory: dict[str, Any], key: str) -> Any:
@@ -47,7 +47,7 @@ def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, 
     return args, ["selected_shops"]
 
 
-def execute(context: BuiltinToolContext, args: dict[str, Any]) -> ToolOutcome:
+def execute(context: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     """Return prepared rows and declare them as the displayed selection.
 
     ``selected_shops`` is authoritative even when empty: an explicit empty list

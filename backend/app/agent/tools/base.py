@@ -75,7 +75,17 @@ class ToolOutcome:
 
 
 class ToolProvider(Protocol):
-    """Common provider surface implemented by builtin and MCP sources."""
+    """Common provider surface implemented by builtin and MCP sources.
+
+    This is a structural contract, not a base class: ``LocalToolProvider``,
+    ``BuiltinToolProvider`` and the MCP provider satisfy it by shape and do not
+    inherit from it. Consequently, "go to definition" on ``provider.execute``
+    from the registry lands on the declaration below, not on the concrete
+    implementation; use "go to implementation" to reach the provider method.
+    这是结构化契约而非基类：各 provider 靠方法签名满足它、不显式继承，
+    因此在 registry 中对 ``provider.execute`` 跳转会落到此声明而不是具体实现。
+    对于本地工具，可在 ``LocalToolProvider`` 中找到实现；对于 MCP 工具，可在 ``MCPToolProvider`` 中找到实现。
+    """
 
     @property
     def provider_name(self) -> str:

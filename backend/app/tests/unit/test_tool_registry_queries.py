@@ -88,15 +88,13 @@ def test_tool_registry_supports_title_quantity_sorting(tmp_path: Path) -> None:
     store = LocalArcadeStore.from_jsonl(data_path)
     gateway = MCPToolGateway()
     registry = ToolRegistry(
-        providers=[
-            BuiltinToolProvider(
-                runtime_services={
-                    "store": store,
-                    "mcp_tool_gateway": gateway,
-                }
-            ),
-            gateway,
-        ],
+        providers=[gateway],
+        local_provider=BuiltinToolProvider(
+            runtime_services={
+                "store": store,
+                "mcp_tool_gateway": gateway,
+            }
+        ),
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
         strict_schema=True,
     )
@@ -147,15 +145,13 @@ def test_tool_registry_backfills_sort_title_name_from_keyword(tmp_path: Path) ->
     store = LocalArcadeStore.from_jsonl(data_path)
     gateway = MCPToolGateway()
     registry = ToolRegistry(
-        providers=[
-            BuiltinToolProvider(
-                runtime_services={
-                    "store": store,
-                    "mcp_tool_gateway": gateway,
-                }
-            ),
-            gateway,
-        ],
+        providers=[gateway],
+        local_provider=BuiltinToolProvider(
+            runtime_services={
+                "store": store,
+                "mcp_tool_gateway": gateway,
+            }
+        ),
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
         strict_schema=True,
     )
@@ -207,15 +203,13 @@ def test_tool_registry_supports_distance_sorting(tmp_path: Path) -> None:
     store = LocalArcadeStore.from_jsonl(data_path)
     gateway = MCPToolGateway()
     registry = ToolRegistry(
-        providers=[
-            BuiltinToolProvider(
-                runtime_services={
-                    "store": store,
-                    "mcp_tool_gateway": gateway,
-                }
-            ),
-            gateway,
-        ],
+        providers=[gateway],
+        local_provider=BuiltinToolProvider(
+            runtime_services={
+                "store": store,
+                "mcp_tool_gateway": gateway,
+            }
+        ),
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
         strict_schema=True,
     )

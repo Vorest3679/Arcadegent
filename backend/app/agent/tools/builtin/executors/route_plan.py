@@ -9,7 +9,7 @@ from typing import Any
 
 from app.agent.artifacts.model import Artifact
 from app.agent.tools.base import ToolOutcome
-from app.agent.tools.builtin.provider import BuiltinToolContext
+from app.agent.tools.spec import ToolContext
 from app.protocol.messages import Location
 from app.services.coordinate_transform import wgs84_to_gcj02
 
@@ -175,7 +175,7 @@ def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, 
     return args, hydrated
 
 
-async def execute(context: BuiltinToolContext, args: dict[str, Any]) -> ToolOutcome:
+async def execute(context: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     """Prefer MCP-based AMap routing when available, otherwise call the online REST service."""
     tool = context.require("route_plan_tool")
     origin = Location.model_validate(args["origin"])

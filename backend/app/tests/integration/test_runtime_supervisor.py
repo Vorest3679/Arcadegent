@@ -22,6 +22,7 @@ from app.agent.subagents.agent_node import AgentNode
 from app.agent.subagents.subagent_builder import SubAgentProfile
 from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
 from app.agent.tools.execution import CAP_SPAWN_AGENT, ToolDispatcher, ToolTask
+from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.protocol.messages import ChatRequest
@@ -174,6 +175,7 @@ def _kernel(
         tool_registry=ToolRegistry(
             providers=[tools],
             permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+            local_provider=LocalToolProvider(),
         ),
         provider_adapter=provider,  # type: ignore[arg-type]
         session_store=_Store(),  # type: ignore[arg-type]
@@ -307,6 +309,7 @@ def test_first_or_interval_returns_done_and_pending_and_cancels_cleanly(tmp_path
         registry = ToolRegistry(
             providers=[tools],
             permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+            local_provider=LocalToolProvider(),
         )
         dispatcher = ToolDispatcher(tool_registry=registry, hooks=_PassthroughHooks())
         supervisor = LoopSupervisor(
@@ -368,6 +371,7 @@ def test_second_cancellation_during_cancel_all_still_cancels_later_siblings(tmp_
         registry = ToolRegistry(
             providers=[tools],
             permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+            local_provider=LocalToolProvider(),
         )
         hooks = _StuckCommitHooks()
         dispatcher = ToolDispatcher(tool_registry=registry, hooks=hooks)
