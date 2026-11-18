@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Literal
@@ -59,12 +59,10 @@ class LocalToolProvider:
         *,
         provider_name: str = "local",
         services: Mapping[str, Any] | None = None,
-        service_resolver: Callable[[str], Any] | None = None,
         specs: Iterable[ToolSpec] = (),
     ) -> None:
         self._provider_name = provider_name
         self._services: dict[str, Any] = dict(services or {})
-        self._service_resolver = service_resolver
         self._context = ToolContext(self._resolve_service)
         self._entries: Mapping[str, LocalToolEntry] = MappingProxyType({})
         self._revision = 0
@@ -248,6 +246,4 @@ class LocalToolProvider:
             raise ValueError("empty_tool_service_name")
         if name in self._services:
             return self._services[name]
-        if self._service_resolver is not None:
-            return self._service_resolver(name)
         raise ValueError(f"unknown_tool_service:{name}")

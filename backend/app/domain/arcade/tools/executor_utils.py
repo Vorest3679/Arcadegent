@@ -1,4 +1,4 @@
-"""Shared utilities for per-tool builtin executors."""
+"""Shared utilities for the arcade tool executors."""
 
 from __future__ import annotations
 

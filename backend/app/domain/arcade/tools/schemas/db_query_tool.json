@@ -2,12 +2,7 @@
   "name": "db_query_tool",
   "kind": "function",
   "description": "Search arcade shops by keyword and region. Use *_code for 12-digit region codes, or *_name for natural-language region names. Can also fetch one shop by shop_id. Supports sorting via sort_by/sort_order/sort_title_name, including distance sorting from an origin longitude/latitude. For named-place nearby search, resolve the place with AMap MCP first, then pass the resolved coordinates as origin_*.",
-  "executor": "app.agent.tools.builtin.executors.db_query:execute",
-  "argument_preparer": "app.agent.tools.builtin.executors.db_query:prepare_arguments",
-  "capabilities": ["builtin", "read_only", "search"],
-  "metadata": {
-    "tool_function": "app.agent.tools.builtin.executors.db_query:execute"
-  },
+  "capabilities": ["read_only", "search"],
   "input_schema": {
     "additionalProperties": false,
     "properties": {

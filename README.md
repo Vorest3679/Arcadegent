@@ -426,8 +426,8 @@ Agent 配置分为几层：
 - Prompt：`backend/app/agent/context/prompts/*.md`
 - Skill：`backend/app/agent/context/skills/*/SKILL.md`
 - Skill 配置：`backend/skill.config.py`（目录、禁用项、agent 白名单和读取上限）
-- Builtin tool manifest：`backend/app/agent/tools/builtin/tools_manifest.json`
-- Builtin tool schema：`backend/app/agent/tools/builtin/schemas/*.json`
+- 通用工具 manifest：`backend/app/agent/tools/builtin/tools_manifest.json`（`invoke_worker`、`list_skills`、`read_skill`）
+- 机厅业务工具：`backend/app/domain/arcade/tools/`（定义 JSON 在 `schemas/`，由 container 代码注册）
 - MCP server 配置：`backend/app/agent/tools/mcp/servers/*.json`
 
 Skill 使用标准 Agent Skills 格式，通过目录自动发现，正文和引用文本按需加载。新增技能无需修改注册代码，配置与迁移说明见 [Agent Skills 指南](docs/guidings/技能配置与扩展指南.md)。

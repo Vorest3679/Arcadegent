@@ -14,12 +14,12 @@ from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.react_runtime import ReactRuntime
 from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.tools.builtin import BuiltinToolProvider
-from app.agent.tools.builtin.route_plan_tool import AMapConfig
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.mcp_gateway import MCPToolGateway, build_mcp_server_configs
 from app.agent.tools.registry import ToolRegistry
 from app.core.config import Settings
 from app.domain.arcade.domain import ArcadeTurnDomain
+from app.domain.arcade.tools import AMapConfig, arcade_tool_services, arcade_tool_specs
 from app.infra.db.local import LocalArcadeStore
 from app.infra.db.online import SupabaseArcadeRepository, SupabaseRepositoryConfig, build_supabase_session_repository
 from app.infra.db.protocols import ArcadeRepository, SessionStateRepository
@@ -101,25 +101,30 @@ def build_container(
             default_timeout_seconds=settings.mcp_default_timeout_seconds,
         )
         mcp_tool_gateway = MCPToolGateway(servers=mcp_servers)
-    builtin_tool_provider = BuiltinToolProvider(
-        runtime_services={
-            "store": store,
-            "skill_registry": skill_registry,
-            "settings": settings,
-            "amap_config": AMapConfig(
-                api_key=settings.amap_api_key,
-                base_url=settings.amap_base_url,
-                timeout_seconds=settings.amap_timeout_seconds,
-            ),
-            "mcp_tool_gateway": mcp_tool_gateway,
-            "project_root": project_root,
-        }
-    )
+    # Generic agent tools (skills, worker dispatch) come from the agent's manifest.
+    builtin_tool_provider = BuiltinToolProvider(services={"skill_registry": skill_registry})
     tool_registry = ToolRegistry(
         providers=[mcp_tool_gateway],
         permission_checker=permission_checker,
         strict_schema=True,
         local_provider=builtin_tool_provider,
+    )
+    # Arcade business tools are registered in code with the services they need.
+    # The build is synchronous, so this writes the local catalog directly rather
+    # than awaiting ``ToolRegistry.add_tools``, which would also run MCP discovery
+    # here instead of on startup. Uniqueness is unaffected: MCP tools live under
+    # ``mcp__``, a prefix ``ToolSpec`` rejects, and the catalog checks its own names.
+    tool_registry.local_provider.add(
+        arcade_tool_specs(),
+        services=arcade_tool_services(
+            store=store,
+            amap_config=AMapConfig(
+                api_key=settings.amap_api_key,
+                base_url=settings.amap_base_url,
+                timeout_seconds=settings.amap_timeout_seconds,
+            ),
+            mcp_tool_gateway=mcp_tool_gateway,
+        ),
     )
     session_store = session_store if session_store is not None else _build_session_repository(settings)
     artifact_sink = ArtifactSink()

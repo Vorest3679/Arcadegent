@@ -1,4 +1,4 @@
-"""Executor for the builtin provider selection tool."""
+"""Executor for the map provider selection tool (``geo_resolve_tool``)."""
 
 from __future__ import annotations
 

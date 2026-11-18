@@ -1,4 +1,4 @@
-"""Executor for the builtin route planning tool."""
+"""Executor for the route planning tool (``route_plan_tool``)."""
 
 from __future__ import annotations
 

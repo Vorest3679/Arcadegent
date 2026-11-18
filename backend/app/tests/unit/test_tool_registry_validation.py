@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.agent.tools.builtin.route_plan_tool import RoutePlanTool
+from app.domain.arcade.tools.route_plan_tool import RoutePlanTool
 from app.agent.tools.registry import _is_strict_compatible
 from app.protocol.messages import Location
 from backend.app.tests.unit._tool_registry_test_support import _build_registry, _run

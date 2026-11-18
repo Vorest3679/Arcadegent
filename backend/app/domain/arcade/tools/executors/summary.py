@@ -1,4 +1,4 @@
-"""Executor for the builtin deterministic summary tool."""
+"""Executor for the deterministic summary tool (``summary_tool``)."""
 
 from __future__ import annotations
 

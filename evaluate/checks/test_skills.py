@@ -36,7 +36,7 @@ def write_skill(root, directory="sample-skill", *, body="BODY_MARKER", **fields)
 def tool_registry(registry, tmp_path):
     return ToolRegistry(
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
-        local_provider=BuiltinToolProvider(runtime_services={"skill_registry": registry}),
+        local_provider=BuiltinToolProvider(services={"skill_registry": registry}),
     )
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from app.agent.tools.builtin.route_plan_tool import RoutePlanTool
+from app.domain.arcade.tools.route_plan_tool import RoutePlanTool
 from app.protocol.messages import Location
 from backend.app.tests.unit._tool_registry_test_support import (
     _build_mcp_gateway,
@@ -150,7 +150,7 @@ def test_route_malformed_json_coordinates_remain_invalid(tmp_path: Path) -> None
 def test_amap_failure_diagnostics_do_not_expose_key(monkeypatch):
     import httpx
     import pytest
-    from app.agent.tools.builtin.route_plan_tool import AMapConfig
+    from app.domain.arcade.tools.route_plan_tool import AMapConfig
 
     original = httpx.AsyncClient
     for body, expected in [({"status": "0", "infocode": "10001"}, "amap_api_error_10001"),

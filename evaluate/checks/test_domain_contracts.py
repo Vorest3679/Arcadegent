@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.agent.tools.builtin.route_plan_tool import AMapConfig, RoutePlanTool
+from app.domain.arcade.tools.route_plan_tool import AMapConfig, RoutePlanTool
 from app.infra.db.local import LocalArcadeStore
 from app.protocol.messages import Location
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.agent.tools.builtin.summary_tool import SummaryTool
+from app.domain.arcade.tools.summary_tool import SummaryTool
 from app.protocol.messages import RouteSummaryDto
 
 

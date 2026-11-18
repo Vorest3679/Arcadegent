@@ -363,7 +363,7 @@ def test_previous_route_is_not_promoted_as_new_result() -> None:
 
 def test_online_route_unavailable_does_not_estimate() -> None:
     import pytest
-    from app.agent.tools.builtin.route_plan_tool import RoutePlanTool
+    from app.domain.arcade.tools.route_plan_tool import RoutePlanTool
     from app.protocol.messages import Location
     with pytest.raises(RuntimeError, match="route_unavailable"):
         asyncio.run(RoutePlanTool().plan_route(provider="amap", mode="walking", origin=Location(lng=116, lat=39), destination=Location(lng=117, lat=40)))

@@ -1,49 +1,6 @@
 {
-  "services": {
-    "db_query_tool": {
-      "factory": "app.agent.tools.builtin.db_query_tool:DBQueryTool",
-      "dependencies": {
-        "store": "store"
-      }
-    },
-    "geo_resolve_tool": {
-      "factory": "app.agent.tools.builtin.geo_resolve_tool:GeoResolveTool"
-    },
-    "amap_config": {
-      "factory": "app.agent.tools.builtin.route_plan_tool:AMapConfig",
-      "dependencies": {
-        "api_key": {
-          "env": "AMAP_API_KEY",
-          "default": ""
-        },
-        "base_url": {
-          "env": "AMAP_BASE_URL",
-          "default": "https://restapi.amap.com"
-        },
-        "timeout_seconds": {
-          "env": "AMAP_TIMEOUT_SECONDS",
-          "default": 8.0,
-          "cast": "float"
-        }
-      }
-    },
-    "route_plan_tool": {
-      "factory": "app.agent.tools.builtin.route_plan_tool:RoutePlanTool",
-      "dependencies": {
-        "amap_config": "amap_config"
-      }
-    },
-    "summary_tool": {
-      "factory": "app.agent.tools.builtin.summary_tool:SummaryTool"
-    }
-  },
   "tools": [
     "schemas/invoke_worker.json",
-    "schemas/db_query_tool.json",
-    "schemas/geo_resolve_tool.json",
-    "schemas/route_plan_tool.json",
-    "schemas/summary_tool.json",
-    "schemas/result_selection_tool.json",
     "schemas/list_skills.json",
     "schemas/read_skill.json"
   ]

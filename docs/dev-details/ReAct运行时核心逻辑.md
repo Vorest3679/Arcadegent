@@ -172,7 +172,7 @@ publish("assistant.completed" or "session.failed", {"reply": final_text, ...}, o
 - `promote`：只提升 worker 自己产生过（有元数据）的 artifact；失败 worker 的提升结果带 `status="partial"`，worker 从父状态复制的值不会被提升。父状态里被提升 artifact 声明为失效的旧值同时被删除，所以 worker 搜索没有选择新店时不会显示父状态上一轮的 `selected_shops`。非 artifact 的标量字段由 `TurnDomain.worker_memory_promotions` 返回；机厅领域只回写 worker 实际写入的字段（挂载时记录基线，工具处理处用 `mark_worker_memory_write` 标记写入），未运行的 worker 不会用旧快照覆盖并行兄弟的新查询。
 - `display_snapshot` / `turn_snapshot`：前者给即时响应与会话详情（session scope 常驻，turn scope 取最近一次展示轮），后者给最终 assistant 回合的 `map_artifacts`（只有本轮确实更新过展示 artifact 才归档）。领域把两者投影成机厅自有的 `ArcadeDisplay`（`domain/arcade/display.py`），由 `ArcadeTurnDomain.session_display` 提供；该方法不属于内核端口，内核只经 `turn_display_snapshot` 拿到不透明 dict。没有 `display` 元数据的老会话按“展示 + session”兼容，不会被新 artifact 挤掉。
 
-工具自带 artifacts 时，`ToolExecutionResult.artifacts` 优先；否则才调用 `TurnDomain.artifacts_from_result`。当前 `db_query_tool`、`result_selection_tool`、`route_plan_tool` 通过 `ToolOutcome` 自带 artifacts，过渡映射只剩 MCP 结果；worker 的结果由 `ArtifactSink.promote` 提升，不再从 `invoke_worker` 信封二次写入。`ProviderExecutionResult` 与 `MCPExecutionResult` 都携带 artifacts，`BuiltinToolProvider` 接受 `ToolOutcome` 或纯 dict（旧执行器无需改动）。
+工具自带 artifacts 时，`ToolExecutionResult.artifacts` 优先；否则才调用 `TurnDomain.artifacts_from_result`。当前 `db_query_tool`、`result_selection_tool`、`route_plan_tool` 通过 `ToolOutcome` 自带 artifacts，过渡映射只剩 MCP 结果；worker 的结果由 `ArtifactSink.promote` 提升，不再从 `invoke_worker` 信封二次写入。`ProviderExecutionResult` 与 `MCPExecutionResult` 都携带 artifacts，`LocalToolProvider`（含 `BuiltinToolProvider`）接受 `ToolOutcome` 或纯 dict（旧执行器无需改动）。
 
 intent 在阶段 6 改为每轮推导：`IntentPolicy.classify` 先看显式 intent 与导航/附近信号；上一轮是 `navigate` 且还没有 route（典型是 worker 返回 `needs_input` 等起点）时，普通补充信息（“我在人民广场”）保留 `navigate`；一旦已有 route，普通追问回到 `search`，不再继承旧导航。`on_step_update` 末尾的 `IntentPolicy.finalize` 仍只在本轮产生 route artifact 时把标签改为 `navigate`。
 
@@ -297,7 +297,7 @@ tool.started（submit，模型顺序）
 
 ### 执行模式与监督器
 
-`ToolDescriptor.execution_mode` 是工具自声明的并发属性，默认 `exclusive`；`ToolRegistry.execution_mode(tool_name)` 对未知工具返回 `exclusive`，批量入口 `execution_modes(names)` 每个模型步只收集一次描述符。`BuiltinToolProvider` 从工具 JSON 读取并校验该字段，MCP 工具显式保持 `exclusive`（以后可映射 MCP 的 `readOnlyHint`）。首批 `parallel` 为 `list_skills`、`read_skill`、`invoke_worker`；其余内置工具保持独占。
+`ToolDescriptor.execution_mode` 是工具自声明的并发属性，默认 `exclusive`；`ToolRegistry.execution_mode(tool_name)` 对未知工具返回 `exclusive`，批量入口 `execution_modes(names)` 每个模型步只收集一次描述符。本地工具由 `ToolSpec` 读取并校验该字段（manifest 与代码注册一致），MCP 工具显式保持 `exclusive`（以后可映射 MCP 的 `readOnlyHint`）。首批 `parallel` 为 `list_skills`、`read_skill`、`invoke_worker`；机厅业务工具保持独占。
 
 `runtime/supervisor.py` 的 `LoopSupervisor` 跟踪本批 `ToolTask`：
 

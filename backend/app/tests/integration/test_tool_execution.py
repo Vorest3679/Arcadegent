@@ -296,13 +296,19 @@ def test_builtin_tools_declare_parallel_only_for_the_safe_reads() -> None:
 
     # Stage 7 prerequisites are in place: skill snapshots are locked and worker
     # slots keep the most recent running worker, so these three can overlap.
-    assert {name for name, tool in tools.items() if tool.execution_mode == "parallel"} == {
-        "invoke_worker",
-        "list_skills",
-        "read_skill",
-    }
-    assert tools["db_query_tool"].execution_mode == "exclusive"
-    assert tools["summary_tool"].execution_mode == "exclusive"
+    # The agent manifest now holds only the generic tools (plan 5, stage 2b).
+    assert set(tools) == {"invoke_worker", "list_skills", "read_skill"}
+    assert {name for name, tool in tools.items() if tool.execution_mode == "parallel"} == set(tools)
+
+
+def test_arcade_tools_stay_exclusive() -> None:
+    from app.domain.arcade.tools import arcade_tool_specs
+
+    modes = {spec.name: spec.execution_mode for spec in arcade_tool_specs()}
+    assert modes == dict.fromkeys(
+        ["db_query_tool", "geo_resolve_tool", "route_plan_tool", "summary_tool", "result_selection_tool"],
+        "exclusive",
+    )
 
 
 def test_builtin_provider_reads_a_declared_parallel_mode(tmp_path: Path) -> None:
@@ -347,24 +353,29 @@ def test_invalid_builtin_execution_mode_is_rejected(tmp_path: Path) -> None:
         BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
 
 
-def test_builtin_path_metadata_needs_a_host_provided_project_root(tmp_path: Path) -> None:
+def test_builtin_manifest_metadata_is_plain_data_and_services_come_from_the_host(tmp_path: Path) -> None:
     tool = {
         "name": "list_skills",
         "description": "list skills",
         "executor": "app.agent.tools.builtin.executors.skills:list_skills",
         "input_schema": {"type": "object"},
-        "metadata": {"guide": {"path": "docs/guide.md", "as_string": True}},
+        "metadata": {"guide": {"path": "docs/guide.md"}, "owner": "tests"},
     }
     (tmp_path / "list_skills.json").write_text(json.dumps(tool), encoding="utf-8")
     (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["list_skills.json"]}), encoding="utf-8")
 
-    # The agent package no longer guesses a project root from its own location.
-    with pytest.raises(ValueError, match="unknown_builtin_service:project_root"):
-        BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
+    # No path/env/ref resolution: metadata is copied as given (plan 5, D7).
+    provider = BuiltinToolProvider(manifest_path=tmp_path / "manifest.json", services={"skill_registry": object()})
+    assert asyncio.run(provider.get_tools())["list_skills"].metadata == tool["metadata"]
+    assert provider.health()["services"] == ["skill_registry"]
 
-    provider = BuiltinToolProvider(
-        manifest_path=tmp_path / "manifest.json",
-        runtime_services={"project_root": tmp_path},
+
+def test_builtin_manifest_rejects_a_services_section(tmp_path: Path) -> None:
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"services": {"x": {"factory": "builtins:dict"}}, "tools": []}), encoding="utf-8"
     )
-    metadata = asyncio.run(provider.get_tools())["list_skills"].metadata
-    assert metadata["guide"] == str(tmp_path / "docs" / "guide.md")
+
+    # Services are built by the host and passed in code; a manifest that still
+    # declares factories fails loudly instead of being silently ignored.
+    with pytest.raises(ValueError, match="unsupported_builtin_tool_manifest_keys:services"):
+        BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")

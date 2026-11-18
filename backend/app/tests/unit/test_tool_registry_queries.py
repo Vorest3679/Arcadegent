@@ -3,12 +3,8 @@
 import json
 from pathlib import Path
 
-from app.agent.tools.builtin import BuiltinToolProvider
-from app.agent.tools.mcp_gateway import MCPToolGateway
-from app.agent.tools.permission import ToolPermissionChecker
-from app.agent.tools.registry import ToolRegistry
 from app.infra.db.local import LocalArcadeStore
-from backend.app.tests.unit._tool_registry_test_support import _build_registry, _run
+from backend.app.tests.unit._tool_registry_test_support import _build_arcade_registry, _build_registry, _run
 
 
 def test_tool_registry_can_lookup_one_shop(tmp_path: Path) -> None:
@@ -85,19 +81,7 @@ def test_tool_registry_supports_title_quantity_sorting(tmp_path: Path) -> None:
             handle.write(json.dumps(row, ensure_ascii=False))
             handle.write("\n")
 
-    store = LocalArcadeStore.from_jsonl(data_path)
-    gateway = MCPToolGateway()
-    registry = ToolRegistry(
-        providers=[gateway],
-        local_provider=BuiltinToolProvider(
-            runtime_services={
-                "store": store,
-                "mcp_tool_gateway": gateway,
-            }
-        ),
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
-        strict_schema=True,
-    )
+    registry = _build_arcade_registry(tmp_path, LocalArcadeStore.from_jsonl(data_path))
     result = _run(registry.execute(
         call_id="c4",
         tool_name="db_query_tool",
@@ -142,19 +126,7 @@ def test_tool_registry_backfills_sort_title_name_from_keyword(tmp_path: Path) ->
             handle.write(json.dumps(row, ensure_ascii=False))
             handle.write("\n")
 
-    store = LocalArcadeStore.from_jsonl(data_path)
-    gateway = MCPToolGateway()
-    registry = ToolRegistry(
-        providers=[gateway],
-        local_provider=BuiltinToolProvider(
-            runtime_services={
-                "store": store,
-                "mcp_tool_gateway": gateway,
-            }
-        ),
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
-        strict_schema=True,
-    )
+    registry = _build_arcade_registry(tmp_path, LocalArcadeStore.from_jsonl(data_path))
     result = _run(registry.execute(
         call_id="c5",
         tool_name="db_query_tool",
@@ -200,19 +172,7 @@ def test_tool_registry_supports_distance_sorting(tmp_path: Path) -> None:
             handle.write(json.dumps(row, ensure_ascii=False))
             handle.write("\n")
 
-    store = LocalArcadeStore.from_jsonl(data_path)
-    gateway = MCPToolGateway()
-    registry = ToolRegistry(
-        providers=[gateway],
-        local_provider=BuiltinToolProvider(
-            runtime_services={
-                "store": store,
-                "mcp_tool_gateway": gateway,
-            }
-        ),
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
-        strict_schema=True,
-    )
+    registry = _build_arcade_registry(tmp_path, LocalArcadeStore.from_jsonl(data_path))
     result = _run(registry.execute(
         call_id="c_distance",
         tool_name="db_query_tool",

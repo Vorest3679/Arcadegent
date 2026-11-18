@@ -304,3 +304,33 @@ def test_registry_writes_to_the_explicit_local_provider(tmp_path: Path) -> None:
     assert sum(provider is builtin for provider in listed.providers()) == 1
     assert "invoke_worker" in _run(listed.get_tools())
     assert list(listed.provider_health()) == ["builtin"]
+
+
+def test_container_registers_arcade_tools_in_code(tmp_path: Path) -> None:
+    from app.core.config import Settings
+    from app.core.container import build_container
+    from app.domain.arcade.tools import arcade_tool_specs
+
+    data_path = tmp_path / "shops.jsonl"
+    data_path.write_text(json.dumps({"source": "fixture", "source_id": 1, "name": "Alpha"}) + "\n", encoding="utf-8")
+    (tmp_path / "no-mcp").mkdir()
+    container = build_container(Settings(
+        data_jsonl_path=data_path, arcade_geo_cache_path=tmp_path / "geo.json",
+        mcp_servers_dir=tmp_path / "no-mcp",
+        supabase_url="https://fixture.invalid", supabase_service_role_key="test-key",
+    ))
+
+    # Plan 5, stage 2b: the agent manifest keeps only the generic tools; arcade
+    # tools are runtime-registered by the host together with their services.
+    entries = container.tool_registry.local_provider.entries()
+    origins = {name: entry.origin for name, entry in entries.items()}
+    arcade = [spec.name for spec in arcade_tool_specs()]
+    assert origins == {
+        "invoke_worker": "manifest", "list_skills": "manifest", "read_skill": "manifest",
+        **dict.fromkeys(arcade, "registered"),
+    }
+    services = container.tool_registry.local_provider.health()["services"]
+    assert services == sorted(["skill_registry", "db_query_tool", "geo_resolve_tool", "route_plan_tool",
+                               "summary_tool", "mcp_tool_gateway"])
+    assert "concludes_turn" in entries["summary_tool"].spec.capabilities
+    assert all(not entries[name].spec.reserved_capabilities for name in arcade)

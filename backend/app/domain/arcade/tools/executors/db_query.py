@@ -1,4 +1,4 @@
-"""Executor for the builtin arcade search tool."""
+"""Executor for the arcade search tool (``db_query_tool``)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from typing import Any
 
 from app.agent.artifacts.model import Artifact
 from app.agent.tools.base import ToolOutcome
-from app.agent.tools.builtin.executor_utils import as_region_code_or_name
-from app.agent.tools.builtin.geo_outlier_filter import filter_geo_outliers, row_coordinates
 from app.agent.tools.spec import ToolContext
-from app.agent._logging import get_logger
+from app.domain.arcade.tools.executor_utils import as_region_code_or_name
+from app.domain.arcade.tools.geo_outlier_filter import filter_geo_outliers, row_coordinates
+from app.infra.observability.logger import get_logger
 
 logger = get_logger(__name__)
 
