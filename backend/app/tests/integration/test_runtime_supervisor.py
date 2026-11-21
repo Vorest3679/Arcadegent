@@ -39,7 +39,6 @@ _MODES = {"slow": "parallel", "fast": "parallel", "block": "parallel", "spawn": 
 
 
 class _Tools:
-    provider_name = "supervisor_test"
     _capabilities = {"spawn": (CAP_SPAWN_AGENT,)}
 
     def __init__(self) -> None:
@@ -54,7 +53,6 @@ class _Tools:
             name: ToolDescriptor(
                 name=name,
                 description=name,
-                provider=self.provider_name,
                 input_schema={"type": "object"},
                 capabilities=self._capabilities.get(name, ()),
                 execution_mode=_MODES.get(name, "exclusive"),  # type: ignore[arg-type]
@@ -173,7 +171,7 @@ def _kernel(
         context_builder=_ContextBuilder(),  # type: ignore[arg-type]
         subagent_builder=_FakeSubAgents(),  # type: ignore[arg-type]
         tool_registry=ToolRegistry(
-            providers=[tools],
+            providers={"supervisor_test": tools},
             permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
             local_provider=LocalToolProvider(),
         ),
@@ -307,7 +305,7 @@ def test_first_or_interval_returns_done_and_pending_and_cancels_cleanly(tmp_path
     async def scenario() -> None:
         tools = _Tools()
         registry = ToolRegistry(
-            providers=[tools],
+            providers={"supervisor_test": tools},
             permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
             local_provider=LocalToolProvider(),
         )
@@ -369,7 +367,7 @@ def test_second_cancellation_during_cancel_all_still_cancels_later_siblings(tmp_
     async def scenario() -> None:
         tools = _Tools()
         registry = ToolRegistry(
-            providers=[tools],
+            providers={"supervisor_test": tools},
             permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
             local_provider=LocalToolProvider(),
         )

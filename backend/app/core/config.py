@@ -107,6 +107,7 @@ class Settings:
     agent_subagent_yaml_overlay_enabled: bool = True
     agent_provider_profiles_file: Path = _AGENT_DIR / "nodes" / "profiles" / "provider_profiles.yaml"
     agent_provider_profile: str = "default"
+    agent_plugins_file: Path = _PROJECT_ROOT / "backend" / "plugins.yaml"
     mcp_default_timeout_seconds: float = 10.0
     mcp_servers_dir: Path = _AGENT_DIR / "tools" / "mcp" / "servers"
     amap_api_key: str = ""
@@ -190,6 +191,9 @@ class Settings:
             agent_provider_profile=os.getenv(
                 "AGENT_PROVIDER_PROFILE",
                 cls.agent_provider_profile,
+            ),
+            agent_plugins_file=_resolve_path(
+                os.getenv("AGENT_PLUGINS_FILE", str(cls.agent_plugins_file))
             ),
             mcp_default_timeout_seconds=float(
                 os.getenv("MCP_DEFAULT_TIMEOUT_SECONDS", str(cls.mcp_default_timeout_seconds))

@@ -175,11 +175,14 @@ def test_amap_failure_diagnostics_do_not_expose_key(monkeypatch):
     assert "secret-key" not in str(error.value)
 
 @pytest.mark.parametrize("mode", ["walking", "driving"])
-def test_route_uses_explicit_settings_not_process_env(tmp_path, monkeypatch, mode):
+def test_route_uses_explicit_plugin_config_not_process_env(tmp_path, monkeypatch, mode):
     import asyncio
     import httpx
+    from pydantic import SecretStr
+    from app.agent.plugins import EmptyConfig
     from app.core.config import Settings
     from app.core.container import build_container
+    from app.domain.arcade.plugin import AMapSettings, ArcadeConfig
 
     data_path = tmp_path / "shops.jsonl"
     _write_rows(data_path)
@@ -190,15 +193,25 @@ def test_route_uses_explicit_settings_not_process_env(tmp_path, monkeypatch, mod
                               supabase_url="https://fixture.invalid",
                               supabase_service_role_key="test-key",
                               mcp_servers_dir=tmp_path / "no-mcp",
-                              amap_api_key="settings-key", amap_base_url="https://route.invalid",
+                              amap_api_key="settings-key", amap_base_url="https://settings.invalid",
                               amap_timeout_seconds=3)
-    container = build_container(settings)
+    container = build_container(
+        settings,
+        plugin_configs={
+            "core": EmptyConfig(),
+            "arcade": ArcadeConfig(amap=AMapSettings(
+                api_key=SecretStr("plugin-key"),
+                base_url="https://route.invalid",
+                timeout_seconds=3,
+            )),
+        },
+    )
     original = httpx.AsyncClient
 
     def handle(request):
         assert request.url.host == "route.invalid"
         assert request.url.path == f"/v3/direction/{mode}"
-        assert request.url.params["key"] == "settings-key"
+        assert request.url.params["key"] == "plugin-key"
         assert request.url.params["origin"] == "121.455483,31.229618"
         assert request.url.params["destination"] == "121.473024,31.228048"
         return httpx.Response(200, json={"status": "1", "route": {"paths": [

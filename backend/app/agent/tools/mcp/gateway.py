@@ -262,10 +262,6 @@ class MCPToolGateway:
         self._dispatcher = dispatcher or MCPDispatcher(client_manager=self._client_manager)
 
     @property
-    def provider_name(self) -> str:
-        return "mcp"
-
-    @property
     def enabled(self) -> bool:
         return any(config.enabled for config in self._servers.values())
 
@@ -340,7 +336,6 @@ class MCPToolGateway:
             descriptors[local_name] = ToolDescriptor(
                 name=descriptor.local_name,
                 description=descriptor.description,
-                provider=self.provider_name,
                 input_schema=descriptor.input_schema,
                 output_schema=descriptor.output_schema,
                 capabilities=("mcp", descriptor.server_name),

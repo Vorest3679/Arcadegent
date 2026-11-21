@@ -41,7 +41,6 @@ class ToolDescriptor:
 
     name: str
     description: str
-    provider: str
     input_schema: dict[str, Any]
     kind: str = "function"
     output_schema: dict[str, Any] | None = None
@@ -85,11 +84,11 @@ class ToolProvider(Protocol):
     这是结构化契约而非基类：各 provider 靠方法签名满足它、不显式继承，
     因此在 registry 中对 ``provider.execute`` 跳转会落到此声明而不是具体实现。
     对于本地工具，可在 ``LocalToolProvider`` 中找到实现；对于 MCP 工具，可在 ``MCPToolProvider`` 中找到实现。
-    """
 
-    @property
-    def provider_name(self) -> str:
-        """Stable provider id used for metadata and health aggregation."""
+    A provider carries no name: ``ToolRegistry`` is constructed with a
+    ``{name: provider}`` mapping and is the only place that names providers.
+    provider 本身不带名字，名字只由 ``ToolRegistry`` 的 ``{name: provider}`` 映射给出。
+    """
 
     async def get_tools(self) -> dict[str, ToolDescriptor]:
         """Return current tool descriptors keyed by local tool name."""

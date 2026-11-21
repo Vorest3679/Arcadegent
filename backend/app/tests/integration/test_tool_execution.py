@@ -20,8 +20,6 @@ from app.agent.tools.registry import ToolRegistry
 
 
 class _Tools:
-    provider_name = "execution_test"
-
     def __init__(self) -> None:
         self.started = asyncio.Event()
         self.cancelled = asyncio.Event()
@@ -31,7 +29,6 @@ class _Tools:
             name: ToolDescriptor(
                 name=name,
                 description=name,
-                provider=self.provider_name,
                 input_schema={"type": "object"},
                 execution_mode="parallel" if name == "parallel_echo" else "exclusive",
             )
@@ -88,7 +85,7 @@ class _RecordingHooks:
 
 def _registry(tmp_path: Path, provider: Any | None = None) -> ToolRegistry:
     return ToolRegistry(
-        providers=[provider or _Tools()],
+        providers={"execution_test": provider or _Tools()},
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
         local_provider=LocalToolProvider(),
     )
@@ -323,7 +320,6 @@ def test_builtin_provider_reads_a_declared_parallel_mode(tmp_path: Path) -> None
     (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["list_skills.json"]}), encoding="utf-8")
     provider = BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
     registry = ToolRegistry(
-        providers=[],
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
         local_provider=provider,
     )
@@ -333,7 +329,7 @@ def test_builtin_provider_reads_a_declared_parallel_mode(tmp_path: Path) -> None
 
 
 def test_tool_descriptor_defaults_to_exclusive() -> None:
-    descriptor = ToolDescriptor(name="x", description="", provider="p", input_schema={"type": "object"})
+    descriptor = ToolDescriptor(name="x", description="", input_schema={"type": "object"})
     assert descriptor.execution_mode == "exclusive"
 
 

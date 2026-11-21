@@ -292,8 +292,8 @@ _HOOK_NAMES: dict[tuple[LifecycleScope, LifecyclePhase], str] = {
 }
 
 
-def _is_default_hook(hooks: Any, name: str) -> bool:
-    return getattr(type(hooks), name, None) is getattr(BaseLifecycleHooks, name, None)
+def _is_default_hook(hooks: Any, name: str, base: type = BaseLifecycleHooks) -> bool:
+    return getattr(type(hooks), name, None) is getattr(base, name, None)
 
 
 def _kernel_memory(state: AgentSessionState) -> dict[str, Any]:

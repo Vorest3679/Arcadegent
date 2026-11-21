@@ -9,6 +9,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 from app.agent.tools.builtin import BuiltinToolProvider
+from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.mcp_gateway import MCPServerConfig, MCPToolGateway
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
@@ -46,19 +47,18 @@ def _build_arcade_registry(
     *,
     mcp_tool_gateway: MCPToolGateway | None = None,
 ) -> ToolRegistry:
-    """Registry wired like the container: manifest tools plus code-registered arcade tools."""
+    """Registry wired like the container: plugin providers plus a runtime catalog."""
     gateway = mcp_tool_gateway or MCPToolGateway()
-    registry = ToolRegistry(
-        providers=[gateway],
-        local_provider=BuiltinToolProvider(),
+    arcade = LocalToolProvider(
+        specs=arcade_tool_specs(),
+        services=arcade_tool_services(store=store, amap_config=None, mcp_tool_gateway=gateway),
+    )
+    return ToolRegistry(
+        providers={"mcp": gateway, "core": BuiltinToolProvider(), "arcade": arcade},
+        local_provider=LocalToolProvider(),
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
         strict_schema=True,
     )
-    _run(registry.add_tools(
-        arcade_tool_specs(),
-        services=arcade_tool_services(store=store, amap_config=None, mcp_tool_gateway=gateway),
-    ))
-    return registry
 
 
 def _build_registry(

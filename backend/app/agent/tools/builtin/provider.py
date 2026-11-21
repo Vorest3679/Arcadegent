@@ -1,6 +1,6 @@
 """Manifest adapter: local tools declared in a JSON manifest.
 
-``BuiltinToolProvider`` is a :class:`LocalToolProvider` whose ``manifest``
+``BuiltinToolProvider`` is a :class:`LocalToolProvider` whose ``plugin``
 tools come from ``tools_manifest.json``. The manifest only lists tool
 definition files; each definition names its ``executor`` (and optional
 ``argument_preparer``) by import path. Services are not declared in the
@@ -8,9 +8,8 @@ manifest: the host builds them and passes them in ``services``. Metadata is
 copied as plain data.
 
 The adapter only translates its source into ``ToolSpec`` objects; the catalog,
-the origin rules and the execution path are ``LocalToolProvider``'s. Hosts
-that build ``ToolSpec`` objects in code register them through
-``ToolRegistry.add_tools`` instead.
+the origin rules and the execution path are ``LocalToolProvider``'s. Plugins
+that build ``ToolSpec`` objects in code return a plain ``LocalToolProvider``.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ class BuiltinToolProvider(LocalToolProvider):
         services: Mapping[str, Any] | None = None,
         manifest_path: Path | None = None,
     ) -> None:
-        super().__init__(provider_name="builtin", services=services)
+        super().__init__(services=services)
         self._manifest_path = manifest_path or Path(__file__).with_name("tools_manifest.json")
         self._tool_files: dict[str, Path] = {}  # tool_name -> definition file
         self.load(self._load_manifest_specs())

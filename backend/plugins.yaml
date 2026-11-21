@@ -1,0 +1,15 @@
+# Host plugin configuration.
+#
+# Keys under ``plugins`` are plugin names the host knows (``core``, ``arcade``),
+# in install order; both are required by the current agent definitions.
+# Values are validated by each plugin's config model. Secrets must be a whole
+# ``${VAR}`` or ``${VAR:-}`` placeholder (no literal default); a whole
+# ``${VAR:-}`` whose variable is unset or empty falls back to the model default.
+plugins:
+  core:
+  arcade:
+    config:
+      amap:
+        api_key: ${AMAP_API_KEY:-}
+        base_url: ${AMAP_BASE_URL:-}
+        timeout_seconds: ${AMAP_TIMEOUT_SECONDS:-}

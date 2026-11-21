@@ -40,9 +40,9 @@ def _spec(name: str = "echo_tool", **overrides: Any) -> ToolSpec:
     return ToolSpec(**values)
 
 
-def _registry(tmp_path: Path, *providers: Any, local: LocalToolProvider | None = None) -> ToolRegistry:
+def _registry(tmp_path: Path, local: LocalToolProvider | None = None, **providers: Any) -> ToolRegistry:
     return ToolRegistry(
-        providers=list(providers),
+        providers=providers,
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
         local_provider=local if local is not None else LocalToolProvider(),
     )
@@ -55,14 +55,12 @@ def _run(awaitable):
 class _RemoteProvider:
     """Minimal non-local provider that owns one tool."""
 
-    provider_name = "remote"
-
     def __init__(self) -> None:
         self.refreshed = 0
 
     async def get_tools(self) -> dict[str, ToolDescriptor]:
         return {"remote_tool": ToolDescriptor(
-            name="remote_tool", description="remote", provider="remote", input_schema={"type": "object"})}
+            name="remote_tool", description="remote", input_schema={"type": "object"})}
 
     async def execute(self, *, tool_name, raw_arguments, validated_arguments=None) -> ProviderExecutionResult:
         return ProviderExecutionResult(status="completed", output={})
@@ -111,8 +109,8 @@ def test_spec_normalizes_and_validates_arguments() -> None:
     with pytest.raises(TypeError):
         spec.metadata["owner"] = "x"  # type: ignore[index]
     assert spec.validate_arguments({"text": "a"}) == {"text": "a", "times": 1}
-    descriptor = spec.to_descriptor(provider="local")
-    assert (descriptor.name, descriptor.provider, descriptor.execution_mode) == ("echo_tool", "local", "exclusive")
+    descriptor = spec.to_descriptor()
+    assert (descriptor.name, descriptor.execution_mode) == ("echo_tool", "exclusive")
     assert descriptor.validator is not None and descriptor.validator({"text": "b"})["times"] == 1
 
 
@@ -146,8 +144,8 @@ def test_add_list_execute_and_delete_a_registered_tool(tmp_path: Path) -> None:
     registry = _registry(tmp_path)
 
     assert _run(registry.add_tools([_spec()])) == ["echo_tool"]
-    listed = _run(registry.list_tools())
-    assert [(tool.name, tool.provider) for tool in listed] == [("echo_tool", "local")]
+    listed = _run(registry.list_tools(provider="runtime"))
+    assert [tool.name for tool in listed] == ["echo_tool"]
     assert registry.local_provider.health()["origins"] == {"registered": ["echo_tool"]}
 
     result = _run(registry.execute(call_id="c1", tool_name="echo_tool",
@@ -192,7 +190,7 @@ def test_update_replaces_a_registered_tool_in_place(tmp_path: Path) -> None:
 
 
 def test_failed_batches_change_nothing(tmp_path: Path) -> None:
-    registry = _registry(tmp_path, _RemoteProvider())
+    registry = _registry(tmp_path, remote=_RemoteProvider())
     service = object()
     _run(registry.add_tools([_spec("kept_tool")], services={"store": service}))
     revision = registry.local_provider.revision
@@ -224,9 +222,9 @@ def test_update_and_delete_only_touch_registered_tools(tmp_path: Path) -> None:
     registry = _registry(tmp_path, local=BuiltinToolProvider(manifest_path=tmp_path / "manifest.json"))
     _run(registry.add_tools([_spec("registered_tool")]))
 
-    with pytest.raises(ToolSpecError, match="immutable_tool:manifest_tool:manifest"):
+    with pytest.raises(ToolSpecError, match="immutable_tool:manifest_tool:plugin"):
         _run(registry.delete_tools(["manifest_tool"]))
-    with pytest.raises(ToolSpecError, match="immutable_tool:manifest_tool:manifest"):
+    with pytest.raises(ToolSpecError, match="immutable_tool:manifest_tool:plugin"):
         _run(registry.update_tools([_spec("manifest_tool")]))
     with pytest.raises(ToolSpecError, match="unknown_tool:missing_tool"):
         _run(registry.update_tools([_spec("missing_tool")]))
@@ -242,12 +240,12 @@ def test_refresh_reloads_the_manifest_and_keeps_registered_tools(tmp_path: Path)
     (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["manifest_tool.json"]}), encoding="utf-8")
     builtin = BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
     remote = _RemoteProvider()
-    registry = _registry(tmp_path, remote, local=builtin)
+    registry = _registry(tmp_path, local=builtin, remote=remote)
     _run(registry.add_tools([_spec("registered_tool")]))
     before = _run(registry.get_tools())
 
     (tmp_path / "manifest_tool.json").write_text(json.dumps({**definition, "description": "v2"}), encoding="utf-8")
-    _run(registry.refresh_tools(provider="builtin"))
+    _run(registry.refresh_tools(provider="runtime"))
     after = _run(registry.get_tools())
 
     assert registry.local_provider is builtin
@@ -286,29 +284,55 @@ def test_registered_executors_resolve_services_and_preparers(tmp_path: Path) -> 
 
 def test_registry_writes_to_the_explicit_local_provider(tmp_path: Path) -> None:
     builtin = BuiltinToolProvider()
-    explicit = LocalToolProvider(provider_name="host")
+    explicit = LocalToolProvider()
 
-    # The catalog is passed in, never inferred from the providers list.
+    # The catalog is passed in, never inferred from the providers mapping.
     assert _registry(tmp_path, local=explicit).local_provider is explicit
     assert _registry(tmp_path, local=builtin).local_provider is builtin
 
     # The manifest is trusted host configuration: it may declare reserved
     # capabilities that runtime registration rejects.
     local = _registry(tmp_path, local=builtin).local_provider.entries()
-    assert local["invoke_worker"].origin == "manifest"
+    assert local["invoke_worker"].origin == "plugin"
     assert "spawn_agent" in local["invoke_worker"].spec.capabilities
     assert "invoke_worker" not in _registry(tmp_path).local_provider.entries()
 
-    # The catalog is aggregated whether or not it was listed in ``providers``.
-    listed = _registry(tmp_path, builtin, local=builtin)
-    assert sum(provider is builtin for provider in listed.providers()) == 1
+    # The catalog is aggregated once: under its own key if it is one of the
+    # providers, otherwise under ``runtime``.
+    listed = _registry(tmp_path, local=builtin, core=builtin)
+    assert list(listed.providers()) == ["core"]
     assert "invoke_worker" in _run(listed.get_tools())
-    assert list(listed.provider_health()) == ["builtin"]
+    assert list(listed.provider_health()) == ["core"]
+    assert list(_registry(tmp_path, local=builtin).providers()) == ["runtime"]
+    with pytest.raises(ValueError, match="duplicate_provider:runtime"):
+        _registry(tmp_path, runtime=_RemoteProvider())
+    with pytest.raises(ValueError, match="invalid_provider_name"):
+        _registry(tmp_path, **{" bad": _RemoteProvider()})
 
 
-def test_container_registers_arcade_tools_in_code(tmp_path: Path) -> None:
+def test_locked_provider_rejects_runtime_writes_and_untrusted_reserved_reloads() -> None:
+    locked = LocalToolProvider(specs=[_spec("plugin_tool")])
+    locked.lock_runtime_writes(trusted=False)
+
+    for write in (lambda: locked.add([_spec("other_tool")]),
+                  lambda: locked.update([_spec("plugin_tool")]),
+                  lambda: locked.remove(["plugin_tool"])):
+        with pytest.raises(ToolSpecError, match="runtime_writes_locked"):
+            write()
+    with pytest.raises(ToolSpecError, match="reserved_capability:plugin_tool:spawn_agent"):
+        locked.load([_spec("plugin_tool", capabilities=("spawn_agent",))])
+    assert locked.load([_spec("plugin_tool", description="Reloaded.")]) == ["plugin_tool"]
+
+    trusted = LocalToolProvider()
+    trusted.lock_runtime_writes(trusted=True)
+    assert trusted.load([_spec("worker_tool", capabilities=("spawn_agent",))]) == ["worker_tool"]
+
+
+def test_container_installs_plugin_providers_and_a_separate_runtime_catalog(tmp_path: Path) -> None:
+    from app.agent.plugins import EmptyConfig
     from app.core.config import Settings
     from app.core.container import build_container
+    from app.domain.arcade.plugin import ArcadeConfig
     from app.domain.arcade.tools import arcade_tool_specs
 
     data_path = tmp_path / "shops.jsonl"
@@ -318,19 +342,27 @@ def test_container_registers_arcade_tools_in_code(tmp_path: Path) -> None:
         data_jsonl_path=data_path, arcade_geo_cache_path=tmp_path / "geo.json",
         mcp_servers_dir=tmp_path / "no-mcp",
         supabase_url="https://fixture.invalid", supabase_service_role_key="test-key",
-    ))
+    ), plugin_configs={"core": EmptyConfig(), "arcade": ArcadeConfig()})
 
-    # Plan 5, stage 2b: the agent manifest keeps only the generic tools; arcade
-    # tools are runtime-registered by the host together with their services.
-    entries = container.tool_registry.local_provider.entries()
-    origins = {name: entry.origin for name, entry in entries.items()}
-    arcade = [spec.name for spec in arcade_tool_specs()]
-    assert origins == {
-        "invoke_worker": "manifest", "list_skills": "manifest", "read_skill": "manifest",
-        **dict.fromkeys(arcade, "registered"),
+    # Plan 5, stage 2c: each plugin owns a provider named by the plugin;
+    # runtime writes go to a separate, empty catalog held by the host.
+    providers = dict(container.plugin_set.tool_providers)
+    assert list(providers) == ["core", "arcade"]
+    assert list(container.tool_registry.providers()) == ["mcp", "core", "arcade", "runtime"]
+    core_entries = providers["core"].entries()
+    assert {name: entry.origin for name, entry in core_entries.items()} == {
+        "invoke_worker": "plugin", "list_skills": "plugin", "read_skill": "plugin",
     }
-    services = container.tool_registry.local_provider.health()["services"]
-    assert services == sorted(["skill_registry", "db_query_tool", "geo_resolve_tool", "route_plan_tool",
+    arcade_entries = providers["arcade"].entries()
+    arcade = [spec.name for spec in arcade_tool_specs()]
+    assert {name: entry.origin for name, entry in arcade_entries.items()} == dict.fromkeys(arcade, "plugin")
+    assert container.tool_registry.providers()["runtime"] is container.tool_registry.local_provider
+    assert container.tool_registry.local_provider.entries() == {}
+    with pytest.raises(ToolSpecError, match="runtime_writes_locked"):
+        providers["arcade"].add([_spec("late_tool")])
+    services = providers["arcade"].health()["services"]
+    assert services == sorted(["db_query_tool", "geo_resolve_tool", "route_plan_tool",
                                "summary_tool", "mcp_tool_gateway"])
-    assert "concludes_turn" in entries["summary_tool"].spec.capabilities
-    assert all(not entries[name].spec.reserved_capabilities for name in arcade)
+    assert "concludes_turn" in arcade_entries["summary_tool"].spec.capabilities
+    assert all(not arcade_entries[name].spec.reserved_capabilities for name in arcade)
+    assert [plugin["name"] for plugin in container.plugin_set.health()] == ["core", "arcade"]

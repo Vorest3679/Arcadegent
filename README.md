@@ -140,6 +140,7 @@ LLM_STREAM=false
 AGENT_MAX_STEPS=20
 AGENT_CONTEXT_WINDOW=24
 AGENT_PROVIDER_PROFILE=default
+# AGENT_PLUGINS_FILE=backend/plugins.yaml
 
 MCP_SERVERS_DIR=backend/app/agent/tools/mcp/servers
 MCP_DEFAULT_TIMEOUT_SECONDS=10
@@ -162,6 +163,7 @@ ARCADE_GEO_REQUEST_TIMEOUT_SECONDS=1.2
 - `LLM_API_KEY` 为空时服务可以启动，机厅列表接口也可使用，但 Agent 对话不会产生有意义的模型编排结果。API Key需要使用兼容OpenAI的接口，建议使用DeepSeek的API。
 - `ARCADE_GEO_CACHE_PATH` 会写入 `data/runtime/`，目录不存在时会自动创建。旧的 `data/runtime/chat_sessions.json` 可通过 `scripts/migrate_chat_sessions_to_supabase.py` 导入到 Supabase。
 - `AMAP_API_KEY` 用于高德 REST 路线、逆地理编码和后端地理缓存；高德 Web JS API 的浏览器 key 需要单独配在前端。
+- 插件启用列表与插件配置默认读取 `backend/plugins.yaml`，可用 `AGENT_PLUGINS_FILE` 覆盖（相对路径在仓库根或 `backend/` 下运行都能找到）。`core` 与 `arcade` 都是必需插件，禁用会启动失败。路线工具的高德配置来自该文件，密钥只能写成 `${AMAP_API_KEY}` 或 `${AMAP_API_KEY:-}`，不能带字面默认值；逆地理编码与地理缓存仍直接读取 `AMAP_*`。
 
 ### 4. 配置 MCP
 
@@ -426,8 +428,9 @@ Agent 配置分为几层：
 - Prompt：`backend/app/agent/context/prompts/*.md`
 - Skill：`backend/app/agent/context/skills/*/SKILL.md`
 - Skill 配置：`backend/skill.config.py`（目录、禁用项、agent 白名单和读取上限）
-- 通用工具 manifest：`backend/app/agent/tools/builtin/tools_manifest.json`（`invoke_worker`、`list_skills`、`read_skill`）
-- 机厅业务工具：`backend/app/domain/arcade/tools/`（定义 JSON 在 `schemas/`，由 container 代码注册）
+- 插件配置：`backend/plugins.yaml`（启用列表与安装顺序、各插件配置值；密钥用环境变量占位符）
+- 通用工具 manifest：`backend/app/agent/tools/builtin/tools_manifest.json`（`invoke_worker`、`list_skills`、`read_skill`，由 `CorePlugin` 提供）
+- 机厅业务工具：`backend/app/domain/arcade/tools/`（定义 JSON 在 `schemas/`，由 `ArcadePlugin` 提供）
 - MCP server 配置：`backend/app/agent/tools/mcp/servers/*.json`
 
 Skill 使用标准 Agent Skills 格式，通过目录自动发现，正文和引用文本按需加载。新增技能无需修改注册代码，配置与迁移说明见 [Agent Skills 指南](docs/guidings/技能配置与扩展指南.md)。

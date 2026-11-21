@@ -24,6 +24,13 @@ def test_health_arcades_and_chat(tmp_path: Path) -> None:
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
     assert health.json()["mcp"]["enabled"] is False
+    plugins = health.json()["plugins"]
+    assert [(plugin["name"], plugin["trusted"]) for plugin in plugins] == [("core", True), ("arcade", False)]
+    assert plugins[1]["contributions"]["hooks"] is True
+    assert "route_plan_tool" in plugins[1]["contributions"]["tools"]
+    assert plugins[1]["secrets"] == {"amap.api_key": "set"}
+    assert "test-amap-key" not in health.text
+    assert list(health.json()["tool_providers"]) == ["mcp", "core", "arcade", "runtime"]
 
     listing = client.get("/api/arcades", params={"keyword": "Gamma"})
     assert listing.status_code == 200

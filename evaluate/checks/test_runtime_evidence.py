@@ -42,7 +42,7 @@ def test_model_and_worker_usage_count_each_request_once_and_keep_missing_evidenc
 
 @pytest.mark.parametrize("failure", ["unknown_tool", "prepare_failed", "invalid_json"])
 def test_preparation_failure_closes_event_pair_and_preserves_raw_arguments(failure, tmp_path):
-    registry = ToolRegistry(providers=[], permission_checker=ToolPermissionChecker(
+    registry = ToolRegistry(permission_checker=ToolPermissionChecker(
         policy_file=tmp_path / "no-policy.yaml"), local_provider=LocalToolProvider())
     if failure == "prepare_failed":
         async def broken(**kwargs):

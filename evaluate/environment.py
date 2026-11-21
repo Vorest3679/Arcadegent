@@ -147,23 +147,37 @@ def environment(config, model, budget, directory, attempt_id, write, session_id)
     sessions = MemorySessions()
     app = ROOT / "backend/app"
     # Construct Settings directly: Settings.from_env() would load production .env.
+    amap_key = config.values.get("EVAL_AMAP_API_KEY", "") if config.map_mode == "live" else ""
+    amap_timeout = min(8, config.wall_s)
     settings = Settings(
         env="evaluation", data_jsonl_path=config.data, agent_max_steps=config.per_attempt,
         agent_nodes_definitions_dir=app / "agent/nodes/definitions",
         agent_tool_policy_file=app / "agent/nodes/profiles/tool_policies.yaml",
         arcade_geo_cache_path=directory / "geo-cache.json", arcade_geo_sync_limit=0,
-        amap_api_key=config.values.get("EVAL_AMAP_API_KEY", "") if config.map_mode == "live" else "",
-        amap_timeout_seconds=min(8, config.wall_s),
+        amap_api_key=amap_key, amap_timeout_seconds=amap_timeout,
     )
-    container = build_container(settings, session_store=sessions, provider_adapter=provider,
-                                mcp_tool_gateway=MCPToolGateway(servers=[]))
     # Avoid synchronous geocoding inside DTO mapping; route REST remains opt-in.
+    from app.agent.plugins import EmptyConfig
+    from app.domain.arcade.plugin import AMapSettings, ArcadeConfig
     from app.services.arcade_geo_resolver import ArcadeGeoResolver, ArcadeGeoResolverConfig
     from app.services.arcade_payload_mapper import ArcadePayloadMapper
+    from pydantic import SecretStr
     mapper = ArcadePayloadMapper(geo_resolver=ArcadeGeoResolver(config=ArcadeGeoResolverConfig(
         api_key="", base_url="https://fixture.invalid", cache_path=directory / "geo-cache.json",
         request_timeout_seconds=1, sync_limit=0, max_workers=1)))
-    container.arcade_payload_mapper = mapper
-    container.react_runtime._domain.payload_mapper = mapper
+    # Evaluation passes its own plugin configs instead of reading plugins.yaml
+    # with the production environment.
+    plugin_configs = {
+        "core": EmptyConfig(),
+        "arcade": ArcadeConfig(amap=AMapSettings(api_key=SecretStr(amap_key), timeout_seconds=amap_timeout)),
+    }
+    container = build_container(
+        settings,
+        plugin_configs=plugin_configs,
+        session_store=sessions,
+        provider_adapter=provider,
+        mcp_tool_gateway=MCPToolGateway(servers=[]),
+        arcade_payload_mapper=mapper,
+    )
     events = RecordedEvents(write, attempt_id, session_id, config.max_tools)
     return container, provider, events

@@ -97,3 +97,13 @@ def test_allow_lists_only_reference_existing_files() -> None:
     existing = {path.relative_to(AGENT_DIR).as_posix() for path in _agent_sources()}
     assert set(ALLOWED_APP_IMPORTS) <= existing
     assert set(ALLOWED_BUSINESS_TOKENS) <= existing
+
+
+def test_plugin_modules_only_import_the_agent_package() -> None:
+    """Stage 2c: the plugin protocol and host are business-neutral."""
+    plugin_dir = AGENT_DIR / "plugins"
+    sources = [path for path in plugin_dir.rglob("*.py") if "__pycache__" not in path.parts]
+
+    assert sources
+    assert {path.name: _outside_agent_imports(path) for path in sources if _outside_agent_imports(path)} == {}
+    assert {path.name: _business_tokens(path) for path in sources if _business_tokens(path)} == {}

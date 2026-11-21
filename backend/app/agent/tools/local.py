@@ -2,11 +2,11 @@
 
 Every entry records its origin:
 
-* ``manifest`` — loaded from a host configuration file (a JSON manifest, a
-  plugin bundle, …) by :meth:`LocalToolProvider.load` and owned by that file:
-  changed through the file plus another ``load``, not through updates. The
-  source is trusted host configuration, so it may declare reserved
-  capabilities (``invoke_worker`` declares ``spawn_agent``);
+* ``plugin`` — provided by a plugin (a code bundle, a JSON manifest, …)
+  through :meth:`LocalToolProvider.load` and owned by that plugin: changed by
+  installing another version, not by runtime updates. The source is trusted
+  host configuration, so it may declare reserved capabilities
+  (``invoke_worker`` declares ``spawn_agent``);
 * ``registered`` — added at runtime; fully manageable, but may not declare
   ``RESERVED_CAPABILITIES``.
 
@@ -20,6 +20,11 @@ The provider knows nothing about where specs come from: a manifest adapter
 subclasses it (or builds it) and hands the parsed specs to :meth:`load`.
 Only two write paths exist, one per origin: :meth:`add` for runtime
 registration and :meth:`load` for a trusted source's full tool set.
+
+Plugin installation calls :meth:`lock_runtime_writes` on a plugin's provider.
+After that ``add``/``update``/``remove`` fail with ``runtime_writes_locked``;
+:meth:`load` (the provider's own manifest reload) still replaces its
+``plugin`` tools, with reserved capabilities only if the plugin is trusted.
 """
 
 from __future__ import annotations
@@ -34,7 +39,7 @@ from typing import Any, Literal
 from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor, ToolOutcome
 from app.agent.tools.spec import ToolContext, ToolSpec, ToolSpecError
 
-ToolOrigin = Literal["manifest", "registered"]
+ToolOrigin = Literal["plugin", "registered"]
 _MUTABLE_ORIGINS: frozenset[str] = frozenset({"registered"})
 
 
@@ -57,23 +62,31 @@ class LocalToolProvider:
     def __init__(
         self,
         *,
-        provider_name: str = "local",
         services: Mapping[str, Any] | None = None,
         specs: Iterable[ToolSpec] = (),
     ) -> None:
-        self._provider_name = provider_name
         self._services: dict[str, Any] = dict(services or {})
         self._context = ToolContext(self._resolve_service)
         self._entries: Mapping[str, LocalToolEntry] = MappingProxyType({})
         self._revision = 0
+        self._runtime_writes_locked = False
+        self._load_trusted = True
         if specs:
-            self.add(specs)
+            # Construction declares a plugin's whole catalog, so it is trusted
+            # source material rather than a runtime registration.
+            self.load(specs)
+
+    def lock_runtime_writes(self, *, trusted: bool) -> None:
+        """Refuse ``add``/``update``/``remove`` from now on; plugin installation calls this.
+
+        ``load`` stays available for the provider's own reload. ``trusted`` is
+        the installed plugin's trust: an untrusted plugin's reload may not add
+        reserved capabilities. The lock is permanent for this provider.
+        """
+        self._runtime_writes_locked = True
+        self._load_trusted = trusted
 
     # -- ToolProvider protocol -------------------------------------------------
-
-    @property
-    def provider_name(self) -> str:
-        return self._provider_name
 
     @property
     def revision(self) -> int:
@@ -155,6 +168,7 @@ class LocalToolProvider:
         capability, or a service name already bound to a different object fails
         the whole batch before anything changes.
         """
+        self._require_runtime_writes()
         batch = self._checked_batch(specs, trusted=False)
         for spec in batch:
             if spec.name in self._entries:
@@ -166,6 +180,7 @@ class LocalToolProvider:
 
     def update(self, specs: Iterable[ToolSpec]) -> list[str]:
         """Replace registered tools by name; each must already exist."""
+        self._require_runtime_writes()
         batch = self._checked_batch(specs, trusted=False)
         for spec in batch:
             self._require_mutable(spec.name)
@@ -174,6 +189,7 @@ class LocalToolProvider:
 
     def remove(self, names: Iterable[str]) -> list[str]:
         """Remove registered tools by name; each must exist."""
+        self._require_runtime_writes()
         targets = list(dict.fromkeys(names))
         for name in targets:
             self._require_mutable(name)
@@ -186,14 +202,15 @@ class LocalToolProvider:
         Used at construction and again on every reload (``refresh``); tools of
         other origins, including ``registered`` ones, are kept. The source is
         trusted host configuration, so its specs may declare reserved
-        capabilities (``invoke_worker`` declares ``spawn_agent``).
+        capabilities (``invoke_worker`` declares ``spawn_agent``) unless the
+        provider belongs to an untrusted plugin (see :meth:`lock_runtime_writes`).
         """
-        batch = self._checked_batch(specs, trusted=True)
-        kept = {name: entry for name, entry in self._entries.items() if entry.origin != "manifest"}
+        batch = self._checked_batch(specs, trusted=self._load_trusted)
+        kept = {name: entry for name, entry in self._entries.items() if entry.origin != "plugin"}
         for spec in batch:
             if spec.name in kept:
                 raise ToolSpecError(f"duplicate_tool:{spec.name}")
-        self._commit({**kept, **self._entries_for(batch, "manifest")})
+        self._commit({**kept, **self._entries_for(batch, "plugin")})
         return [spec.name for spec in batch]
 
     # -- internals ---------------------------------------------------------------
@@ -223,6 +240,10 @@ class LocalToolProvider:
             checked[name] = service
         return checked
 
+    def _require_runtime_writes(self) -> None:
+        if self._runtime_writes_locked:
+            raise ToolSpecError("runtime_writes_locked")
+
     def _require_mutable(self, name: str) -> None:
         entry = self._entries.get(name)
         if entry is None:
@@ -232,7 +253,7 @@ class LocalToolProvider:
 
     def _entries_for(self, batch: list[ToolSpec], origin: ToolOrigin) -> dict[str, LocalToolEntry]:
         return {
-            spec.name: LocalToolEntry(spec=spec, origin=origin, descriptor=spec.to_descriptor(provider=self._provider_name))
+            spec.name: LocalToolEntry(spec=spec, origin=origin, descriptor=spec.to_descriptor())
             for spec in batch
         }
 

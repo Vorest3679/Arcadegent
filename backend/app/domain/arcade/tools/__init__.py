@@ -1,11 +1,11 @@
-"""Arcade business tools, registered in code through ``ToolRegistry.add_tools``.
+"""Arcade business tools, provided in code by ``ArcadePlugin``.
 
 ``arcade_tool_specs()`` binds each JSON definition in ``schemas/`` to its
 executor and argument preparer; ``arcade_tool_services(...)`` builds the
-services those executors resolve from ``ToolContext``. The host (the
-container) registers both in one call::
+services those executors resolve from ``ToolContext``. The plugin combines
+both into its tool provider::
 
-    await registry.add_tools(arcade_tool_specs(), services=arcade_tool_services(...))
+    LocalToolProvider(specs=arcade_tool_specs(), services=arcade_tool_services(...))
 """
 
 from __future__ import annotations

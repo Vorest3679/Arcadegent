@@ -59,7 +59,6 @@ class _SubAgents:
 
 
 class _Tools:
-    provider_name = "worker_runner_test"
     _capabilities = {"spawn": (CAP_SPAWN_AGENT,)}
 
     def __init__(self) -> None:
@@ -71,7 +70,6 @@ class _Tools:
             name: ToolDescriptor(
                 name=name,
                 description=name,
-                provider=self.provider_name,
                 input_schema={"type": "object"},
                 capabilities=self._capabilities.get(name, ()),
             )
@@ -99,7 +97,7 @@ class _Tools:
 
 def _kernel(tmp_path: Path, provider: _Provider, store: _Store, tools: _Tools) -> AgentKernel:
     registry = ToolRegistry(
-        providers=[tools],
+        providers={"worker_runner_test": tools},
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
         local_provider=LocalToolProvider(),
     )

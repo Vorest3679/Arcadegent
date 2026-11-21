@@ -174,12 +174,11 @@ class ToolSpec:
         """Apply schema defaults and validate; raises ``ToolInputValidationError``."""
         return self._validator(arguments)
 
-    def to_descriptor(self, *, provider: str) -> ToolDescriptor:
+    def to_descriptor(self) -> ToolDescriptor:
         """Project the spec to the provider-neutral descriptor the registry routes on."""
         return ToolDescriptor(
             name=self.name,
             description=self.description,
-            provider=provider,
             input_schema=cast(dict[str, Any], self.input_schema),
             kind=self.kind,
             validator=self._validator,

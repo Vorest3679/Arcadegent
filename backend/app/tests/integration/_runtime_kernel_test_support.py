@@ -67,7 +67,6 @@ class _Store:
 
 
 class _Tools:
-    provider_name = "kernel_test"
     _capabilities = {"finish": (CAP_CONCLUDES_TURN,), "spawn": (CAP_SPAWN_AGENT,)}
 
     async def get_tools(self) -> dict[str, ToolDescriptor]:
@@ -75,7 +74,6 @@ class _Tools:
             name: ToolDescriptor(
                 name=name,
                 description=name,
-                provider=self.provider_name,
                 input_schema={"type": "object"},
                 capabilities=self._capabilities.get(name, ()),
             )
@@ -133,7 +131,7 @@ def _call(name: str, **arguments: Any) -> ModelResponse:
 
 def _runtime(tmp_path: Path, provider: _Provider, store: _Store, domain: BaseTurnDomain | None = None) -> AgentKernel:
     registry = ToolRegistry(
-        providers=[_Tools()],
+        providers={"kernel_test": _Tools()},
         permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
         local_provider=LocalToolProvider(),
     )
