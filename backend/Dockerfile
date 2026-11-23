@@ -7,7 +7,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app/backend
 
 COPY backend/pyproject.toml ./
-COPY backend/skill.config.py ./
 COPY backend/plugins.yaml ./
 COPY backend/app ./app
 

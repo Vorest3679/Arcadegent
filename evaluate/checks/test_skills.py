@@ -6,23 +6,24 @@ import os
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import pytest
 import yaml
 
 from app.agent.context.context_builder import ContextBuilder
+from app.agent.context.prompt_loader import DirectoryPromptLoader
 from app.agent.runtime.session_state import AgentSessionState, state_from_dict, state_to_dict
-from app.agent.skills.config import SkillConfig, load_skill_config
+from app.agent.skills.config import SkillConfig
 from app.agent.skills.execution import SkillExecution, bind_skill_execution, current_skill_invocation
 from app.agent.skills.registry import SkillError, SkillRegistry, parse_skill
+from app.agent.subagents.roster import AgentRoster, AgentRosterError
 from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.tools.builtin import BuiltinToolProvider
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
+from app.domain.arcade.profiles import arcade_agent_roster
 from app.protocol.messages import ChatRequest
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def write_skill(root, directory="sample-skill", *, body="BODY_MARKER", **fields):
@@ -35,14 +36,14 @@ def write_skill(root, directory="sample-skill", *, body="BODY_MARKER", **fields)
 
 def tool_registry(registry, tmp_path):
     return ToolRegistry(
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
+        permission_checker=ToolPermissionChecker(),
         local_provider=BuiltinToolProvider(services={"skill_registry": registry}),
     )
 
 
 def test_bundled_skills_use_standard_format():
-    config = load_skill_config(REPO_ROOT / "backend" / "skill.config.py")
-    registry = SkillRegistry(config)
+    from app.domain.arcade.profiles import SKILLS_DIR
+    registry = SkillRegistry(SkillConfig(roots=[SKILLS_DIR]))
     catalog = registry.list_skills(agent_name="main_agent")
     assert {item["name"] for item in catalog} == {
         "search-result-reading", "navigation-result-reading", "response-composition",
@@ -177,8 +178,11 @@ def test_tools_refresh_context_and_bind_identity_without_body_in_history(tmp_pat
     registry = SkillRegistry(SkillConfig(roots=[root], agent_skills={"search_worker": []}))
     tools = tool_registry(registry, tmp_path)
     state = AgentSessionState(session_id="synthetic")
-    builder = ContextBuilder(prompt_root=tmp_path / "prompts", history_turn_limit=4, skill_registry=registry)
-    profile = SubAgentBuilder().get("main_agent")
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "main_agent.md").write_text("main prompt", encoding="utf-8")
+    builder = ContextBuilder(prompt_loader=DirectoryPromptLoader([prompts]), history_turn_limit=4, skill_registry=registry)
+    profile = SubAgentBuilder(arcade_agent_roster().agents).get("main_agent")
     write_skill(root)
 
     async def invoke(name, arguments, agent="main_agent"):
@@ -249,15 +253,11 @@ def test_parallel_skill_loads_keep_the_capacity_lock(tmp_path, monkeypatch):
     assert execution.loaded_bytes == size  # the capacity cap was not bypassed
 
 
-def test_config_paths_are_relative_to_config_and_legacy_yaml_is_rejected(tmp_path, monkeypatch):
-    config_path = tmp_path / "skill.config.py"
-    config_path.write_text('from app.agent.skills.config import SkillConfig\nconfig = SkillConfig(roots=["skills"])\n')
-    monkeypatch.chdir(tmp_path.parent)
-    assert load_skill_config(config_path).roots == [(tmp_path / "skills").resolve()]
+def test_skill_limits_and_legacy_yaml_are_rejected(tmp_path):
     with pytest.raises(ValueError):
         SkillConfig(max_file_bytes=0)
     with pytest.raises(ValueError):
         SkillConfig(max_loaded_bytes=True)
     (tmp_path / "query.yaml").write_text("id: query\nskill_files: []\n")
-    with pytest.raises(ValueError, match="skill.config.py"):
-        SubAgentBuilder(definitions_dir=tmp_path)
+    with pytest.raises(AgentRosterError, match="skill_files"):
+        AgentRoster.from_yaml(tmp_path)

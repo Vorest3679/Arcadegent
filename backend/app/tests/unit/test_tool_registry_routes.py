@@ -179,7 +179,7 @@ def test_route_uses_explicit_plugin_config_not_process_env(tmp_path, monkeypatch
     import asyncio
     import httpx
     from pydantic import SecretStr
-    from app.agent.plugins import EmptyConfig
+    from app.agent.plugins import CoreConfig
     from app.core.config import Settings
     from app.core.container import build_container
     from app.domain.arcade.plugin import AMapSettings, ArcadeConfig
@@ -188,17 +188,18 @@ def test_route_uses_explicit_plugin_config_not_process_env(tmp_path, monkeypatch
     _write_rows(data_path)
     monkeypatch.setenv("AMAP_API_KEY", "wrong-process-key")
     monkeypatch.setenv("AMAP_BASE_URL", "https://wrong.invalid")
-    (tmp_path / "no-mcp").mkdir()
-    settings = Settings(data_jsonl_path=data_path,
-                              supabase_url="https://fixture.invalid",
-                              supabase_service_role_key="test-key",
-                              mcp_servers_dir=tmp_path / "no-mcp",
-                              amap_api_key="settings-key", amap_base_url="https://settings.invalid",
-                              amap_timeout_seconds=3)
+    settings = Settings(
+        data_jsonl_path=data_path,
+        supabase_url="https://fixture.invalid",
+        supabase_service_role_key="test-key",
+        amap_api_key="settings-key",
+        amap_base_url="https://settings.invalid",
+        amap_timeout_seconds=3,
+    )
     container = build_container(
         settings,
         plugin_configs={
-            "core": EmptyConfig(),
+            "core": CoreConfig(),
             "arcade": ArcadeConfig(amap=AMapSettings(
                 api_key=SecretStr("plugin-key"),
                 base_url="https://route.invalid",

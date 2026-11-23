@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.agent.context.context_builder import ContextBuilder
+from app.agent.context.prompt_loader import DirectoryPromptLoader, PromptError
 from app.agent.skills.config import SkillConfig
 from app.agent.skills.registry import SkillRegistry
 from app.agent.runtime.session_state import AgentSessionState, AgentTurn
-from app.agent.subagents.subagent_builder import SubAgentProfile
+from app.agent.subagents.roster import AgentDefinition
 from app.protocol.messages import ChatRequest
 
 
@@ -18,7 +21,7 @@ def test_context_builder_passes_through_model_transcripts(tmp_path: Path) -> Non
     (prompt_root / "system_base.md").write_text("base prompt", encoding="utf-8")
     (prompt_root / "main_agent.md").write_text("main prompt", encoding="utf-8")
 
-    builder = ContextBuilder(prompt_root=prompt_root, skill_registry=None, history_turn_limit=10)
+    builder = ContextBuilder(prompt_loader=DirectoryPromptLoader([prompt_root], base_prompt="system_base.md"), skill_registry=None, history_turn_limit=10)
     state = AgentSessionState(
         session_id="s_transcript",
         active_subagent="main_agent",
@@ -66,9 +69,9 @@ def test_context_builder_passes_through_model_transcripts(tmp_path: Path) -> Non
     context = builder.build(
         session_state=state,
         request=ChatRequest(message="find maimai"),
-        subagent=SubAgentProfile(
+        subagent=AgentDefinition(
             name="main_agent",
-            prompt_file="main_agent.md",
+            prompt="main_agent.md",
             allowed_tools=[],
         ),
     )
@@ -98,7 +101,7 @@ def test_context_builder_injects_directory_and_detail_blocks(tmp_path: Path) -> 
     )
 
     builder = ContextBuilder(
-        prompt_root=prompt_root,
+        prompt_loader=DirectoryPromptLoader([prompt_root], base_prompt="system_base.md"),
         skill_registry=SkillRegistry(SkillConfig(roots=[skill_root])),
         history_turn_limit=6,
     )
@@ -147,9 +150,9 @@ def test_context_builder_injects_directory_and_detail_blocks(tmp_path: Path) -> 
     context = builder.build(
         session_state=state,
         request=ChatRequest(message="find maimai"),
-        subagent=SubAgentProfile(
+        subagent=AgentDefinition(
             name="main_agent",
-            prompt_file="main_agent.md",
+            prompt="main_agent.md",
             allowed_tools=[],
         ),
     )
@@ -184,7 +187,7 @@ def test_context_builder_injects_route_block_before_shop_details(tmp_path: Path)
     )
 
     builder = ContextBuilder(
-        prompt_root=prompt_root,
+        prompt_loader=DirectoryPromptLoader([prompt_root], base_prompt="system_base.md"),
         skill_registry=SkillRegistry(SkillConfig(roots=[skill_root])),
         history_turn_limit=6,
     )
@@ -205,9 +208,9 @@ def test_context_builder_injects_route_block_before_shop_details(tmp_path: Path)
     context = builder.build(
         session_state=state,
         request=ChatRequest(message="route to bravo"),
-        subagent=SubAgentProfile(
+        subagent=AgentDefinition(
             name="main_agent",
-            prompt_file="main_agent.md",
+            prompt="main_agent.md",
             allowed_tools=[],
         ),
     )
@@ -226,7 +229,7 @@ def test_context_builder_exposes_last_mcp_result_in_runtime_hint(tmp_path: Path)
     (prompt_root / "navigation_worker.md").write_text("navigation prompt", encoding="utf-8")
 
     builder = ContextBuilder(
-        prompt_root=prompt_root,
+        prompt_loader=DirectoryPromptLoader([prompt_root], base_prompt="system_base.md"),
         skill_registry=SkillRegistry(SkillConfig(roots=[skill_root])),
         history_turn_limit=6,
     )
@@ -245,9 +248,9 @@ def test_context_builder_exposes_last_mcp_result_in_runtime_hint(tmp_path: Path)
     context = builder.build(
         session_state=state,
         request=ChatRequest(message="从虹口足球场去街机烈火怎么走"),
-        subagent=SubAgentProfile(
+        subagent=AgentDefinition(
             name="navigation_worker",
-            prompt_file="navigation_worker.md",
+            prompt="navigation_worker.md",
             allowed_tools=[],
         ),
     )
@@ -266,7 +269,7 @@ def test_context_builder_includes_recent_tool_results_history(tmp_path: Path) ->
     (prompt_root / "navigation_worker.md").write_text("navigation prompt", encoding="utf-8")
 
     builder = ContextBuilder(
-        prompt_root=prompt_root,
+        prompt_loader=DirectoryPromptLoader([prompt_root], base_prompt="system_base.md"),
         skill_registry=SkillRegistry(SkillConfig(roots=[skill_root])),
         history_turn_limit=6,
     )
@@ -324,9 +327,9 @@ def test_context_builder_includes_recent_tool_results_history(tmp_path: Path) ->
     context = builder.build(
         session_state=state,
         request=ChatRequest(message="从虹口足球场去街机烈火怎么走"),
-        subagent=SubAgentProfile(
+        subagent=AgentDefinition(
             name="navigation_worker",
-            prompt_file="navigation_worker.md",
+            prompt="navigation_worker.md",
             allowed_tools=[],
         ),
     )
@@ -348,7 +351,7 @@ def test_context_builder_main_agent_sees_worker_tool_history(tmp_path: Path) -> 
     (prompt_root / "main_agent.md").write_text("main prompt", encoding="utf-8")
 
     builder = ContextBuilder(
-        prompt_root=prompt_root,
+        prompt_loader=DirectoryPromptLoader([prompt_root], base_prompt="system_base.md"),
         skill_registry=SkillRegistry(SkillConfig(roots=[skill_root])),
         history_turn_limit=6,
     )
@@ -387,9 +390,9 @@ def test_context_builder_main_agent_sees_worker_tool_history(tmp_path: Path) -> 
     context = builder.build(
         session_state=state,
         request=ChatRequest(message="帮我找从虹口足球场出发的机厅"),
-        subagent=SubAgentProfile(
+        subagent=AgentDefinition(
             name="main_agent",
-            prompt_file="main_agent.md",
+            prompt="main_agent.md",
             allowed_tools=[],
         ),
     )
@@ -399,3 +402,19 @@ def test_context_builder_main_agent_sees_worker_tool_history(tmp_path: Path) -> 
     assert '"worker_run_id": "wrk_2"' in context.instructions
     assert '"arguments": {"keywords": "虹口足球场"}' in context.instructions
     assert '"name": "虹口足球场"' in context.instructions
+
+
+def test_prompt_loader_searches_plugin_directories_in_order(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    (second / "main_agent.md").write_text("second", encoding="utf-8")
+    (first / "system_base.md").write_text("base", encoding="utf-8")
+    loader = DirectoryPromptLoader([first, second], base_prompt="system_base.md")
+
+    assert loader.base_prompt() == "base"
+    assert loader.load("main_agent.md") == "second"
+    for name in ("missing.md", "../outside.md", str(second / "main_agent.md")):
+        with pytest.raises(PromptError, match=r"^prompt_not_found$"):
+            loader.load(name)

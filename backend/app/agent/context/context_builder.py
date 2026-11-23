@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
+from app.agent.context.prompt_loader import PromptLoader
 from app.agent.context.context_payload import (
     ContextBlockKey,
     ContextBlockRefDto,
@@ -26,7 +26,7 @@ from app.agent.context.context_payload import (
     ShopTransportContextDto,
 )
 from app.agent.runtime.session_state import AgentSessionState, AgentTurn, get_working_memory_artifact
-from app.agent.subagents.subagent_builder import SubAgentProfile
+from app.agent.subagents.roster import AgentDefinition
 from app.agent.skills.registry import SkillRegistry
 from app.protocol.messages import ChatRequest
 
@@ -45,24 +45,23 @@ class ContextBuilder:
     def __init__(
         self,
         *,
-        prompt_root: Path,
+        prompt_loader: PromptLoader,
         history_turn_limit: int,
         skill_registry: SkillRegistry | None = None,
     ) -> None:
-        self._prompt_root = prompt_root
+        self._prompt_loader = prompt_loader
         self._skill_registry = skill_registry
         self._history_turn_limit = max(4, history_turn_limit)
-        self._prompt_cache: dict[str, str] = {}
 
     def build(
         self,
         *,
         session_state: AgentSessionState,
         request: ChatRequest,
-        subagent: SubAgentProfile,
+        subagent: AgentDefinition,
     ) -> BuiltContext:
-        base_prompt = self._load_prompt("system_base.md").strip()
-        subagent_prompt = self._load_prompt(subagent.prompt_file).strip()
+        base_prompt = self._prompt_loader.base_prompt().strip()
+        subagent_prompt = self._prompt_loader.agent_prompt(subagent).strip()
         skill_block = self._build_skill_block(session_state)
         client_location = self._client_location_payload(session_state=session_state, request=request)
         client_location_block = self._build_client_location_block(client_location)
@@ -381,7 +380,7 @@ class ContextBuilder:
         *,
         session_state: AgentSessionState,
         request: ChatRequest,
-        subagent: SubAgentProfile,
+        subagent: AgentDefinition,
     ) -> RuntimeContextPayloadDto:
         query = self._build_query_context(session_state=session_state, request=request)
         search_catalog = self._build_search_catalog(session_state=session_state)
@@ -407,7 +406,7 @@ class ContextBuilder:
         self,
         *,
         session_state: AgentSessionState,
-        subagent: SubAgentProfile,
+        subagent: AgentDefinition,
         query: QueryContextDto | None,
         search_catalog: SearchCatalogContextDto | None,
         shop_details: list[ShopDetailContextDto],
@@ -957,27 +956,3 @@ class ContextBuilder:
 
     def _memory_value(self, memory: dict[str, Any], key: str) -> Any:
         return get_working_memory_artifact(memory, key)
-
-    def _load_prompt(self, filename: str) -> str:
-        return self._load_markdown(
-            filename=filename,
-            root=self._prompt_root,
-            cache=self._prompt_cache,
-        )
-
-    def _load_markdown(
-        self,
-        *,
-        filename: str,
-        root: Path,
-        cache: dict[str, str],
-    ) -> str:
-        if filename in cache:
-            return cache[filename]
-        path = root / filename
-        if not path.exists():
-            content = ""
-        else:
-            content = path.read_text(encoding="utf-8")
-        cache[filename] = content
-        return content

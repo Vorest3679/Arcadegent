@@ -22,7 +22,7 @@ from app.agent.runtime.session_state import (
 )
 from app.agent.runtime.worker_runner import WorkerRunner
 from app.agent.subagents.agent_node import AgentNode
-from app.agent.subagents.subagent_builder import SubAgentProfile
+from app.agent.subagents.roster import AgentDefinition
 from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
 from app.agent.tools.execution import CAP_SPAWN_AGENT
 from app.agent.tools.local import LocalToolProvider
@@ -45,8 +45,10 @@ _TOOLS = ("spawn", "echo", "block")
 
 
 class _SubAgents:
-    def get(self, name: str) -> SubAgentProfile:
-        return SubAgentProfile(name=name, prompt_file="", allowed_tools=list(_TOOLS))  # type: ignore[arg-type]
+    entry_name = "main_agent"
+
+    def get(self, name: str) -> AgentDefinition:
+        return AgentDefinition(name=name, prompt="fixture.md", allowed_tools=list(_TOOLS))  # type: ignore[arg-type]
 
     def node(self, name: str) -> AgentNode:
         is_main = name == "main_agent"
@@ -98,7 +100,7 @@ class _Tools:
 def _kernel(tmp_path: Path, provider: _Provider, store: _Store, tools: _Tools) -> AgentKernel:
     registry = ToolRegistry(
         providers={"worker_runner_test": tools},
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        permission_checker=ToolPermissionChecker(),
         local_provider=LocalToolProvider(),
     )
     return AgentKernel(

@@ -199,10 +199,22 @@ def test_repository_plugins_yaml_matches_the_settings_defaults() -> None:
     models = {"core": CorePlugin.config_model, "arcade": ArcadePlugin.config_model}
     configs = _load_file(settings.agent_plugins_file, models=models, environ={})
     assert list(configs) == ["core", "arcade"]
-    amap = configs["arcade"]
-    assert isinstance(amap, ArcadeConfig)
-    assert (amap.amap.base_url, amap.amap.timeout_seconds) == (settings.amap_base_url, settings.amap_timeout_seconds)
-    assert amap.amap.api_key.get_secret_value() == ""
+    core = configs["core"]
+    from app.agent.plugins import CoreConfig
+    assert isinstance(core, CoreConfig)
+    assert core.skills.max_file_bytes == 64 * 1024
+    assert core.skills.max_loaded_bytes == 256 * 1024
+    assert core.skills.disabled_skills == []
+    assert core.skills.agent_skills == {}
+    arcade = configs["arcade"]
+    assert isinstance(arcade, ArcadeConfig)
+    assert (arcade.amap.base_url, arcade.amap.timeout_seconds) == (
+        settings.amap_base_url, settings.amap_timeout_seconds
+    )
+    assert arcade.amap.api_key.get_secret_value() == ""
+    assert arcade.agents.yaml_overlay is True
+    assert arcade.agents.definitions_dir is None
+    assert arcade.mcp_servers_dir is None
 
 
 def test_agent_plugins_file_resolves_relative_paths_like_other_agent_files(monkeypatch, tmp_path: Path) -> None:
@@ -215,3 +227,55 @@ def test_agent_plugins_file_resolves_relative_paths_like_other_agent_files(monke
     assert Settings.from_env().agent_plugins_file.resolve() == expected
     monkeypatch.chdir(expected.parent)
     assert Settings.from_env().agent_plugins_file.resolve() == expected
+
+
+def test_arcade_resource_overrides_resolve_against_the_plugins_file(tmp_path: Path) -> None:
+    from app.agent.plugins import CorePlugin
+    from app.domain.arcade.plugin import ArcadeConfig, ArcadePlugin
+
+    path = tmp_path / "plugins.yaml"
+    path.write_text(
+        "plugins:\n"
+        "  arcade:\n"
+        "    config:\n"
+        "      agents:\n"
+        "        yaml_overlay: ${OVERLAY:-}\n"
+        "        definitions_dir: ${DEFS:-}\n"
+        "      mcp_servers_dir: ${MCP_DIR:-}\n",
+        encoding="utf-8",
+    )
+    configs = resolve_plugin_configs(
+        read_plugins_file(path),
+        base_dir=path.parent,
+        models={"core": CorePlugin.config_model, "arcade": ArcadePlugin.config_model},
+        environ={"OVERLAY": "false", "DEFS": "agents", "MCP_DIR": "mcp"},
+    )
+    arcade = configs["arcade"]
+    assert isinstance(arcade, ArcadeConfig)
+    assert arcade.agents.yaml_overlay is False
+    assert arcade.agents.definitions_dir == (tmp_path / "agents").resolve()
+    assert arcade.mcp_servers_dir == (tmp_path / "mcp").resolve()
+
+
+def test_repository_resources_are_cwd_independent(monkeypatch, tmp_path: Path) -> None:
+    from app.agent.plugins import (
+        CorePlugin,
+        load_plugin_configs,
+        resolve_plugin_resources,
+    )
+    from app.core.config import Settings
+    from app.domain.arcade.plugin import ArcadePlugin
+
+    plugins = {"core": CorePlugin, "arcade": ArcadePlugin}
+    settings = Settings()
+    assert settings.agent_plugins_file.is_absolute()
+
+    def resolved() -> dict:
+        configs = load_plugin_configs(settings.agent_plugins_file, plugins=plugins, environ={})
+        return resolve_plugin_resources(plugins, configs)
+
+    from_repo_root = resolved()
+    monkeypatch.chdir(tmp_path)
+    assert resolved() == from_repo_root
+    monkeypatch.chdir(settings.agent_plugins_file.parent)
+    assert resolved() == from_repo_root

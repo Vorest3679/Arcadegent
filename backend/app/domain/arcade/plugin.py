@@ -1,4 +1,4 @@
-"""Arcade plugin: business hooks and tools installed into the generic agent host."""
+"""Arcade plugin: business hooks, tools, resources and agent definitions."""
 
 from __future__ import annotations
 
@@ -7,9 +7,17 @@ from typing import Any
 from pydantic import Field, SecretStr
 
 from app.agent.artifacts.sink import ArtifactSink
-from app.agent.plugins.spec import Plugin, PluginConfig, PluginInfo
-from app.agent.tools.local import LocalToolProvider
+from app.agent.plugins import (
+    AgentRoster,
+    LocalToolProvider,
+    Plugin,
+    PluginConfig,
+    PluginInfo,
+    PluginResources,
+    RelPath,
+)
 from app.domain.arcade.domain import ArcadeTurnDomain
+from app.domain.arcade.profiles import MCP_SERVERS_DIR, PROMPTS_DIR, SKILLS_DIR, arcade_agent_roster
 from app.domain.arcade.tools import AMapConfig, arcade_tool_services, arcade_tool_specs
 from app.infra.db.protocols import ArcadeRepository
 from app.services.arcade_payload_mapper import ArcadePayloadMapper
@@ -30,17 +38,27 @@ class AMapSettings(PluginConfig):
         )
 
 
+class ArcadeAgentsSettings(PluginConfig):
+    """Whether and from where the arcade agent YAML overlay is read."""
+
+    yaml_overlay: bool = True
+    definitions_dir: RelPath | None = None
+
+
 class ArcadeConfig(PluginConfig):
     """Configuration values for the arcade plugin (from ``plugins.yaml``)."""
 
     amap: AMapSettings = AMapSettings()
+    agents: ArcadeAgentsSettings = ArcadeAgentsSettings()
+    mcp_servers_dir: RelPath | None = None
 
 
 class ArcadePlugin(Plugin):
-    """Arcade hooks and tools; resources and agents arrive in plan stage 2d."""
+    """Arcade hooks, tools, skill/MCP/prompt resources and agent definitions."""
 
     info = PluginInfo(name="arcade", version="1.0.0", description="Arcade search, navigation and display domain.")
     config_model = ArcadeConfig
+    resources = PluginResources(skills=(SKILLS_DIR,), mcp_servers=(MCP_SERVERS_DIR,), prompts=(PROMPTS_DIR,))
 
     def __init__(
         self,
@@ -55,11 +73,20 @@ class ArcadePlugin(Plugin):
         self._artifact_sink = artifact_sink
         self._mcp_tool_gateway = mcp_tool_gateway
 
-    def hooks(self, config: PluginConfig) -> ArcadeTurnDomain:
+    @classmethod
+    def resolved_resources(cls, config: ArcadeConfig) -> PluginResources:
+        if config.mcp_servers_dir is None:
+            return cls.resources
+        return PluginResources(
+            skills=cls.resources.skills,
+            mcp_servers=(config.mcp_servers_dir,),
+            prompts=cls.resources.prompts,
+        )
+
+    def hooks(self, config: ArcadeConfig) -> ArcadeTurnDomain:
         return ArcadeTurnDomain(payload_mapper=self._payload_mapper, artifact_sink=self._artifact_sink)
 
-    def tools(self, config: PluginConfig) -> LocalToolProvider:
-        assert isinstance(config, ArcadeConfig)  # the host passes an instance of ``config_model``
+    def tools(self, config: ArcadeConfig) -> LocalToolProvider:
         return LocalToolProvider(
             specs=arcade_tool_specs(),
             services=arcade_tool_services(
@@ -69,5 +96,11 @@ class ArcadePlugin(Plugin):
             ),
         )
 
+    def agents(self, config: ArcadeConfig) -> AgentRoster:
+        return arcade_agent_roster(
+            yaml_overlay=config.agents.yaml_overlay,
+            definitions_dir=config.agents.definitions_dir,
+        )
 
-__all__ = ["AMapSettings", "ArcadeConfig", "ArcadePlugin"]
+
+__all__ = ["AMapSettings", "ArcadeAgentsSettings", "ArcadeConfig", "ArcadePlugin"]

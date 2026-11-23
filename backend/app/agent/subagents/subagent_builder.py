@@ -1,209 +1,83 @@
-"""Subagent profile registry used by ReAct runtime."""
+"""Agent profile registry used by the ReAct runtime.
+
+The registry holds only declarations supplied by plugins: it never invents a
+profile for a known business or assumes that one agent may spawn all others.
+The single ``role="entry"`` agent runs user turns; every worker it may dispatch
+is listed explicitly in its ``workers`` field.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Literal, cast
-
-import yaml
+from collections.abc import Iterable, Mapping
 
 from app.agent.subagents.agent_node import AgentNode
-
-SubAgentName = Literal["main_agent", "search_worker", "navigation_worker"]
-
-
-@dataclass(frozen=True)
-class SubAgentProfile:
-    """Execution profile for one subagent."""
-
-    name: SubAgentName
-    prompt_file: str
-    allowed_tools: list[str]
-    model: str | None = None
-    reasoning_effort: str | None = None
+from app.agent.subagents.roster import AgentDefinition
 
 
 class SubAgentBuilder:
-    """Resolve hub/worker agent profiles by name and routing hints."""
+    """Resolve agent profiles by name and expose kernel-facing executors."""
 
     def __init__(
         self,
+        profiles: Iterable[AgentDefinition],
         *,
-        definitions_dir: Path | None = None,
-        enable_yaml_overlay: bool = True,
+        aliases: Mapping[str, str] | None = None,
     ) -> None:
-        self._profiles: dict[str, SubAgentProfile] = {
-            "main_agent": SubAgentProfile(
-                name="main_agent",
-                prompt_file="main_agent.md",
-                allowed_tools=[
-                    "list_skills",
-                    "read_skill",
-                    "invoke_worker",
-                    "db_query_tool",
-                    "geo_resolve_tool",
-                    "route_plan_tool",
-                    "summary_tool",
-                    "result_selection_tool",
-                    "mcp__*",
-                ],
-            ),
-            "search_worker": SubAgentProfile(
-                name="search_worker",
-                prompt_file="search_worker.md",
-                allowed_tools=["list_skills", "read_skill", "db_query_tool", "result_selection_tool", "mcp__*"],
-            ),
-            "navigation_worker": SubAgentProfile(
-                name="navigation_worker",
-                prompt_file="navigation_worker.md",
-                allowed_tools=[
-                    "list_skills",
-                    "read_skill",
-                    "db_query_tool",
-                    "geo_resolve_tool",
-                    "route_plan_tool",
-                    "mcp__*",
-                ],
-            ),
-        }
-        if enable_yaml_overlay and definitions_dir is not None:
-            self._apply_yaml_overlay(definitions_dir)
+        self._profiles: dict[str, AgentDefinition] = {}
+        for profile in profiles:
+            if not isinstance(profile, AgentDefinition):
+                raise TypeError("invalid_agent_definition")
+            if profile.name in self._profiles:
+                raise ValueError(f"duplicate_agent:{profile.name}")
+            self._profiles[profile.name] = profile
+        entries = [profile for profile in self._profiles.values() if profile.role == "entry"]
+        if len(entries) != 1:
+            raise ValueError("entry_agent_required" if not entries else "multiple_entry_agents")
+        self._entry = entries[0]
+        for profile in self._profiles.values():
+            for worker in profile.workers:
+                target = self._profiles.get(worker)
+                if target is None or target.role != "worker":
+                    raise ValueError(f"unknown_worker:{profile.name}:{worker}")
+        self._aliases = dict(aliases or {})
+        for alias, target in self._aliases.items():
+            if alias in self._profiles:
+                raise ValueError(f"alias_shadows_agent:{alias}")
+            if target not in self._profiles:
+                raise ValueError(f"unknown_alias_target:{alias}:{target}")
 
-    def get(self, name: str) -> SubAgentProfile:
-        return self._profiles.get(name, self._profiles["main_agent"])
+    def get(self, name: str) -> AgentDefinition:
+        """Resolve a real name first, then a legacy alias, else the entry agent."""
+        profile = self._profiles.get(name)
+        if profile is not None:
+            return profile
+        target = self._aliases.get(name)
+        return self._profiles[target] if target is not None else self._entry
+
+    @property
+    def entry(self) -> AgentDefinition:
+        return self._entry
+
+    @property
+    def entry_name(self) -> str:
+        return self._entry.name
 
     def worker_names(self) -> tuple[str, ...]:
-        """Profiles the main agent may spawn as isolated workers."""
-        return tuple(name for name in self._profiles if name != "main_agent")
+        """Workers the entry agent may spawn."""
+        return self._entry.workers
 
     def node(self, name: str) -> AgentNode:
         """Resolve a profile into the kernel-facing node policy."""
         profile = self.get(name)
-        is_main = profile.name == "main_agent"
+        is_entry = profile.role == "entry"
         return AgentNode(
             profile=profile,
-            scope="conversation" if is_main else "worker",
-            publish_text=is_main,
-            spawnable=self.worker_names() if is_main else (),
+            scope="conversation" if is_entry else "worker",
+            publish_text=is_entry,
+            spawnable=profile.workers,
             model=profile.model,
             reasoning_effort=profile.reasoning_effort,
         )
 
-    def _apply_yaml_overlay(self, definitions_dir: Path) -> None:
-        mapping: dict[str, SubAgentName] = {
-            "intent": "main_agent",
-            "query": "search_worker",
-            "navigation": "navigation_worker",
-            "summary": "main_agent",
-        }
-        if not definitions_dir.exists():
-            return
-        for path in sorted(definitions_dir.glob("*.yaml")):
-            payload = self._read_yaml(path)
-            if payload is None:
-                continue
-            if "skill_files" in payload:
-                raise ValueError("skill_files is no longer supported; configure skills in skill.config.py")
-            status = self._read_status(payload)
-            if status != "active":
-                continue
-            subagent_name = self._read_subagent_name(payload, mapping=mapping)
-            if subagent_name is None:
-                continue
 
-            profile = self._profiles[subagent_name]
-            prompt_file = self._read_prompt_file(payload, fallback=profile.prompt_file)
-            overlay_tools = self._read_allowed_tools(payload)
-            allowed_tools_mode = self._read_allowed_tools_mode(payload)
-            if allowed_tools_mode == "replace" and overlay_tools:
-                allowed_tools = overlay_tools
-            else:
-                allowed_tools = self._merge_unique(profile.allowed_tools, overlay_tools)
-            self._profiles[subagent_name] = SubAgentProfile(
-                name=profile.name,
-                prompt_file=prompt_file,
-                allowed_tools=allowed_tools,
-                model=self._read_optional_str(payload, "model") or profile.model,
-                reasoning_effort=self._read_optional_str(payload, "reasoning_effort") or profile.reasoning_effort,
-            )
-
-    def _read_yaml(self, path: Path) -> dict[str, Any] | None:
-        if not path.exists():
-            return None
-        try:
-            raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
-            return None
-        if not isinstance(raw, dict):
-            return None
-        return raw
-
-    def _read_optional_str(self, payload: dict[str, Any], key: str) -> str | None:
-        raw = payload.get(key)
-        if not isinstance(raw, str):
-            return None
-        return raw.strip() or None
-
-    def _read_prompt_file(self, payload: dict[str, Any], *, fallback: str) -> str:
-        raw = payload.get("prompt_file")
-        if not isinstance(raw, str):
-            return fallback
-        value = raw.strip()
-        return value or fallback
-
-    def _read_status(self, payload: dict[str, Any]) -> str:
-        raw = payload.get("status")
-        if not isinstance(raw, str):
-            return "active"
-        value = raw.strip().lower()
-        if value in {"active", "planned"}:
-            return value
-        return "active"
-
-    def _read_subagent_name(
-        self,
-        payload: dict[str, Any],
-        *,
-        mapping: dict[str, SubAgentName],
-    ) -> SubAgentName | None:
-        raw_name = payload.get("subagent_name")
-        if isinstance(raw_name, str):
-            normalized = raw_name.strip()
-            if normalized in self._profiles:
-                return cast(SubAgentName, normalized)
-
-        raw_id = payload.get("id")
-        if isinstance(raw_id, str):
-            mapped = mapping.get(raw_id.strip())
-            if mapped is not None:
-                return mapped
-        return None
-
-    def _read_allowed_tools_mode(self, payload: dict[str, Any]) -> str:
-        raw = payload.get("allowed_tools_mode")
-        if not isinstance(raw, str):
-            return "merge"
-        value = raw.strip().lower()
-        if value in {"merge", "replace"}:
-            return value
-        return "merge"
-
-    def _read_allowed_tools(self, payload: dict[str, Any]) -> list[str]:
-        raw = payload.get("allowed_tools")
-        if not isinstance(raw, list):
-            return []
-        tools: list[str] = []
-        for item in raw:
-            if isinstance(item, str):
-                value = item.strip()
-                if value:
-                    tools.append(value)
-        return tools
-
-    def _merge_unique(self, base: list[str], overlay: list[str]) -> list[str]:
-        merged: list[str] = []
-        for item in [*base, *overlay]:
-            if item not in merged:
-                merged.append(item)
-        return merged
+__all__ = ["SubAgentBuilder"]

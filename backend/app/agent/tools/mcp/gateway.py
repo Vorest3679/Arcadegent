@@ -6,9 +6,9 @@ from __future__ import annotations
 # 总得来说属于一个工具网关，负责发现 MCP 工具并通过 FastMCP 客户端执行它们。
 # 是本模块下的核心类，提供了工具发现、工具定义构建、工具执行等功能。
 
-import os
-from pathlib import Path
 import re
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from app.agent.tools.base import ToolDescriptor
@@ -39,7 +39,7 @@ from app.protocol.messages import GeoPoint, Location, RouteSummaryDto
 logger = get_logger(__name__)
 _PUBLIC_SOURCE_TYPES = frozenset({"http", "stdio", "sse", "streamable-http", "script", "string", "config"})
 
-_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_CONFIG_PLACEHOLDER = re.compile(r"\$\{([^}]+)\}")
 
 
 def _coerce_bool(value: Any, *, default: bool) -> bool:
@@ -92,13 +92,19 @@ def _is_server_payload(value: Any) -> bool:
     return isinstance(value, dict) and ("command" in value or "url" in value)
 
 
-def _expand_env_placeholders(value: Any) -> Any:
+def _expand_placeholders(value: Any, placeholders: Mapping[str, str]) -> Any:
     if isinstance(value, str):
-        return _ENV_VAR_PATTERN.sub(lambda match: os.getenv(match.group(1), ""), value)
+        def replace(match: re.Match[str]) -> str:
+            key = match.group(1)
+            if key not in placeholders:
+                raise ValueError("unresolved_mcp_placeholder")
+            return placeholders[key]
+
+        return _CONFIG_PLACEHOLDER.sub(replace, value)
     if isinstance(value, list):
-        return [_expand_env_placeholders(item) for item in value]
+        return [_expand_placeholders(item, placeholders) for item in value]
     if isinstance(value, dict):
-        return {key: _expand_env_placeholders(item) for key, item in value.items()}
+        return {key: _expand_placeholders(item, placeholders) for key, item in value.items()}
     return value
 
 
@@ -182,8 +188,14 @@ def build_mcp_server_configs(
     raw_config: dict[str, Any] | None = None,
     config_dir: str | Path | None = None,
     default_timeout_seconds: float = 10.0,
+    placeholders: Mapping[str, str] | None = None,
 ) -> list[MCPServerConfig]:
-    """Build runtime server configs from standard MCP JSON objects or directories."""
+    """Build runtime server configs from standard MCP JSON objects or directories.
+
+    ``placeholders`` maps ``${key}`` tokens to values supplied by the owning
+    plugin's validated config (for example ``config.amap.api_key``). An unknown
+    token fails instead of sending a literal secret reference to the server.
+    """
     if raw_config is None:
         merged_server_configs: dict[str, Any] = {}
         if config_dir is not None:
@@ -205,7 +217,7 @@ def build_mcp_server_configs(
         if not name:
             raise ValueError("mcp server name must not be empty")
 
-        payload = _normalize_server_payload(name, _expand_env_placeholders(raw_payload))
+        payload = _normalize_server_payload(name, _expand_placeholders(raw_payload, placeholders or {}))
         enabled = _coerce_bool(payload.pop("enabled", True), default=True)
         if "disabled" in payload:
             enabled = not _coerce_bool(payload.pop("disabled"), default=False)

@@ -14,7 +14,7 @@ from app.core.config import Settings
 def test_llm_config_uses_default_provider_profile_values() -> None:
     settings = Settings(
         llm_api_key="test-key",
-        agent_provider_profiles_file=Path("app/agent/nodes/profiles/provider_profiles.yaml"),
+        agent_provider_profiles_file=Path("app/agent_host/provider_profiles.yaml"),
         agent_provider_profile="default",
     )
 
@@ -33,7 +33,7 @@ def test_llm_config_uses_default_provider_profile_values() -> None:
 def test_llm_config_can_disable_provider_via_profile() -> None:
     settings = Settings(
         llm_api_key="test-key",
-        agent_provider_profiles_file=Path("app/agent/nodes/profiles/provider_profiles.yaml"),
+        agent_provider_profiles_file=Path("app/agent_host/provider_profiles.yaml"),
         agent_provider_profile="local",
     )
 
@@ -49,7 +49,7 @@ def test_llm_config_prefers_explicit_settings_over_profile_defaults() -> None:
         llm_api_key="test-key",
         llm_base_url="https://api.deepseek.com",
         llm_model="deepseek-chat",
-        agent_provider_profiles_file=Path("app/agent/nodes/profiles/provider_profiles.yaml"),
+        agent_provider_profiles_file=Path("app/agent_host/provider_profiles.yaml"),
         agent_provider_profile="default",
     )
 
@@ -60,7 +60,7 @@ def test_llm_config_prefers_explicit_settings_over_profile_defaults() -> None:
 
 
 def test_llm_stream_defaults_off_and_follows_settings() -> None:
-    profiles = Path("app/agent/nodes/profiles/provider_profiles.yaml")
+    profiles = Path("app/agent_host/provider_profiles.yaml")
     assert resolve_llm_config(Settings(llm_api_key="k", agent_provider_profiles_file=profiles)).stream is False
     enabled = Settings(llm_api_key="k", llm_stream=True, agent_provider_profiles_file=profiles)
     assert resolve_llm_config(enabled).stream is True
@@ -119,7 +119,7 @@ def test_resolve_llm_config_ignores_a_same_named_file_in_the_working_directory(
     config = resolve_llm_config(
         Settings(
             llm_api_key="test-key",
-            agent_provider_profiles_file=Path("app/agent/nodes/profiles/provider_profiles.yaml"),
+            agent_provider_profiles_file=Path("app/agent_host/provider_profiles.yaml"),
         )
     )
 
@@ -138,4 +138,4 @@ def test_load_provider_profile_uses_the_given_path_only(tmp_path: Path, monkeypa
     assert load_provider_profile(profiles, "missing")["model"] == "m-default"
     monkeypatch.chdir(tmp_path)
     # No project-root guessing: a relative path that does not exist is just empty.
-    assert load_provider_profile(Path("app/agent/nodes/profiles/provider_profiles.yaml"), "default") == {}
+    assert load_provider_profile(Path("app/agent_host/provider_profiles.yaml"), "default") == {}

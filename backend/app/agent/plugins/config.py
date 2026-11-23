@@ -42,8 +42,11 @@ def _reject_empty_path(value: Any) -> Any:
     return value
 
 
+_WINDOWS_ABS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+
+
 def _resolve_path(value: Path, info: ValidationInfo) -> Path:
-    if value.is_absolute():
+    if value.is_absolute() or _WINDOWS_ABS_PATH.match(str(value)):
         return value
     base_dir = (info.context or {}).get("base_dir")
     if base_dir is None:
@@ -88,6 +91,39 @@ def _mentions_secret(annotation: Any) -> bool:
     if annotation is SecretStr:
         return True
     return any(_mentions_secret(item) for item in get_args(annotation))
+
+
+def config_placeholders(config: BaseModel, *, prefix: str = "config") -> dict[str, str]:
+    """Flatten a validated config into ``config.a.b`` placeholder values.
+
+    Secrets are revealed for interpolation into plugin-owned resource files;
+    callers must not log the result. ``None`` fields are omitted, so a resource
+    that references them fails as unresolved instead of silently becoming
+    ``"None"``.
+    """
+    values: dict[str, str] = {}
+
+    def walk(value: Any, path: str) -> None:
+        if isinstance(value, SecretStr):
+            values[path] = value.get_secret_value()
+        elif isinstance(value, BaseModel):
+            for name in type(value).model_fields:
+                walk(getattr(value, name), f"{path}.{name}")
+        elif isinstance(value, Mapping):
+            for key, item in value.items():
+                walk(item, f"{path}.{key}")
+        elif isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                walk(item, f"{path}.{index}")
+        elif value is None:
+            return
+        elif isinstance(value, bool):
+            values[path] = "true" if value else "false"
+        elif isinstance(value, (str, int, float, Path)):
+            values[path] = str(value)
+
+    walk(config, prefix)
+    return values
 
 
 # -- plugins file --------------------------------------------------------------
@@ -227,4 +263,11 @@ def _validation_codes(exc: ValidationError) -> str:
     return ";".join(parts) or "invalid_config"
 
 
-__all__ = ["PluginConfigError", "RelPath", "read_plugins_file", "resolve_plugin_configs", "secret_values"]
+__all__ = [
+    "PluginConfigError",
+    "RelPath",
+    "config_placeholders",
+    "read_plugins_file",
+    "resolve_plugin_configs",
+    "secret_values",
+]

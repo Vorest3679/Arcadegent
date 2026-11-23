@@ -29,7 +29,8 @@ from app.agent.runtime.lifecycle import LifecycleContext, LifecyclePhase
 from app.agent.runtime.ports import SessionStore
 from app.agent.runtime.session_state import AgentSessionState
 from app.agent.runtime.supervisor import LoopSupervisor, WaitPolicy
-from app.agent.subagents.subagent_builder import SubAgentBuilder, SubAgentProfile
+from app.agent.subagents.roster import AgentDefinition
+from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.tools.execution import (
     CAP_SPAWN_AGENT,
     ToolDispatcher,
@@ -205,7 +206,7 @@ class ToolActions:
         session_id: str,
         session_state: AgentSessionState,
         tool_calls: list[Any],
-        profile: SubAgentProfile,
+        profile: AgentDefinition,
         worker_run_id: str | None = None,
         persist: bool = True,
         step_ctx: LifecycleContext | None = None,

@@ -8,7 +8,7 @@ order, builds the envelope and restores the active agent.
 the two halves so parallel workers overlap while their commits stay ordered.
 
 While workers overlap, ``ActiveWorkerSlots`` keeps one live ``active_subagent``:
-the most recently started worker, or ``main_agent`` once the last one finishes.
+the most recently started worker, or the entry agent once the last one finishes.
 Every worker event still carries its own run id, so the UI can tell them apart.
 """
 
@@ -94,8 +94,9 @@ class ActiveWorkerSlots:
     能够正确地恢复 active_subagent。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, entry_name: str) -> None:
         # 元组会被封装成entry，entry[0]是parent_state，entry[1]是slots列表
+        self._entry_name = entry_name
         self._slots: dict[int, tuple[AgentSessionState, list[tuple[str, str]]]] = {}
 
     def _entry(self, parent: AgentSessionState) -> list[tuple[str, str]]:
@@ -113,14 +114,14 @@ class ActiveWorkerSlots:
         return previous
 
     def next_active(self, parent: AgentSessionState, *, run_id: str) -> str:
-        """切换到下一个活跃的worker，如果没有则返回main_agent"""
+        """切换到下一个活跃的worker，如果没有则返回入口 agent"""
         entry = self._slots.get(id(parent))
         remaining = [
             name
             for item_run_id, name in (entry[1] if entry is not None else [])
             if item_run_id != run_id # 循环过滤掉当前的run_id，剩下的就是其他活跃的worker
         ]
-        return remaining[-1] if remaining else "main_agent"
+        return remaining[-1] if remaining else self._entry_name
 
     def clear(self, parent: AgentSessionState) -> None:
         """Drop every slot for ``parent`` (turn-end safety net)."""
@@ -139,7 +140,7 @@ class ActiveWorkerSlots:
             self._slots[id(parent)] = (entry[0], remaining)
         else:
             self._slots.pop(id(parent), None)
-        return remaining[-1][1] if remaining else "main_agent"
+        return remaining[-1][1] if remaining else self._entry_name
 
 
 @dataclass
@@ -215,7 +216,7 @@ class WorkerRunner:
         self._emit = emit
         self._safe_emit = safe_emit
         self._run_loop = run_loop
-        self._slots = slots or ActiveWorkerSlots()
+        self._slots = slots or ActiveWorkerSlots(entry_name=subagent_builder.entry_name)
 
     def prepare(
         self,
@@ -306,7 +307,7 @@ class WorkerRunner:
 
         The worker's ``active_subagent`` transition is the live UI signal:
         while several workers overlap the parent shows the most recently
-        started one, and ``main_agent`` returns once the last one finishes.
+        started one, and the entry agent returns once the last one finishes.
         Evidence, usage, artifacts and the envelope wait for ``finish``.
         Errors and cancellation propagate to ``start``, which owns recovery.
         """

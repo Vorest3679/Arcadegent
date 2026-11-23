@@ -43,7 +43,7 @@ def _spec(name: str = "echo_tool", **overrides: Any) -> ToolSpec:
 def _registry(tmp_path: Path, local: LocalToolProvider | None = None, **providers: Any) -> ToolRegistry:
     return ToolRegistry(
         providers=providers,
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        permission_checker=ToolPermissionChecker(),
         local_provider=local if local is not None else LocalToolProvider(),
     )
 
@@ -329,7 +329,7 @@ def test_locked_provider_rejects_runtime_writes_and_untrusted_reserved_reloads()
 
 
 def test_container_installs_plugin_providers_and_a_separate_runtime_catalog(tmp_path: Path) -> None:
-    from app.agent.plugins import EmptyConfig
+    from app.agent.plugins import CoreConfig
     from app.core.config import Settings
     from app.core.container import build_container
     from app.domain.arcade.plugin import ArcadeConfig
@@ -337,12 +337,15 @@ def test_container_installs_plugin_providers_and_a_separate_runtime_catalog(tmp_
 
     data_path = tmp_path / "shops.jsonl"
     data_path.write_text(json.dumps({"source": "fixture", "source_id": 1, "name": "Alpha"}) + "\n", encoding="utf-8")
-    (tmp_path / "no-mcp").mkdir()
-    container = build_container(Settings(
-        data_jsonl_path=data_path, arcade_geo_cache_path=tmp_path / "geo.json",
-        mcp_servers_dir=tmp_path / "no-mcp",
-        supabase_url="https://fixture.invalid", supabase_service_role_key="test-key",
-    ), plugin_configs={"core": EmptyConfig(), "arcade": ArcadeConfig()})
+    container = build_container(
+        Settings(
+            data_jsonl_path=data_path,
+            arcade_geo_cache_path=tmp_path / "geo.json",
+            supabase_url="https://fixture.invalid",
+            supabase_service_role_key="test-key",
+        ),
+        plugin_configs={"core": CoreConfig(), "arcade": ArcadeConfig()},
+    )
 
     # Plan 5, stage 2c: each plugin owns a provider named by the plugin;
     # runtime writes go to a separate, empty catalog held by the host.

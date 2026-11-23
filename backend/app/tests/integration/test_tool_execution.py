@@ -86,7 +86,7 @@ class _RecordingHooks:
 def _registry(tmp_path: Path, provider: Any | None = None) -> ToolRegistry:
     return ToolRegistry(
         providers={"execution_test": provider or _Tools()},
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        permission_checker=ToolPermissionChecker(),
         local_provider=LocalToolProvider(),
     )
 
@@ -320,7 +320,7 @@ def test_builtin_provider_reads_a_declared_parallel_mode(tmp_path: Path) -> None
     (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["list_skills.json"]}), encoding="utf-8")
     provider = BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
     registry = ToolRegistry(
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        permission_checker=ToolPermissionChecker(),
         local_provider=provider,
     )
 

@@ -24,11 +24,21 @@ def test_skill_discovery_loading_business_tools_and_execution_isolation(tmp_path
     """Exercise real tool dispatch/context/session boundaries with a deterministic model."""
     import app.core.container as container_module
     from app.agent.llm.provider_adapter import ModelToolCall
-    from app.agent.skills.config import SkillConfig
+    from app.agent.plugins import PluginResources
 
     root = tmp_path / "skills"
     root.mkdir()
-    monkeypatch.setattr(container_module, "load_skill_config", lambda _: SkillConfig(roots=[root]))
+    original_resources = container_module.resolve_plugin_resources
+
+    def resolve_resources(plugins, configs):
+        resources = original_resources(plugins, configs)
+        resources["arcade"] = PluginResources(
+            skills=(root,),
+            mcp_servers=resources["arcade"].mcp_servers,
+        )
+        return resources
+
+    monkeypatch.setattr(container_module, "resolve_plugin_resources", resolve_resources)
     client = _build_client(tmp_path, chat_clock=chat_clock)
     runtime = client.app.state.container.react_runtime
     main_calls = 0
@@ -370,8 +380,9 @@ def test_online_route_unavailable_does_not_estimate() -> None:
 
 def test_history_window_keeps_complete_tool_group() -> None:
     from app.agent.context.context_builder import ContextBuilder
+    from app.agent.context.prompt_loader import DirectoryPromptLoader
     from app.agent.runtime.session_state import AgentTurn
-    builder = ContextBuilder(prompt_root=Path("."), history_turn_limit=4)
+    builder = ContextBuilder(prompt_loader=DirectoryPromptLoader([Path(".")]), history_turn_limit=4)
     turns = [AgentTurn(role="user", content="query"), AgentTurn(role="assistant", content="", payload={"model": {"transcript": {"responses_output": [{"type": "function_call", "call_id": "c"}]}}})]
     turns.extend(AgentTurn(role="tool", content="result", call_id=str(i)) for i in range(5))
     retained = builder._tail_turns(turns, scope="conversation")

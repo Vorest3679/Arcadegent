@@ -111,7 +111,7 @@ publish("assistant.completed" or "session.failed", {"reply": final_text, ...}, o
 | 每轮开始清除上一轮的 `reply`、`last_error` | `reset_turn_scratch`，在 turn 钩子之前执行 |
 | 工具失败写 `last_error`，成功清除 | 记录工具结果时由内核维护；worker 据此判定失败 |
 | 结束本轮 | 工具描述符声明 `concludes_turn` capability，输出 `{"reply": str}` |
-| 派生 worker | 工具声明 `spawn_agent` capability，输出 `{"worker", "task"}`；合法名单来自当前节点的 `AgentNode.spawnable`（`SubAgentBuilder.node(name)`），非法派发由内核返回失败信封 |
+| 派生 worker | 工具声明 `spawn_agent` capability，输出 `{"worker", "task"}`；合法名单来自当前节点的 `AgentNode.spawnable`（`SubAgentBuilder.node(name)`，由插件 `AgentRoster` 中 agent 的 `workers` 显式声明），非法派发由内核返回失败信封 |
 
 领域继承 `BaseTurnDomain`，只覆盖需要的部分。分两类（对应 Vue 中“生命周期钩子改状态”与“render / computed 产出数据”）：
 
@@ -233,7 +233,7 @@ ctx.response  before_unmount 时为已投影的响应（只读通知）
 
 这是设计讨论里最容易混淆的地方，单独记下：
 
-- **`spawnable_workers` 不是 config，是拓扑。** 它表示“当前 agent 节点能派发哪些 worker”，应放到 `AgentNode.spawnable`；全局“存在哪些 worker”仍由 `SubAgentBuilder` 维护。2.7 起 `_run_worker` 只按当前节点的 `AgentNode.spawnable` 校验。若本轮要临时收紧，放 `StepPolicy`，不要放 `TurnConfig`。
+- **`spawnable_workers` 不是 config，是拓扑。** 它表示“当前 agent 节点能派发哪些 worker”，应放到 `AgentNode.spawnable`；全局“存在哪些 worker”由已安装插件的 `AgentRoster` 合并后交给 `SubAgentBuilder` 维护。2.7 起 `_run_worker` 只按当前节点的 `AgentNode.spawnable` 校验。若本轮要临时收紧，放 `StepPolicy`，不要放 `TurnConfig`。
 - **`payload_mapper` 不是 config，是领域依赖。** `ArcadePayloadMapper` 带 geo resolver、缓存和 HTTP 配置，是长生命周期服务，只在 `ArcadeTurnDomain.build_response` 与 `ChatSessionDetailService` 的 DTO 映射中使用；应留在 `ArcadeTurnDomain` 构造注入，不能塞进通用 `TurnConfig`。否则内核被迫知道“payload mapper”这个机厅概念，每轮 config 还会携带服务对象。
 
 ### domain 如何进入内核
@@ -264,7 +264,7 @@ domain 进入内核时会被翻译成 core 能理解的概念，但语义由适�
 - `create/mount/update` 失败则中止并进入错误卸载；`before_unmount` 失败仍执行 `unmounted`；`unmounted` 失败只记录，不覆盖主错误。
 - 改状态的逻辑只在钩子里（`on_turn_mount`、`on_step_update`、`on_worker_mount`），同一时机没有第二个入口；返回数据的策略（hints、`tool_result_signal`、worker envelope、`build_response`）仍是显式函数，由内核直接调用。`BaseLifecycleHooks` 的默认钩子都是空操作，覆盖时不需要调用 `super()`。
 - 钩子可写之后，多个领域并存时的执行顺序会影响结果；接入第二个领域前须先实现“注册顺序挂载、逆序卸载”。
-- worker 收尾：证据回写与 usage 合并恰好执行一次——正常路径在构建信封前执行；异常或取消时补做，并按 `ActiveWorkerSlots` 恢复父会话 `active_subagent`（还有 worker 在跑则取最近启动者，全部结束才回到 `main_agent`），run 的终态（failed / cancelled）仍交给 run/session 层记录。
+- worker 收尾：证据回写与 usage 合并恰好执行一次——正常路径在构建信封前执行；异常或取消时补做，并按 `ActiveWorkerSlots` 恢复父会话 `active_subagent`（还有 worker 在跑则取最近启动者，全部结束才回到入口 agent），run 的终态（failed / cancelled）仍交给 run/session 层记录。
 
 2.7–2.8 已把这些边界显式化：`runtime/lifecycle.py` 提供 dispatcher、`StateView`、保留键检查和 `BaseLifecycleHooks`；`AgentKernel` 在 run/turn/step/worker 边界发事件；`AgentNode.spawnable` 是唯一的 worker 合法名单；`StepPolicy.runtime_hints` 已合并进 provider hints。剩余：model/reasoning_effort 映射到 provider 协议参数、session scope 事件、多 domain 钩子顺序、公共 `TurnContext/TurnState/ToolResult` 契约（独立成包的后续事项）。并行 worker 的父级顺序已在阶段 7 由 `ActiveWorkerSlots` 与 model-order commit 解决。
 
@@ -317,7 +317,7 @@ tool.started（submit，模型顺序）
 | `commit` | 产物提升（失败标记 `partial`，记录 `source_run_id`）、usage 合并、证据回写、构造信封、`worker.completed/failed`、释放 active slot | 只在父循环协程执行 |
 | `spawn` | `start + finish` 的一次性入口 | 保留给非并发的直接调用 |
 
-`ActiveWorkerSlots` 以父状态为键保存正在运行的 worker：新 worker 启动时成为 `active_subagent`，某个 worker 结束时取仍在运行的最近启动者，最后一个结束后恢复 `main_agent`。`add` 在各 worker 自己的任务中执行，因此这些方法保持同步且没有 await；`AgentKernel` 在 run 结束时清除该状态的 slots，避免泄漏的 slot 长期强引用 session state。`worker.started/completed/failed` 都带 `run_id` 与同值的 `worker_run_id`，前端据此区分并行 worker；`worker.completed/failed` 的 `active_subagent` 是提交后的下一个 active。
+`ActiveWorkerSlots` 以父状态为键保存正在运行的 worker：新 worker 启动时成为 `active_subagent`，某个 worker 结束时取仍在运行的最近启动者，最后一个结束后恢复入口 agent。`add` 在各 worker 自己的任务中执行，因此这些方法保持同步且没有 await；`AgentKernel` 在 run 结束时清除该状态的 slots，避免泄漏的 slot 长期强引用 session state。`worker.started/completed/failed` 都带 `run_id` 与同值的 `worker_run_id`，前端据此区分并行 worker；`worker.completed/failed` 的 `active_subagent` 是提交后的下一个 active。
 
 `SkillExecution.load` 用线程锁覆盖“查重 → 读取 → 累加 `loaded_bytes`”，所以并行 `read_skill` 不会重复加载、也不会绕过 `max_loaded_bytes`；`SkillRegistry` 自身的刷新/读取仍由 `RLock` 串行化。`SkillExecution` 的 `__deepcopy__` 复制资源快照但不复制锁，兼容会话存储与测试里的 deepcopy。
 

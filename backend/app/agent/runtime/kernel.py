@@ -132,9 +132,10 @@ class AgentKernel:
         self._domain: TurnDomain = domain or BaseTurnDomain()
         self._lifecycle = LifecycleDispatcher(self._domain)
         self._artifacts = artifacts or ArtifactSink()
+        self._entry_name = subagent_builder.entry_name
         # Shared by every worker dispatch so overlapping workers agree on the
         # parent's live ``active_subagent``.
-        self._worker_slots = ActiveWorkerSlots()
+        self._worker_slots = ActiveWorkerSlots(entry_name=self._entry_name)
 
     def _new_loop(self, turn: TurnInput) -> AgentLoop:
         # Built per run from the current attributes, so replaced collaborators
@@ -310,7 +311,7 @@ class AgentKernel:
     ) -> TurnResult:
         state.turn_index += 1
         state.skill_execution = SkillExecution()
-        state.active_subagent = "main_agent"
+        state.active_subagent = self._entry_name
         state.working_memory = reset_turn_scratch(state.working_memory)
         # Generic artifact lifecycle is a kernel invariant: a domain may add its
         # legacy keys in a turn-mount hook, but never has to remember this step.
@@ -384,7 +385,7 @@ class AgentKernel:
             AgentTurn(
                 role="user",
                 content=turn.message,
-                agent="main_agent",
+                agent=self._entry_name,
                 scope="conversation",
                 payload=request_payload,
             ),
@@ -431,13 +432,13 @@ class AgentKernel:
             # The reply was not published as model output (summary tool, fallback):
             # show it as a new output so earlier outputs stay sealed.
             output_id = _new_output_id()
-            publish_assistant_text(final_text, output_id=output_id, stream_mode="synthetic")
+            publish_assistant_text(final_text, output_id=output_id, stream_mode="synthetic", agent_name=self._entry_name)
         append_turn(
             state,
             AgentTurn(
                 role="assistant",
                 content=final_text,
-                agent="main_agent",
+                agent=self._entry_name,
                 scope="conversation",
                 payload={
                     "final": True,
@@ -458,7 +459,7 @@ class AgentKernel:
         ctx.before_unmount_done = True
         ctx.phase = LifecyclePhase.BEFORE_UNMOUNT
         await self._emit(ctx)
-        state.active_subagent = "main_agent"
+        state.active_subagent = self._entry_name
         state.working_memory["reply"] = final_text
         state.updated_at = _utc_now_iso()
         if model_error is not None:
@@ -508,7 +509,7 @@ class AgentKernel:
         ctx: LifecycleContext,
         budget: RunBudget,
     ) -> LoopOutcome:
-        node = self._subagent_builder.node("main_agent")
+        node = self._subagent_builder.node(self._entry_name)
         spec = LoopSpec(
             session_id=session_id,
             state=state,

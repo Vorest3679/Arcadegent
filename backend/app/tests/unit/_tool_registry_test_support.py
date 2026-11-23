@@ -56,7 +56,7 @@ def _build_arcade_registry(
     return ToolRegistry(
         providers={"mcp": gateway, "core": BuiltinToolProvider(), "arcade": arcade},
         local_provider=LocalToolProvider(),
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
+        permission_checker=ToolPermissionChecker(),
         strict_schema=True,
     )
 

@@ -32,7 +32,7 @@ from app.agent.runtime.lifecycle import (
 from app.agent.runtime.budget import RunBudget
 from app.agent.runtime.session_state import AgentSessionState
 from app.agent.subagents.agent_node import AgentNode
-from app.agent.subagents.subagent_builder import SubAgentProfile
+from app.agent.subagents.roster import AgentDefinition
 from app.agent.tools.execution import CAP_CONCLUDES_TURN
 from app.agent.tools.registry import ToolExecutionResult, ToolRegistry
 
@@ -93,7 +93,7 @@ class LoopSpec:
     fail_on_tool_error: bool = False
 
     @property
-    def profile(self) -> SubAgentProfile:
+    def profile(self) -> AgentDefinition:
         return self.node.profile
 
     @property
@@ -296,7 +296,9 @@ class AgentLoop:
         if spec.publish_text:
 
             def on_text(text: str, stream_mode: str) -> None:
-                publish_assistant_text(text, output_id=output_id, stream_mode=stream_mode)
+                publish_assistant_text(
+                    text, output_id=output_id, stream_mode=stream_mode, agent_name=spec.profile.name
+                )
 
         return await think(self._provider_adapter, request, on_text=on_text)
 

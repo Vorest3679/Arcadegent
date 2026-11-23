@@ -1,0 +1,4 @@
+{
+  "transport": "streamable-http",
+  "url": "https://mcp.amap.com/mcp?key=${config.amap.api_key}"
+}

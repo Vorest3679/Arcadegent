@@ -19,7 +19,7 @@ from app.agent.runtime.session_state import AgentSessionState
 from app.agent.runtime.supervisor import LoopSupervisor, WaitPolicy
 from app.agent.skills.execution import SkillExecution
 from app.agent.subagents.agent_node import AgentNode
-from app.agent.subagents.subagent_builder import SubAgentProfile
+from app.agent.subagents.roster import AgentDefinition
 from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
 from app.agent.tools.execution import CAP_SPAWN_AGENT, ToolDispatcher, ToolTask
 from app.agent.tools.local import LocalToolProvider
@@ -97,10 +97,12 @@ class _Tools:
 
 
 class _FakeSubAgents:
-    def get(self, name: str) -> SubAgentProfile:
-        return SubAgentProfile(
+    entry_name = "main_agent"
+
+    def get(self, name: str) -> AgentDefinition:
+        return AgentDefinition(
             name=name,
-            prompt_file="",
+            prompt="fixture.md",
             allowed_tools=list(_TOOL_NAMES),
         )  # type: ignore[arg-type]
 
@@ -172,7 +174,7 @@ def _kernel(
         subagent_builder=_FakeSubAgents(),  # type: ignore[arg-type]
         tool_registry=ToolRegistry(
             providers={"supervisor_test": tools},
-            permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+            permission_checker=ToolPermissionChecker(),
             local_provider=LocalToolProvider(),
         ),
         provider_adapter=provider,  # type: ignore[arg-type]
@@ -306,7 +308,7 @@ def test_first_or_interval_returns_done_and_pending_and_cancels_cleanly(tmp_path
         tools = _Tools()
         registry = ToolRegistry(
             providers={"supervisor_test": tools},
-            permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+            permission_checker=ToolPermissionChecker(),
             local_provider=LocalToolProvider(),
         )
         dispatcher = ToolDispatcher(tool_registry=registry, hooks=_PassthroughHooks())
@@ -368,7 +370,7 @@ def test_second_cancellation_during_cancel_all_still_cancels_later_siblings(tmp_
         tools = _Tools()
         registry = ToolRegistry(
             providers={"supervisor_test": tools},
-            permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+            permission_checker=ToolPermissionChecker(),
             local_provider=LocalToolProvider(),
         )
         hooks = _StuckCommitHooks()

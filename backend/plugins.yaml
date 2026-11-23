@@ -5,11 +5,25 @@
 # Values are validated by each plugin's config model. Secrets must be a whole
 # ``${VAR}`` or ``${VAR:-}`` placeholder (no literal default); a whole
 # ``${VAR:-}`` whose variable is unset or empty falls back to the model default.
+#
+# Agent and MCP overrides use the same environment variables as before. Paths
+# are relative to this file's directory (``backend/``); leave them unset to use
+# the arcade plugin's bundled resources.
 plugins:
   core:
+    config:
+      skills:
+        disabled_skills: []
+        agent_skills: {}
+        max_file_bytes: 65536
+        max_loaded_bytes: 262144
   arcade:
     config:
       amap:
         api_key: ${AMAP_API_KEY:-}
         base_url: ${AMAP_BASE_URL:-}
         timeout_seconds: ${AMAP_TIMEOUT_SECONDS:-}
+      agents:
+        yaml_overlay: ${AGENT_SUBAGENT_YAML_OVERLAY_ENABLED:-}
+        definitions_dir: ${AGENT_NODES_DEFINITIONS_DIR:-}
+      mcp_servers_dir: ${MCP_SERVERS_DIR:-}

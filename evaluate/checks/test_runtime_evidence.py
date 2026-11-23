@@ -9,12 +9,19 @@ from app.agent.context.turn_recorder import merge_usage_totals, record_model_cal
 from app.agent.runtime.events import bind_run_events, reset_run_events
 from app.agent.runtime.actions import ToolActions
 from app.agent.runtime.session_state import AgentSessionState, state_from_dict, state_to_dict
+from app.agent.subagents.roster import AgentDefinition
 from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.domain.arcade.domain import ArcadeTurnDomain
 from app.session.injector import CollectingPublisher
+
+
+def _subagents() -> SubAgentBuilder:
+    return SubAgentBuilder([
+        AgentDefinition(name="main_agent", prompt="main_agent.md", allowed_tools=(), role="entry"),
+    ])
 
 
 def test_model_and_worker_usage_count_each_request_once_and_keep_missing_evidence():
@@ -42,8 +49,7 @@ def test_model_and_worker_usage_count_each_request_once_and_keep_missing_evidenc
 
 @pytest.mark.parametrize("failure", ["unknown_tool", "prepare_failed", "invalid_json"])
 def test_preparation_failure_closes_event_pair_and_preserves_raw_arguments(failure, tmp_path):
-    registry = ToolRegistry(permission_checker=ToolPermissionChecker(
-        policy_file=tmp_path / "no-policy.yaml"), local_provider=LocalToolProvider())
+    registry = ToolRegistry(permission_checker=ToolPermissionChecker(), local_provider=LocalToolProvider())
     if failure == "prepare_failed":
         async def broken(**kwargs):
             raise ValueError("fixture preparation failure")
@@ -59,7 +65,7 @@ def test_preparation_failure_closes_event_pair_and_preserves_raw_arguments(failu
         tool_registry=registry,
         domain=ArcadeTurnDomain(),
         session_store=None,
-        subagent_builder=SubAgentBuilder(),
+        subagent_builder=_subagents(),
         emit=no_emit,
         spawn_worker=no_spawn,
     )
@@ -72,7 +78,7 @@ def test_preparation_failure_closes_event_pair_and_preserves_raw_arguments(failu
     try:
         asyncio.run(actions.execute_tool_calls(
             session_id=state.session_id, session_state=state,
-            tool_calls=[call], profile=SubAgentBuilder().get("main_agent"), persist=False,
+            tool_calls=[call], profile=_subagents().get("main_agent"), persist=False,
         ))
     finally:
         reset_run_events(token)

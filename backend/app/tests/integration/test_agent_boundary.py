@@ -40,10 +40,6 @@ ALLOWED_BUSINESS_TOKENS: dict[str, tuple[str, ...]] = {
     "runtime/kernel.py": ("map_artifacts",),
     "runtime/react_runtime.py": ("arcade",),
     "runtime/session_state.py": ("navigation_worker", "search_worker"),
-    "subagents/subagent_builder.py": (
-        "db_query_tool", "geo_resolve_tool", "navigation_worker", "result_selection_tool",
-        "route_plan_tool", "search_worker", "summary_tool",
-    ),
     "tools/mcp/discovery.py": ("导航", "路线"),
     "tools/mcp/dispatcher.py": ("amap", "gcj02", "geopoint", "routesummarydto", "导航", "路线"),
     "tools/mcp/gateway.py": ("amap", "gcj02", "geopoint", "routesummarydto", "路线"),
