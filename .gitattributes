@@ -1,0 +1,9 @@
+# Golden snapshots are versioned test fixtures, not build artifacts.
+# linguist-generated only affects GitHub's diff folding and language stats;
+# the files stay tracked and are still required by CI.
+backend/app/tests/integration/golden/** linguist-generated=true
+
+# Tracked test code under directories that .gitignore otherwise excludes.
+# Keep these diffs visible and only exclude them from GitHub language stats.
+backend/app/tests/unit/** linguist-detectable=false
+apps/web/tests/e2e/** linguist-detectable=false
