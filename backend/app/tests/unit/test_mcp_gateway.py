@@ -134,19 +134,18 @@ def test_build_mcp_server_configs_reads_json_directory(tmp_path: Path) -> None:
     assert configs_by_name["assistant"].source["mcpServers"]["assistant"]["command"] == "python"
 
 
-def test_build_mcp_server_configs_expands_env_placeholders(monkeypatch) -> None:
-    monkeypatch.setenv("AMAP_API_KEY", "amap-key")
-
+def test_build_mcp_server_configs_expands_plugin_config_placeholders() -> None:
     configs = build_mcp_server_configs(
         raw_config={
             "mcpServers": {
                 "amap": {
                     "transport": "streamable-http",
-                    "url": "https://mcp.amap.com/mcp?key=${AMAP_API_KEY}",
+                    "url": "https://mcp.amap.com/mcp?key=${config.amap.api_key}",
                 }
             }
         },
         default_timeout_seconds=8,
+        placeholders={"config.amap.api_key": "amap-key"},
     )
 
     assert len(configs) == 1
@@ -154,6 +153,15 @@ def test_build_mcp_server_configs_expands_env_placeholders(monkeypatch) -> None:
     assert config.name == "amap"
     assert config.url == "https://mcp.amap.com/mcp?key=amap-key"
     assert config.source["mcpServers"]["amap"]["url"] == "https://mcp.amap.com/mcp?key=amap-key"
+
+
+def test_build_mcp_server_configs_rejects_unresolved_placeholders() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="unresolved_mcp_placeholder"):
+        build_mcp_server_configs(
+            raw_config={"mcpServers": {"amap": {"url": "https://example.invalid?key=${config.amap.api_key}"}}},
+        )
 
 
 def test_mcp_gateway_discovers_and_executes_tools_from_json_directory(tmp_path: Path) -> None:

@@ -14,13 +14,12 @@ from app.agent.skills.execution import SkillExecution
 from app.agent.tools.base import ProviderExecutionResult, ToolArgumentPreparationError, ToolDescriptor
 from app.agent.tools.builtin import BuiltinToolProvider
 from app.agent.tools.execution import ToolDispatcher, ToolTask
+from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 
 
 class _Tools:
-    provider_name = "execution_test"
-
     def __init__(self) -> None:
         self.started = asyncio.Event()
         self.cancelled = asyncio.Event()
@@ -30,7 +29,6 @@ class _Tools:
             name: ToolDescriptor(
                 name=name,
                 description=name,
-                provider=self.provider_name,
                 input_schema={"type": "object"},
                 execution_mode="parallel" if name == "parallel_echo" else "exclusive",
             )
@@ -87,8 +85,9 @@ class _RecordingHooks:
 
 def _registry(tmp_path: Path, provider: Any | None = None) -> ToolRegistry:
     return ToolRegistry(
-        providers=[provider or _Tools()],
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        providers={"execution_test": provider or _Tools()},
+        permission_checker=ToolPermissionChecker(),
+        local_provider=LocalToolProvider(),
     )
 
 
@@ -294,13 +293,19 @@ def test_builtin_tools_declare_parallel_only_for_the_safe_reads() -> None:
 
     # Stage 7 prerequisites are in place: skill snapshots are locked and worker
     # slots keep the most recent running worker, so these three can overlap.
-    assert {name for name, tool in tools.items() if tool.execution_mode == "parallel"} == {
-        "invoke_worker",
-        "list_skills",
-        "read_skill",
-    }
-    assert tools["db_query_tool"].execution_mode == "exclusive"
-    assert tools["summary_tool"].execution_mode == "exclusive"
+    # The agent manifest now holds only the generic tools (plan 5, stage 2b).
+    assert set(tools) == {"invoke_worker", "list_skills", "read_skill"}
+    assert {name for name, tool in tools.items() if tool.execution_mode == "parallel"} == set(tools)
+
+
+def test_arcade_tools_stay_exclusive() -> None:
+    from app.domain.arcade.tools import arcade_tool_specs
+
+    modes = {spec.name: spec.execution_mode for spec in arcade_tool_specs()}
+    assert modes == dict.fromkeys(
+        ["db_query_tool", "geo_resolve_tool", "route_plan_tool", "summary_tool", "result_selection_tool"],
+        "exclusive",
+    )
 
 
 def test_builtin_provider_reads_a_declared_parallel_mode(tmp_path: Path) -> None:
@@ -315,8 +320,8 @@ def test_builtin_provider_reads_a_declared_parallel_mode(tmp_path: Path) -> None
     (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["list_skills.json"]}), encoding="utf-8")
     provider = BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
     registry = ToolRegistry(
-        providers=[provider],
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        permission_checker=ToolPermissionChecker(),
+        local_provider=provider,
     )
 
     assert asyncio.run(provider.get_tools())["list_skills"].execution_mode == "parallel"
@@ -324,7 +329,7 @@ def test_builtin_provider_reads_a_declared_parallel_mode(tmp_path: Path) -> None
 
 
 def test_tool_descriptor_defaults_to_exclusive() -> None:
-    descriptor = ToolDescriptor(name="x", description="", provider="p", input_schema={"type": "object"})
+    descriptor = ToolDescriptor(name="x", description="", input_schema={"type": "object"})
     assert descriptor.execution_mode == "exclusive"
 
 
@@ -339,5 +344,34 @@ def test_invalid_builtin_execution_mode_is_rejected(tmp_path: Path) -> None:
     (tmp_path / "list_skills.json").write_text(json.dumps(tool), encoding="utf-8")
     (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["list_skills.json"]}), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="invalid_builtin_tool_execution_mode"):
+    # A bad mode is rejected when the manifest is parsed into a spec.
+    with pytest.raises(ValueError, match="invalid_tool_execution_mode:list_skills"):
+        BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")
+
+
+def test_builtin_manifest_metadata_is_plain_data_and_services_come_from_the_host(tmp_path: Path) -> None:
+    tool = {
+        "name": "list_skills",
+        "description": "list skills",
+        "executor": "app.agent.tools.builtin.executors.skills:list_skills",
+        "input_schema": {"type": "object"},
+        "metadata": {"guide": {"path": "docs/guide.md"}, "owner": "tests"},
+    }
+    (tmp_path / "list_skills.json").write_text(json.dumps(tool), encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(json.dumps({"tools": ["list_skills.json"]}), encoding="utf-8")
+
+    # No path/env/ref resolution: metadata is copied as given (plan 5, D7).
+    provider = BuiltinToolProvider(manifest_path=tmp_path / "manifest.json", services={"skill_registry": object()})
+    assert asyncio.run(provider.get_tools())["list_skills"].metadata == tool["metadata"]
+    assert provider.health()["services"] == ["skill_registry"]
+
+
+def test_builtin_manifest_rejects_a_services_section(tmp_path: Path) -> None:
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"services": {"x": {"factory": "builtins:dict"}}, "tools": []}), encoding="utf-8"
+    )
+
+    # Services are built by the host and passed in code; a manifest that still
+    # declares factories fails loudly instead of being silently ignored.
+    with pytest.raises(ValueError, match="unsupported_builtin_tool_manifest_keys:services"):
         BuiltinToolProvider(manifest_path=tmp_path / "manifest.json")

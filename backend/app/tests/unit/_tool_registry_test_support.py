@@ -9,9 +9,11 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 from app.agent.tools.builtin import BuiltinToolProvider
+from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.mcp_gateway import MCPServerConfig, MCPToolGateway
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
+from app.domain.arcade.tools import arcade_tool_services, arcade_tool_specs
 from app.infra.db.local import LocalArcadeStore
 
 
@@ -39,6 +41,26 @@ def _write_rows(path: Path) -> None:
             handle.write(json.dumps(row, ensure_ascii=False))
             handle.write("\n")
 
+def _build_arcade_registry(
+    tmp_path: Path,
+    store: LocalArcadeStore,
+    *,
+    mcp_tool_gateway: MCPToolGateway | None = None,
+) -> ToolRegistry:
+    """Registry wired like the container: plugin providers plus a runtime catalog."""
+    gateway = mcp_tool_gateway or MCPToolGateway()
+    arcade = LocalToolProvider(
+        specs=arcade_tool_specs(),
+        services=arcade_tool_services(store=store, amap_config=None, mcp_tool_gateway=gateway),
+    )
+    return ToolRegistry(
+        providers={"mcp": gateway, "core": BuiltinToolProvider(), "arcade": arcade},
+        local_provider=LocalToolProvider(),
+        permission_checker=ToolPermissionChecker(),
+        strict_schema=True,
+    )
+
+
 def _build_registry(
     tmp_path: Path,
     *,
@@ -46,20 +68,10 @@ def _build_registry(
 ) -> ToolRegistry:
     data_path = tmp_path / "shops.jsonl"
     _write_rows(data_path)
-    store = LocalArcadeStore.from_jsonl(data_path)
-    gateway = mcp_tool_gateway or MCPToolGateway()
-    return ToolRegistry(
-        providers=[
-            BuiltinToolProvider(
-                runtime_services={
-                    "store": store,
-                    "mcp_tool_gateway": gateway,
-                }
-            ),
-            gateway,
-        ],
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "missing.yaml"),
-        strict_schema=True,
+    return _build_arcade_registry(
+        tmp_path,
+        LocalArcadeStore.from_jsonl(data_path),
+        mcp_tool_gateway=mcp_tool_gateway,
     )
 
 def _build_mcp_gateway() -> MCPToolGateway:

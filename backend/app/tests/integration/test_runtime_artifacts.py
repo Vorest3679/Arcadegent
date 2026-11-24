@@ -275,4 +275,6 @@ def test_container_injects_one_artifact_sink(tmp_path) -> None:
     client = _build_client_with_rows(tmp_path, _rows())
     container = client.app.state.container
 
-    assert container.react_runtime._artifacts is container.react_runtime._domain.artifact_sink
+    arcade_domain = dict(container.plugin_set.domain.plugin_domains())["arcade"]
+    assert container.react_runtime._artifacts is arcade_domain.artifact_sink
+    assert container.chat_session_detail._display_source._artifact_sink is arcade_domain.artifact_sink

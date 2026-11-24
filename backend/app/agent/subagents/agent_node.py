@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from app.agent.subagents.subagent_builder import SubAgentProfile
+    from app.agent.subagents.roster import AgentDefinition
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class AgentNode:
     per-turn tightening belongs to ``StepPolicy``, not this object.
     """
 
-    profile: "SubAgentProfile"
+    profile: "AgentDefinition"
     scope: Literal["conversation", "worker"]
     publish_text: bool
     spawnable: tuple[str, ...] = ()

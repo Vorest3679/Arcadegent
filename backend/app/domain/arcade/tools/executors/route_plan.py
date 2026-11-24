@@ -1,0 +1,203 @@
+"""Executor for the route planning tool (``route_plan_tool``)."""
+
+from __future__ import annotations
+
+import json
+import math
+import re
+from typing import Any
+
+from app.agent.artifacts.model import Artifact
+from app.agent.tools.base import ToolOutcome
+from app.agent.tools.spec import ToolContext
+from app.protocol.messages import Location
+from app.services.coordinate_transform import wgs84_to_gcj02
+
+
+def _memory_artifact(memory: dict[str, Any], key: str) -> Any:
+    artifacts = memory.get("artifacts")
+    if isinstance(artifacts, dict) and key in artifacts:
+        return artifacts.get(key)
+    return memory.get(key)
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _point(value: Any) -> dict[str, float] | None:
+    if isinstance(value, str) and value.lstrip().startswith("{"):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if isinstance(value, dict):
+        lng = _number(value.get("lng", value.get("longitude")))
+        lat = _number(value.get("lat", value.get("latitude")))
+    elif isinstance(value, str):
+        match = re.fullmatch(
+            r"\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*[,，]\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*",
+            value,
+        )
+        if match is None:
+            return None
+        lng, lat = float(match.group(1)), float(match.group(2))
+    else:
+        return None
+    if lng is None or lat is None or not (-180 <= lng <= 180 and -90 <= lat <= 90):
+        return None
+    return {"lng": lng, "lat": lat}
+
+
+def _shop_point(shop: dict[str, Any]) -> dict[str, float] | None:
+    geo = shop.get("geo")
+    if isinstance(geo, dict):
+        gcj02 = geo.get("gcj02")
+        point = _point(gcj02)
+        if point is not None:
+            return point
+    return _point({"lng": shop.get("longitude_gcj02"), "lat": shop.get("latitude_gcj02")})
+
+
+def _distance_meters(a: dict[str, float], b: dict[str, float]) -> float:
+    radius_m = 6371000.0
+    lat1 = math.radians(a["lat"])
+    lat2 = math.radians(b["lat"])
+    delta_lat = lat2 - lat1
+    delta_lng = math.radians(b["lng"] - a["lng"])
+    value = math.sin(delta_lat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lng / 2) ** 2
+    return radius_m * 2 * math.atan2(math.sqrt(value), math.sqrt(max(1e-12, 1 - value)))
+
+
+def _client_origin_gcj02(runtime_context: dict[str, Any], point: dict[str, float]) -> dict[str, float] | None:
+    """Convert a route origin only when it is the browser's WGS84 location."""
+    client_location = _memory_artifact(runtime_context, "client_location")
+    browser_point = _point(client_location)
+    if browser_point is None:
+        return None
+
+    accuracy_m = _number(client_location.get("accuracy_m")) if isinstance(client_location, dict) else None
+    tolerance_m = max(150.0, accuracy_m or 0.0)
+    if _distance_meters(point, browser_point) > tolerance_m:
+        return None
+
+    lng, lat = wgs84_to_gcj02(browser_point["lng"], browser_point["lat"])
+    return {"lng": lng, "lat": lat}
+
+
+def _candidate_shops(memory: dict[str, Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for key in ("search_candidates", "selected_shops", "shops", "shop"):
+        value = _memory_artifact(memory, key)
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            marker = id(item)
+            if marker not in seen:
+                seen.add(marker)
+                result.append(item)
+    return result
+
+
+def _normalized_name(value: str) -> str:
+    return re.sub(r"[\s（）()·•\-—_]", "", value).casefold()
+
+
+def _named_shop_point(value: Any, memory: dict[str, Any]) -> dict[str, float] | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    target = _normalized_name(value)
+    matches: list[dict[str, float]] = []
+    for shop in _candidate_shops(memory):
+        name = shop.get("name")
+        if not isinstance(name, str):
+            continue
+        normalized = _normalized_name(name)
+        if normalized not in target and target not in normalized:
+            continue
+        point = _shop_point(shop)
+        if point is not None and point not in matches:
+            matches.append(point)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _reuse_previous_endpoints(memory: dict[str, Any]) -> bool:
+    request = memory.get("last_request")
+    message = str(request.get("message") or "") if isinstance(request, dict) else ""
+    return bool(re.search(r"起点终点.*不变|两端.*不变|原(?:来|先).*路线|same (?:origin|start|end|destination)", message, re.IGNORECASE))
+
+
+def _infer_mode(memory: dict[str, Any]) -> str | None:
+    request = memory.get("last_request")
+    message = str(request.get("message") or "").lower() if isinstance(request, dict) else ""
+    if re.search(r"开车|驾车|自驾|driv", message):
+        return "driving"
+    if re.search(r"步行|走路|walk", message):
+        return "walking"
+    return None
+
+
+def prepare_arguments(raw_arguments: dict[str, Any], runtime_context: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Bind model-friendly endpoint names/strings to strict route coordinates."""
+    args = dict(raw_arguments)
+    hydrated: list[str] = []
+    previous = runtime_context.get("last_route_endpoints")
+    can_reuse = _reuse_previous_endpoints(runtime_context) and isinstance(previous, dict)
+
+    for key in ("origin", "destination"):
+        raw = args.get(key)
+        resolved = _point(raw) or _named_shop_point(raw, runtime_context)
+        if resolved is None and can_reuse:
+            resolved = _point(previous.get(key))
+        if key == "origin" and resolved is not None:
+            resolved = _client_origin_gcj02(runtime_context, resolved) or resolved
+        if resolved is not None and resolved != raw:
+            args[key] = resolved
+            hydrated.append(key)
+
+    if args.get("mode") not in {"walking", "driving"}:
+        mode = _infer_mode(runtime_context)
+        if mode is not None:
+            args["mode"] = mode
+            hydrated.append("mode")
+    if args.get("provider") not in {"amap", "google", "none"}:
+        provider = runtime_context.get("provider")
+        if provider in {"amap", "google", "none"}:
+            args["provider"] = provider
+            hydrated.append("provider")
+    return args, hydrated
+
+
+async def execute(context: ToolContext, args: dict[str, Any]) -> ToolOutcome:
+    """Prefer MCP-based AMap routing when available, otherwise call the online REST service."""
+    tool = context.require("route_plan_tool")
+    origin = Location.model_validate(args["origin"])
+    destination = Location.model_validate(args["destination"])
+
+    route = None
+    mcp_tool_gateway = context.get("mcp_tool_gateway")
+    if args["provider"] == "amap" and mcp_tool_gateway is not None:
+        route = await mcp_tool_gateway.plan_amap_route(
+            mode=args["mode"],
+            origin=origin,
+            destination=destination,
+        )
+    if route is None:
+        route = await tool.plan_route(
+            provider=args["provider"],
+            mode=args["mode"],
+            origin=origin,
+            destination=destination,
+        )
+    payload = route.model_dump(mode="json")
+    return ToolOutcome(
+        output={"route": payload},
+        artifacts=(Artifact("route", payload, display=True, scope="turn"),),
+    )

@@ -122,6 +122,20 @@ def display_artifacts(
     return map_artifacts_from_snapshot(snapshot, state.working_memory)
 
 
+class ArcadeSessionDisplay:
+    """``display_artifacts`` bound to one sink, for the session-detail service.
+
+    The detail service needs only the display projection, so it gets this
+    instead of reaching into the installed turn domain.
+    """
+
+    def __init__(self, *, artifact_sink: ArtifactSink) -> None:
+        self._artifact_sink = artifact_sink
+
+    def session_display(self, state: AgentSessionState) -> ArcadeDisplay:
+        return display_artifacts(state, artifact_sink=self._artifact_sink)
+
+
 def turn_display(
     state: AgentSessionState,
     *,

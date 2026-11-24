@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agent.tools.builtin.provider import BuiltinToolContext
+from app.agent.tools.spec import ToolContext
 
 
-def execute(context: BuiltinToolContext, args: dict[str, Any]) -> dict[str, str]:
+def execute(context: ToolContext, args: dict[str, Any]) -> dict[str, str]:
     """Return a normalized worker dispatch payload for runtime handling."""
     _ = context
     return {

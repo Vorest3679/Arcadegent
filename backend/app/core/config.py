@@ -10,6 +10,11 @@ from typing import Literal
 
 
 _WINDOWS_ABS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
+# parents[3] is the repository root. Agent resource defaults are anchored here so
+# they do not depend on the working directory (tests run from the repository
+# root, the container from ``backend/``).
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_AGENT_HOST_DIR = _PROJECT_ROOT / "backend" / "app" / "agent_host"
 
 
 def _is_absolute_path_like(path_like: str) -> bool:
@@ -97,13 +102,10 @@ class Settings:
     llm_stream: bool = False
     agent_max_steps: int = 20
     agent_context_window: int = 24
-    agent_nodes_definitions_dir: Path = Path("app/agent/nodes/definitions")
-    agent_tool_policy_file: Path = Path("app/agent/nodes/profiles/tool_policies.yaml")
-    agent_subagent_yaml_overlay_enabled: bool = True
-    agent_provider_profiles_file: Path = Path("app/agent/nodes/profiles/provider_profiles.yaml")
+    agent_provider_profiles_file: Path = _AGENT_HOST_DIR / "provider_profiles.yaml"
     agent_provider_profile: str = "default"
+    agent_plugins_file: Path = _PROJECT_ROOT / "backend" / "plugins.yaml"
     mcp_default_timeout_seconds: float = 10.0
-    mcp_servers_dir: Path = Path("backend/app/agent/tools/mcp/servers")
     amap_api_key: str = ""
     amap_base_url: str = "https://restapi.amap.com"
     amap_timeout_seconds: float = 8.0
@@ -163,19 +165,6 @@ class Settings:
             agent_context_window=int(
                 os.getenv("AGENT_CONTEXT_WINDOW", str(cls.agent_context_window))
             ),
-            agent_nodes_definitions_dir=_resolve_path(
-                os.getenv(
-                    "AGENT_NODES_DEFINITIONS_DIR",
-                    str(cls.agent_nodes_definitions_dir),
-                )
-            ),
-            agent_tool_policy_file=_resolve_path(
-                os.getenv("AGENT_TOOL_POLICY_FILE", str(cls.agent_tool_policy_file))
-            ),
-            agent_subagent_yaml_overlay_enabled=_env_bool(
-                "AGENT_SUBAGENT_YAML_OVERLAY_ENABLED",
-                cls.agent_subagent_yaml_overlay_enabled,
-            ),
             agent_provider_profiles_file=_resolve_path(
                 os.getenv(
                     "AGENT_PROVIDER_PROFILES_FILE",
@@ -186,11 +175,11 @@ class Settings:
                 "AGENT_PROVIDER_PROFILE",
                 cls.agent_provider_profile,
             ),
+            agent_plugins_file=_resolve_path(
+                os.getenv("AGENT_PLUGINS_FILE", str(cls.agent_plugins_file))
+            ),
             mcp_default_timeout_seconds=float(
                 os.getenv("MCP_DEFAULT_TIMEOUT_SECONDS", str(cls.mcp_default_timeout_seconds))
-            ),
-            mcp_servers_dir=_resolve_path(
-                os.getenv("MCP_SERVERS_DIR", str(cls.mcp_servers_dir))
             ),
             amap_api_key=os.getenv("AMAP_API_KEY", cls.amap_api_key),
             amap_base_url=os.getenv("AMAP_BASE_URL", cls.amap_base_url),

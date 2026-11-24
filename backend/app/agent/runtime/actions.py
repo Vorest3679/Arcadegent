@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.agent._logging import get_logger, log_ref
 from app.agent.artifacts.sink import ArtifactSink
-from app.agent.context.turn_recorder import record_tool_result_turn
+from app.agent.context.turn_recorder import record_tool_result_turn, save_session
 from app.agent.runtime.budget import RunBudget
 from app.agent.runtime.domain_port import TurnDomain
 from app.agent.runtime.events import ToolEventHooks
@@ -29,7 +29,8 @@ from app.agent.runtime.lifecycle import LifecycleContext, LifecyclePhase
 from app.agent.runtime.ports import SessionStore
 from app.agent.runtime.session_state import AgentSessionState
 from app.agent.runtime.supervisor import LoopSupervisor, WaitPolicy
-from app.agent.subagents.subagent_builder import SubAgentBuilder, SubAgentProfile
+from app.agent.subagents.roster import AgentDefinition
+from app.agent.subagents.subagent_builder import SubAgentBuilder
 from app.agent.tools.execution import (
     CAP_SPAWN_AGENT,
     ToolDispatcher,
@@ -205,7 +206,7 @@ class ToolActions:
         session_id: str,
         session_state: AgentSessionState,
         tool_calls: list[Any],
-        profile: SubAgentProfile,
+        profile: AgentDefinition,
         worker_run_id: str | None = None,
         persist: bool = True,
         step_ctx: LifecycleContext | None = None,
@@ -333,10 +334,10 @@ class ToolActions:
             agent_name=agent_name,
             worker_run_id=worker_run_id,
             tool_arguments=tool_arguments,
-            persist=persist,
             argument_evidence=argument_evidence,
-            session_store=self._session_store if persist else None,
         )
+        if persist:
+            await save_session(self._session_store, state)
         artifacts = result.artifacts
         if not artifacts and result.status == "completed":
             # Transitional mapping for tools that do not describe their own

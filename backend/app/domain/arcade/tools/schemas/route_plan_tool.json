@@ -1,0 +1,48 @@
+{
+  "name": "route_plan_tool",
+  "kind": "function",
+  "description": "Plan a route from origin to destination.",
+  "capabilities": ["read_only", "navigation"],
+  "input_schema": {
+    "$defs": {
+      "LocationArgs": {
+        "additionalProperties": false,
+        "properties": {
+          "lng": {
+            "title": "Lng",
+            "type": "number"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          }
+        },
+        "required": ["lng", "lat"],
+        "title": "LocationArgs",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "provider": {
+        "enum": ["amap", "google", "none"],
+        "title": "Provider",
+        "type": "string"
+      },
+      "mode": {
+        "enum": ["walking", "driving"],
+        "title": "Mode",
+        "type": "string"
+      },
+      "origin": {
+        "$ref": "#/$defs/LocationArgs"
+      },
+      "destination": {
+        "$ref": "#/$defs/LocationArgs"
+      }
+    },
+    "required": ["provider", "mode", "origin", "destination"],
+    "title": "RoutePlanArgs",
+    "type": "object"
+  }
+}

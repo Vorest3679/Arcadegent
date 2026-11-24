@@ -22,9 +22,10 @@ from app.agent.runtime.session_state import (
 )
 from app.agent.runtime.worker_runner import WorkerRunner
 from app.agent.subagents.agent_node import AgentNode
-from app.agent.subagents.subagent_builder import SubAgentProfile
+from app.agent.subagents.roster import AgentDefinition
 from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
 from app.agent.tools.execution import CAP_SPAWN_AGENT
+from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.domain.arcade.domain import ArcadeTurnDomain
@@ -37,6 +38,7 @@ from backend.app.tests.integration._runtime_kernel_test_support import (
     _Store,
     _call,
     _run,
+    _runtime,
     _text,
 )
 
@@ -44,8 +46,10 @@ _TOOLS = ("spawn", "echo", "block")
 
 
 class _SubAgents:
-    def get(self, name: str) -> SubAgentProfile:
-        return SubAgentProfile(name=name, prompt_file="", allowed_tools=list(_TOOLS))  # type: ignore[arg-type]
+    entry_name = "main_agent"
+
+    def get(self, name: str) -> AgentDefinition:
+        return AgentDefinition(name=name, prompt="fixture.md", allowed_tools=list(_TOOLS))  # type: ignore[arg-type]
 
     def node(self, name: str) -> AgentNode:
         is_main = name == "main_agent"
@@ -58,7 +62,6 @@ class _SubAgents:
 
 
 class _Tools:
-    provider_name = "worker_runner_test"
     _capabilities = {"spawn": (CAP_SPAWN_AGENT,)}
 
     def __init__(self) -> None:
@@ -70,7 +73,6 @@ class _Tools:
             name: ToolDescriptor(
                 name=name,
                 description=name,
-                provider=self.provider_name,
                 input_schema={"type": "object"},
                 capabilities=self._capabilities.get(name, ()),
             )
@@ -98,8 +100,9 @@ class _Tools:
 
 def _kernel(tmp_path: Path, provider: _Provider, store: _Store, tools: _Tools) -> AgentKernel:
     registry = ToolRegistry(
-        providers=[tools],
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        providers={"worker_runner_test": tools},
+        permission_checker=ToolPermissionChecker(),
+        local_provider=LocalToolProvider(),
     )
     return AgentKernel(
         context_builder=_ContextBuilder(),  # type: ignore[arg-type]
@@ -409,3 +412,39 @@ def test_worker_dispatch_exception_becomes_a_failed_tool_result(tmp_path: Path) 
     spawn_turns = [turn for turn in saved.turns if turn.name == "spawn"]
     assert spawn_turns and spawn_turns[-1].payload["status"] == "failed"
     assert saved.working_memory["last_error"]["type"] == "worker_dispatch_error"
+
+
+def test_session_saves_run_off_the_event_loop_and_skip_worker_start(tmp_path: Path) -> None:
+    """Blocking stores (Supabase over sync HTTP) must not stall the event loop."""
+    import threading
+
+    class _ThreadRecordingStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.saves: list[tuple[bool, str]] = []
+
+        def get_or_create_session(self, session_id: str) -> AgentSessionState:
+            assert threading.current_thread() is not threading.main_thread()
+            return super().get_or_create_session(session_id)
+
+        def save_session(self, state: AgentSessionState) -> None:
+            self.saves.append((threading.current_thread() is threading.main_thread(), state.active_subagent))
+            super().save_session(state)
+
+    store = _ThreadRecordingStore()
+    provider = _Provider([
+        ("main_agent", _call("spawn", worker="helper_worker", task="do it")),
+        ("helper_worker", _call("echo", value="x")),
+        ("helper_worker", _text("worker text")),
+        ("main_agent", _text("main done")),
+    ])
+
+    response, _events = _run(_runtime(tmp_path, provider, store), "go")
+
+    assert response.text == "main done"
+    assert store.saves, "the run must persist the session"
+    assert not [save for save in store.saves if save[0]], "save_session ran on the event loop thread"
+    # The worker start is a live UI transition, not a persisted state.
+    assert "helper_worker" not in [active for _on_loop, active in store.saves]
+    # user turn, worker commit, invoke_worker result, final state
+    assert len(store.saves) == 4

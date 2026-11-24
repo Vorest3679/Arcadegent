@@ -22,7 +22,7 @@ from app.agent.llm.streaming import (
     TextDelta,
     parse_sse_line,
 )
-from app.infra.observability.logger import get_logger, log_ref
+from app.agent._logging import get_logger, log_ref
 
 logger = get_logger(__name__)
 

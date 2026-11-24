@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
+from types import MappingProxyType
 from typing import Any
 
 from pydantic import ValidationError
@@ -11,9 +13,12 @@ from pydantic_core import ErrorDetails
 
 from app.agent.artifacts.model import Artifact
 from app.agent.tools.base import ExecutionMode, ToolDescriptor, ToolInputValidationError, ToolProvider
-from app.agent.tools.builtin.provider import BuiltinToolProvider
-from app.agent.tools.mcp_gateway import MCPToolGateway
+from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.permission import ToolPermissionChecker, ToolPermissionError
+from app.agent.tools.spec import ToolSpec, ToolSpecError
+
+# Name the local catalog is aggregated under when it is not one of ``providers``.
+RUNTIME_PROVIDER = "runtime"
 
 
 def _is_strict_compatible(schema: Any) -> bool:
@@ -59,27 +64,105 @@ class ToolExecutionResult:
 
 
 class ToolRegistry:
-    """Provider-oriented runtime entrypoint for builtin and MCP tools.
-    面向提供程序的运行时入口，用于内置和 MCP 工具。
-    This registry aggregates tools from multiple providers, 
-    applies permission checks, validates input against provider-declared JSON Schemas, 
-    and routes execution to the appropriate provider implementation.
-    该注册表聚合来自多个提供程序的工具，应用权限检查，
-    根据提供程序声明的 JSON Schema 验证输入，并将执行路由到适当的提供程序实现。 """
+    """Provider-oriented runtime entrypoint for local and MCP tools.
+    面向提供程序的运行时入口，用于本地工具和 MCP 工具。
+
+    The registry aggregates tools from its providers, applies permission
+    checks, validates input against each tool's JSON Schema and routes
+    execution to the owning provider. Providers are passed as a
+    ``{name: provider}`` mapping; that key is the only provider name (health,
+    ``list_tools(provider=...)``, ``refresh_tools(provider=...)``).
+
+    It also manages one local tool catalog (``local_provider``, required):
+    ``add_tools`` / ``update_tools`` / ``delete_tools``. The catalog is passed
+    explicitly, so which provider receives writes is never inferred, and it is
+    aggregated under ``"runtime"`` unless it is already one of ``providers``.
+    Registering a tool never grants access to it: visibility still comes from
+    each agent's ``allowed_tools`` and the policy.
+    该注册表聚合各 provider 的工具，做权限检查、按 JSON Schema 校验输入并路由执行；
+    provider 名只来自构造时映射的键；同时管理显式传入的运行时工具目录。注册不等于授权。"""
 
     def __init__(
         self,
         *,
-        providers: list[ToolProvider] | None = None,
+        providers: Mapping[str, ToolProvider] | None = None,
         permission_checker: ToolPermissionChecker,
         strict_schema: bool = True,
-        **legacy_dependencies: Any,
+        local_provider: LocalToolProvider,
     ) -> None:
         self._permission_checker = permission_checker
         self._strict_schema = strict_schema
-        self._providers = list(
-            providers or self._build_legacy_providers(legacy_dependencies=legacy_dependencies)
-        )
+        self._local = local_provider
+        named: dict[str, ToolProvider] = {}
+        for name, provider in (providers or {}).items():
+            if not isinstance(name, str) or not name.strip() or name != name.strip():
+                raise ValueError("invalid_provider_name")
+            named[name] = provider
+        if not any(provider is local_provider for provider in named.values()):
+            if RUNTIME_PROVIDER in named:
+                raise ValueError(f"duplicate_provider:{RUNTIME_PROVIDER}")
+            named[RUNTIME_PROVIDER] = local_provider
+        self._providers: Mapping[str, ToolProvider] = MappingProxyType(named)
+
+    @property
+    def local_provider(self) -> LocalToolProvider:
+        """The catalog that ``add_tools`` / ``update_tools`` / ``delete_tools`` write to."""
+        return self._local
+
+    def providers(self) -> Mapping[str, ToolProvider]:
+        """The providers the registry aggregates, by name."""
+        return self._providers
+
+    # -- catalog management ----------------------------------------------------
+
+    async def list_tools(
+        self,
+        *,
+        allowed_tools: list[str] | None = None,
+        provider: str | None = None,
+    ) -> list[ToolDescriptor]:
+        """Current tools sorted by name, optionally filtered by patterns and provider name."""
+        tools, owners = await self._collect_tools()
+        return [
+            tools[name]
+            for name in sorted(tools)
+            if (provider is None or owners[name] == provider)
+            and (allowed_tools is None or self._matches_allowed_tools(name, allowed_tools))
+        ]
+
+    async def add_tools(
+        self,
+        specs: Iterable[ToolSpec],
+        *,
+        services: Mapping[str, Any] | None = None,
+    ) -> list[str]:
+        """Register new local tools (and services for their executors) atomically.
+
+        Fails with ``ToolSpecError`` and changes nothing when a name already
+        exists in any provider, repeats within the batch, or a spec uses a
+        reserved capability.
+        """
+        batch = list(specs)
+        tools, _ = await self._collect_tools()
+        for spec in batch:
+            name = getattr(spec, "name", None)
+            if isinstance(name, str) and name in tools:
+                raise ToolSpecError(f"duplicate_tool:{name}")
+        return self._local.add(batch, services=services)
+
+    async def update_tools(self, specs: Iterable[ToolSpec]) -> list[str]:
+        """Replace registered local tools by name; every name must already be registered."""
+        return self._local.update(specs)
+
+    async def delete_tools(self, names: Iterable[str]) -> list[str]:
+        """Remove registered local tools by name; every name must already be registered."""
+        return self._local.remove(names)
+
+    async def refresh_tools(self, *, provider: str | None = None) -> None:
+        """Reload tool sources (MCP discovery, manifests); all providers by default."""
+        for name, item in self._providers.items():
+            if provider is None or name == provider:
+                await item.refresh()
 
     async def get_tools(self, *, allowed_tools: list[str] | None = None) -> dict[str, ToolDescriptor]:
         tools, _ = await self._collect_tools()
@@ -114,14 +197,8 @@ class ToolRegistry:
                 seen.add(name)
         return definitions
 
-    async def refresh_tools(self) -> None:
-        for provider in self._providers:
-            await provider.refresh()
-
     async def refresh_mcp_tools(self) -> None:
-        for provider in self._providers:
-            if provider.provider_name == "mcp":
-                await provider.refresh()
+        await self.refresh_tools(provider="mcp")
 
     async def execution_mode(self, tool_name: str) -> ExecutionMode:
         """Concurrency mode declared by the tool descriptor.
@@ -150,15 +227,12 @@ class ToolRegistry:
         return modes
 
     def provider_health(self) -> dict[str, Any]:
-        return {
-            provider.provider_name: provider.health()
-            for provider in self._providers
-        }
+        return {name: provider.health() for name, provider in self._providers.items()}
 
     def mcp_health(self) -> dict[str, Any]:
-        for provider in self._providers:
-            if provider.provider_name == "mcp":
-                return provider.health()
+        provider = self._providers.get("mcp")
+        if provider is not None:
+            return provider.health()
         return {
             "enabled": False,
             "discovered_tool_count": 0,
@@ -179,9 +253,9 @@ class ToolRegistry:
             self._permission_checker.ensure_allowed(tool_name=tool_name, allowed_tools=allowed_tools)
             tools, owners = await self._collect_tools()
             descriptor = tools.get(tool_name)
-            provider = owners.get(tool_name)
-            if descriptor is None or provider is None:
+            if descriptor is None:
                 raise ValueError(f"unknown_tool:{tool_name}")
+            provider = self._providers[owners[tool_name]]
             validated = raw_arguments
             if descriptor.validator is not None:
                 validated = descriptor.validator(raw_arguments)
@@ -231,45 +305,17 @@ class ToolRegistry:
                 message=str(exc),
             )
 
-    def _build_legacy_providers(self, *, legacy_dependencies: dict[str, Any]) -> list[ToolProvider]:
-        """Build providers based on legacy dependencies, supporting both direct service instances and factory-based specifications.
-        根据传统依赖关系构建提供程序，支持直接服务实例和基于工厂的规范。"""
-        legacy = dict(legacy_dependencies)
-        mcp_tool_gateway = legacy.pop("mcp_tool_gateway", None) or MCPToolGateway()
-        builtin_services = {
-            key: legacy.pop(key)
-            for key in (
-                "db_query_tool",
-                "geo_resolve_tool",
-                "route_plan_tool",
-                "summary_tool",
-            )
-            if key in legacy
-        }
-        providers: list[ToolProvider] = []
-        if builtin_services:
-            providers.append(
-                BuiltinToolProvider(
-                    services={
-                        **builtin_services,
-                        "mcp_tool_gateway": mcp_tool_gateway,
-                    }
-                )
-            )
-        providers.append(mcp_tool_gateway)
-        return providers
-
-    async def _collect_tools(self) -> tuple[dict[str, ToolDescriptor], dict[str, ToolProvider]]:
-        """Aggregate tools from all providers, ensuring no name conflicts and building a mapping of tool names to their owning providers.
-        从所有提供程序聚合工具，确保没有名称冲突，并构建工具名称到其所属提供程序的映射。"""
+    async def _collect_tools(self) -> tuple[dict[str, ToolDescriptor], dict[str, str]]:
+        """Aggregate tools from all providers, rejecting name conflicts; owners map tool name to provider name.
+        从所有提供程序聚合工具，拒绝重名；owners 把工具名映射到 provider 名。"""
         tools: dict[str, ToolDescriptor] = {}
-        owners: dict[str, ToolProvider] = {}
-        for provider in self._providers:
+        owners: dict[str, str] = {}
+        for provider_name, provider in self._providers.items():
             for name, descriptor in (await provider.get_tools()).items():
                 if name in tools:
                     raise ValueError(f"duplicate_tool:{name}")
                 tools[name] = descriptor
-                owners[name] = provider
+                owners[name] = provider_name
         return tools, owners
 
     def _definition_from_descriptor(self, descriptor: ToolDescriptor) -> dict[str, Any]:
@@ -324,7 +370,7 @@ class ToolRegistry:
         tools, owners = await self._collect_tools()
         if tool_name not in tools:
             raise ValueError(f"unknown_tool:{tool_name}")
-        provider = owners[tool_name]
+        provider = self._providers[owners[tool_name]]
         preparer = getattr(provider, "prepare_arguments", None)
         if not callable(preparer):
             return dict(raw_arguments), []

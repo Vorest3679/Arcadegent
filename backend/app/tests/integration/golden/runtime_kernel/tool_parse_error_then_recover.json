@@ -217,12 +217,6 @@
             "raw_arguments": "{"
           },
           "arguments": {},
-          "result": {
-            "error": {
-              "message": "ValueError: invalid tool arguments: invalid JSON",
-              "type": "argument_preparation_error"
-            }
-          },
           "status": "failed"
         },
         "role": "tool",

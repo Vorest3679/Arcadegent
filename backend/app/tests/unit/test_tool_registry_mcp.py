@@ -22,17 +22,18 @@ def test_tool_registry_includes_discovered_mcp_tools_when_allowed(tmp_path: Path
     assert "route_plan_tool" in names
     assert "mcp__amap__maps_direction_walking" in names
 
-def test_tool_registry_gettools_aggregates_builtin_and_mcp_tools(tmp_path: Path) -> None:
+def test_tool_registry_gettools_aggregates_plugin_and_mcp_tools(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())
 
     tools = _run(registry.gettools())
+    arcade = {tool.name for tool in _run(registry.list_tools(provider="arcade"))}
+    mcp = {tool.name for tool in _run(registry.list_tools(provider="mcp"))}
 
     assert "db_query_tool" in tools
     assert "result_selection_tool" in tools
-    assert tools["db_query_tool"].provider == "builtin"
+    assert {"db_query_tool", "result_selection_tool"} <= arcade
     assert "mcp__amap__maps_direction_walking" in tools
-    assert tools["mcp__amap__maps_direction_walking"].provider == "mcp"
-    assert tools["summary_tool"].metadata["prompt"].endswith("response-composition/SKILL.md")
+    assert mcp == {"mcp__amap__maps_direction_walking"}
 
 def test_tool_registry_can_execute_discovered_mcp_tool(tmp_path: Path) -> None:
     registry = _build_registry(tmp_path, mcp_tool_gateway=_build_mcp_gateway())

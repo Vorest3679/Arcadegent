@@ -275,22 +275,6 @@
             "raw_arguments": null
           },
           "arguments": {},
-          "result": {
-            "skills": [
-              {
-                "description": "Interpret route distances, durations, and destinations. Use when context_payload includes route.",
-                "name": "navigation-result-reading"
-              },
-              {
-                "description": "Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.",
-                "name": "response-composition"
-              },
-              {
-                "description": "Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.",
-                "name": "search-result-reading"
-              }
-            ]
-          },
           "status": "completed"
         },
         "role": "tool",
@@ -349,22 +333,6 @@
             "raw_arguments": null
           },
           "arguments": {},
-          "result": {
-            "skills": [
-              {
-                "description": "Interpret route distances, durations, and destinations. Use when context_payload includes route.",
-                "name": "navigation-result-reading"
-              },
-              {
-                "description": "Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.",
-                "name": "response-composition"
-              },
-              {
-                "description": "Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.",
-                "name": "search-result-reading"
-              }
-            ]
-          },
           "status": "completed"
         },
         "role": "tool",
@@ -423,22 +391,6 @@
             "raw_arguments": null
           },
           "arguments": {},
-          "result": {
-            "skills": [
-              {
-                "description": "Interpret route distances, durations, and destinations. Use when context_payload includes route.",
-                "name": "navigation-result-reading"
-              },
-              {
-                "description": "Compose concise Chinese arcade search or navigation replies from runtime context and observed tool outputs. Use before producing the final answer.",
-                "name": "response-composition"
-              },
-              {
-                "description": "Interpret arcade search results and ranking. Use when context_payload includes search_catalog and directory.",
-                "name": "search-result-reading"
-              }
-            ]
-          },
           "status": "completed"
         },
         "role": "tool",

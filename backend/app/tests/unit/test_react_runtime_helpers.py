@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from app.agent.artifacts.model import Artifact
-from app.agent.tools.builtin.executors import db_query as db_query_executor
-from app.agent.tools.builtin.executors import summary as summary_executor
-from app.agent.tools.builtin.executors import result_selection as result_selection_executor
+from app.domain.arcade.tools.executors import db_query as db_query_executor
+from app.domain.arcade.tools.executors import summary as summary_executor
+from app.domain.arcade.tools.executors import result_selection as result_selection_executor
 from app.agent.context.turn_recorder import persist_worker_evidence_turns
 from app.agent.runtime.session_state import (
     AgentTurn,

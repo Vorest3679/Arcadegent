@@ -18,9 +18,10 @@ from app.agent.runtime.domain_port import BaseTurnDomain
 from app.agent.runtime.kernel import AgentKernel, TurnInput
 from app.agent.runtime.session_state import AgentSessionState
 from app.agent.subagents.agent_node import AgentNode
-from app.agent.subagents.subagent_builder import SubAgentProfile
+from app.agent.subagents.roster import AgentDefinition
 from app.agent.tools.base import ProviderExecutionResult, ToolDescriptor
 from app.agent.tools.execution import CAP_CONCLUDES_TURN, CAP_SPAWN_AGENT
+from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
 from app.protocol.messages import ChatRequest
@@ -36,13 +37,15 @@ class _Context:
 
 
 class _ContextBuilder:
-    def build(self, *, session_state: AgentSessionState, request: Any, subagent: SubAgentProfile) -> _Context:
+    def build(self, *, session_state: AgentSessionState, request: Any, subagent: AgentDefinition) -> _Context:
         return _Context(instructions=subagent.name, messages=[{"role": "user", "content": request.message}])
 
 
 class _SubAgents:
-    def get(self, name: str) -> SubAgentProfile:
-        return SubAgentProfile(name=name, prompt_file="", allowed_tools=list(_TOOLS))  # type: ignore[arg-type]
+    entry_name = "main_agent"
+
+    def get(self, name: str) -> AgentDefinition:
+        return AgentDefinition(name=name, prompt="fixture.md", allowed_tools=list(_TOOLS))  # type: ignore[arg-type]
 
     def node(self, name: str) -> AgentNode:
         is_main = name == "main_agent"
@@ -66,7 +69,6 @@ class _Store:
 
 
 class _Tools:
-    provider_name = "kernel_test"
     _capabilities = {"finish": (CAP_CONCLUDES_TURN,), "spawn": (CAP_SPAWN_AGENT,)}
 
     async def get_tools(self) -> dict[str, ToolDescriptor]:
@@ -74,7 +76,6 @@ class _Tools:
             name: ToolDescriptor(
                 name=name,
                 description=name,
-                provider=self.provider_name,
                 input_schema={"type": "object"},
                 capabilities=self._capabilities.get(name, ()),
             )
@@ -132,8 +133,9 @@ def _call(name: str, **arguments: Any) -> ModelResponse:
 
 def _runtime(tmp_path: Path, provider: _Provider, store: _Store, domain: BaseTurnDomain | None = None) -> AgentKernel:
     registry = ToolRegistry(
-        providers=[_Tools()],
-        permission_checker=ToolPermissionChecker(policy_file=tmp_path / "no-policy.yaml"),
+        providers={"kernel_test": _Tools()},
+        permission_checker=ToolPermissionChecker(),
+        local_provider=LocalToolProvider(),
     )
     return AgentKernel(
         context_builder=_ContextBuilder(),  # type: ignore[arg-type]

@@ -98,7 +98,7 @@ def is_domain_event(event: str) -> bool:
 # Bound by ``run_chat`` for the duration of one run; concurrent runs keep their
 # own value because the variable is copied into each task's context.
 _run_events: ContextVar[RunPublisher] = ContextVar(
-    "arcadegent_run_events", default=NullPublisher()
+    "agent_run_events", default=NullPublisher()
 )
 
 
@@ -142,13 +142,19 @@ def emit_agent_changed(
     publish(KernelEvent.SUBAGENT_CHANGED, payload)
 
 
-def publish_assistant_text(text: str, *, output_id: str, stream_mode: str) -> None:
+def publish_assistant_text(
+    text: str,
+    *,
+    output_id: str,
+    stream_mode: str,
+    agent_name: str,
+) -> None:
     """Publish reply text as a delta of one output; reasoning is never published."""
     if not text:
         return
     publish(
         KernelEvent.ASSISTANT_TOKEN,
-        {"delta": text, "active_subagent": "main_agent", "stream_mode": stream_mode},
+        {"delta": text, "active_subagent": agent_name, "stream_mode": stream_mode},
         output_id=output_id,
     )
 

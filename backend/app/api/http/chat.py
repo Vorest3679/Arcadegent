@@ -148,7 +148,7 @@ async def dispatch_chat_session(
         len(request.message),
     )
     try:
-        _normalized, record = container.chat_runs.dispatch(request)
+        _normalized, record = await container.chat_runs.dispatch(request)
     except (SessionError, SessionOwnershipError) as exc:
         raise _http_error(exc) from exc
     return ChatSessionDispatchDto(session_id=record.session_id, run_id=record.run_id, status="running")

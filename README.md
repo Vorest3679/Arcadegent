@@ -29,9 +29,10 @@ QQ群：1091316877
 
 ```text
 backend/                         FastAPI 后端、Agent 运行时、工具系统和测试
-backend/app/agent/context/       Agent prompts 与技能片段
-backend/app/agent/nodes/         main agent / worker YAML 定义和 provider profile
-backend/app/agent/tools/         builtin tools、MCP gateway、工具 schema 和 manifest
+backend/app/agent/              通用 agent 层：runtime、插件协议、工具注册与 MCP 网关
+backend/app/agent_host/         宿主适配：LLM 配置与 provider profile
+backend/app/domain/arcade/      机厅领域：工具、生命周期钩子、agent 定义与资源
+backend/app/domain/arcade/resources/  prompts、skills、agent YAML、tool policies、MCP servers
 apps/web/                        React + Vite 前端
 apps/web/src/components/map/     高德地图、路线卡片和地图操作组件
 apps/web/tests/e2e/              Playwright 端到端测试
@@ -140,8 +141,9 @@ LLM_STREAM=false
 AGENT_MAX_STEPS=20
 AGENT_CONTEXT_WINDOW=24
 AGENT_PROVIDER_PROFILE=default
+# AGENT_PLUGINS_FILE=backend/plugins.yaml
 
-MCP_SERVERS_DIR=backend/app/agent/tools/mcp/servers
+# MCP_SERVERS_DIR=backend/app/domain/arcade/resources/mcp_servers
 MCP_DEFAULT_TIMEOUT_SECONDS=10
 
 AMAP_API_KEY=
@@ -162,15 +164,16 @@ ARCADE_GEO_REQUEST_TIMEOUT_SECONDS=1.2
 - `LLM_API_KEY` 为空时服务可以启动，机厅列表接口也可使用，但 Agent 对话不会产生有意义的模型编排结果。API Key需要使用兼容OpenAI的接口，建议使用DeepSeek的API。
 - `ARCADE_GEO_CACHE_PATH` 会写入 `data/runtime/`，目录不存在时会自动创建。旧的 `data/runtime/chat_sessions.json` 可通过 `scripts/migrate_chat_sessions_to_supabase.py` 导入到 Supabase。
 - `AMAP_API_KEY` 用于高德 REST 路线、逆地理编码和后端地理缓存；高德 Web JS API 的浏览器 key 需要单独配在前端。
+- 插件启用列表与插件配置默认读取 `backend/plugins.yaml`，可用 `AGENT_PLUGINS_FILE` 覆盖（相对路径在仓库根或 `backend/` 下运行都能找到）。`core` 与 `arcade` 都是必需插件，禁用会启动失败。路线工具的高德配置来自该文件，密钥只能写成 `${AMAP_API_KEY}` 或 `${AMAP_API_KEY:-}`，不能带字面默认值；逆地理编码与地理缓存仍直接读取 `AMAP_*`。
 
 ### 4. 配置 MCP
 
-默认会扫描 `backend/app/agent/tools/mcp/servers/*.json`。当前内置高德配置如下：
+默认扫描 `backend/app/domain/arcade/resources/mcp_servers/*.json`；可用 `MCP_SERVERS_DIR` 指向其他目录（相对路径以 `backend/plugins.yaml` 所在目录为基准）。当前内置高德配置如下：
 
 ```json
 {
   "transport": "streamable-http",
-  "url": "https://mcp.amap.com/mcp?key=${AMAP_API_KEY}"
+  "url": "https://mcp.amap.com/mcp?key=${config.amap.api_key}"
 }
 ```
 
@@ -420,15 +423,15 @@ SSE 事件流依赖长连接，Nginx 配置里 `/api/stream/` 已关闭 bufferin
 
 Agent 配置分为几层：
 
-- Subagent 定义：`backend/app/agent/nodes/definitions/*.yaml`
-- Provider profile：`backend/app/agent/nodes/profiles/provider_profiles.yaml`
-- Tool policy：`backend/app/agent/nodes/profiles/tool_policies.yaml`
-- Prompt：`backend/app/agent/context/prompts/*.md`
-- Skill：`backend/app/agent/context/skills/*/SKILL.md`
-- Skill 配置：`backend/skill.config.py`（目录、禁用项、agent 白名单和读取上限）
-- Builtin tool manifest：`backend/app/agent/tools/builtin/tools_manifest.json`
-- Builtin tool schema：`backend/app/agent/tools/builtin/schemas/*.json`
-- MCP server 配置：`backend/app/agent/tools/mcp/servers/*.json`
+- Subagent 定义：`backend/app/domain/arcade/resources/agents/*.yaml`（YAML 覆盖 `profiles.py` 中的代码默认值）
+- Provider profile：`backend/app/agent_host/provider_profiles.yaml`
+- Prompt：`backend/app/domain/arcade/resources/prompts/*.md`
+- Skill：`backend/app/domain/arcade/resources/skills/*/SKILL.md`
+- Skill 配置：`backend/plugins.yaml` 中 `core.config.skills`（禁用项、agent 白名单和读取上限；技能目录由插件资源声明）
+- 插件配置：`backend/plugins.yaml`（启用列表与安装顺序、各插件配置值；密钥用环境变量占位符）
+- 通用工具 manifest：`backend/app/agent/tools/builtin/tools_manifest.json`（`invoke_worker`、`list_skills`、`read_skill`，由 `CorePlugin` 提供）
+- 机厅业务工具：`backend/app/domain/arcade/tools/`（定义 JSON 在 `schemas/`，由 `ArcadePlugin` 提供）
+- MCP server 配置：`backend/app/domain/arcade/resources/mcp_servers/*.json`
 
 Skill 使用标准 Agent Skills 格式，通过目录自动发现，正文和引用文本按需加载。新增技能无需修改注册代码，配置与迁移说明见 [Agent Skills 指南](docs/guidings/技能配置与扩展指南.md)。
 

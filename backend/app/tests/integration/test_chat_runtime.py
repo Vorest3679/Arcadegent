@@ -24,11 +24,21 @@ def test_skill_discovery_loading_business_tools_and_execution_isolation(tmp_path
     """Exercise real tool dispatch/context/session boundaries with a deterministic model."""
     import app.core.container as container_module
     from app.agent.llm.provider_adapter import ModelToolCall
-    from app.agent.skills.config import SkillConfig
+    from app.agent.plugins import PluginResources
 
     root = tmp_path / "skills"
     root.mkdir()
-    monkeypatch.setattr(container_module, "load_skill_config", lambda _: SkillConfig(roots=[root]))
+    original_resources = container_module.resolve_plugin_resources
+
+    def resolve_resources(plugins, configs):
+        resources = original_resources(plugins, configs)
+        resources["arcade"] = PluginResources(
+            skills=(root,),
+            mcp_servers=resources["arcade"].mcp_servers,
+        )
+        return resources
+
+    monkeypatch.setattr(container_module, "resolve_plugin_resources", resolve_resources)
     client = _build_client(tmp_path, chat_clock=chat_clock)
     runtime = client.app.state.container.react_runtime
     main_calls = 0
@@ -108,13 +118,14 @@ def test_skill_discovery_loading_business_tools_and_execution_isolation(tmp_path
     state = client.app.state.container.session_store.get_session(payload["session_id"])
     query = next(turn for turn in state.turns if turn.name == "db_query_tool")
     assert query.payload["status"] == "completed"
-    assert query.payload["result"]["total"] == 1
+    assert json.loads(query.content)["total"] == 1
+    assert "result" not in query.payload  # stored once, in content
     for turn in state.turns:
         assert "PARENT_BODY_MARKER" not in turn.content
         assert "REFERENCE_MARKER" not in json.dumps(turn.payload)
         if turn.name == "read_skill":
             assert turn.payload["status"] == "completed"
-            assert turn.payload["result"]["status"] == "loaded"
+            assert json.loads(turn.content)["status"] == "loaded"
     assert "PARENT_BODY_MARKER" not in json.dumps(state_to_dict(state))
     chat_clock.advance()  # Pass the submission cooldown without sleeping.
     response = client.post("/api/chat", json={"client_id": "test-client", "message": "继续", "session_id": payload["session_id"]})
@@ -363,15 +374,16 @@ def test_previous_route_is_not_promoted_as_new_result() -> None:
 
 def test_online_route_unavailable_does_not_estimate() -> None:
     import pytest
-    from app.agent.tools.builtin.route_plan_tool import RoutePlanTool
+    from app.domain.arcade.tools.route_plan_tool import RoutePlanTool
     from app.protocol.messages import Location
     with pytest.raises(RuntimeError, match="route_unavailable"):
         asyncio.run(RoutePlanTool().plan_route(provider="amap", mode="walking", origin=Location(lng=116, lat=39), destination=Location(lng=117, lat=40)))
 
 def test_history_window_keeps_complete_tool_group() -> None:
     from app.agent.context.context_builder import ContextBuilder
+    from app.agent.context.prompt_loader import DirectoryPromptLoader
     from app.agent.runtime.session_state import AgentTurn
-    builder = ContextBuilder(prompt_root=Path("."), history_turn_limit=4)
+    builder = ContextBuilder(prompt_loader=DirectoryPromptLoader([Path(".")]), history_turn_limit=4)
     turns = [AgentTurn(role="user", content="query"), AgentTurn(role="assistant", content="", payload={"model": {"transcript": {"responses_output": [{"type": "function_call", "call_id": "c"}]}}})]
     turns.extend(AgentTurn(role="tool", content="result", call_id=str(i)) for i in range(5))
     retained = builder._tail_turns(turns, scope="conversation")

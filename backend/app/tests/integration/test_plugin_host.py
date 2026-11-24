@@ -1,0 +1,594 @@
+"""Plugin installation/composite contracts with business-free fake plugins (plan 5, stage 2c)."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+from pydantic import SecretStr
+
+from app.agent.llm.provider_adapter import ModelResponse, ModelToolCall
+from app.agent.plugins import (
+    AgentDefinition,
+    AgentRoster,
+    CompositeTurnDomain,
+    Plugin,
+    PluginConfig,
+    PluginEntry,
+    PluginError,
+    PluginInfo,
+    PluginResources,
+    install_plugins,
+    resolve_plugin_resources,
+)
+from app.agent.runtime.domain_port import BaseTurnDomain
+from app.agent.runtime.kernel import AgentKernel, TurnInput
+from app.agent.runtime.lifecycle import LifecycleContext
+from app.agent.runtime.session_state import AgentSessionState
+from app.agent.subagents.agent_node import AgentNode
+from app.agent.tools.local import LocalToolProvider
+from app.agent.tools.permission import ToolPermissionChecker
+from app.agent.tools.registry import ToolRegistry
+from app.agent.tools.spec import ToolContext, ToolSpec, ToolSpecError
+from app.session.injector import CollectingPublisher
+
+_ECHO_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"value": {"type": "string"}},
+    "required": ["value"],
+    "additionalProperties": False,
+}
+
+
+def _echo(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    return {"echo": f"{context.require('prefix')}:{args['value']}"}
+
+
+def _echo_spec(name: str = "echo_tool", *, capabilities: tuple[str, ...] = ()) -> ToolSpec:
+    return ToolSpec(name=name, description="Echo a value.", input_schema=_ECHO_SCHEMA,
+                    executor=_echo, capabilities=capabilities)
+
+
+class _FixtureDomain(BaseTurnDomain):
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def on_turn_mount(self, ctx: LifecycleContext) -> None:
+        self.calls.append("turn.mount")
+        ctx.memory["fixture_marker"] = True
+
+    def runtime_hints(self, state: AgentSessionState) -> dict[str, Any]:
+        return {"fixture_hint": "on"}
+
+    async def build_response(self, *, session_id: str, state: AgentSessionState, final_text: str) -> Any:
+        return {"reply": final_text, "fixture": True}
+
+
+class _FixturePlugin(Plugin):
+    info = PluginInfo("fixture", "1.0.0")
+
+    def __init__(self, *, prefix: str = "fixture", capabilities: tuple[str, ...] = (),
+                 domain: BaseTurnDomain | None = None) -> None:
+        self.prefix = prefix
+        self.capabilities = capabilities
+        self.domain = domain if domain is not None else _FixtureDomain()
+
+    def hooks(self, config: PluginConfig) -> BaseTurnDomain:
+        return self.domain
+
+    def tools(self, config: PluginConfig) -> LocalToolProvider:
+        return LocalToolProvider(specs=[_echo_spec(capabilities=self.capabilities)],
+                                 services={"prefix": self.prefix})
+
+
+def _named(base: type[Plugin], name: str) -> type[Plugin]:
+    return type(f"_{name.title()}Plugin", (base,), {"info": PluginInfo(name, "1.0.0")})
+
+
+class _Context:
+    def __init__(self, message: str) -> None:
+        self.instructions = "fixture"
+        self.messages = [{"role": "user", "content": message}]
+
+
+class _ContextBuilder:
+    def build(self, *, session_state: AgentSessionState, request: Any, subagent: AgentDefinition) -> _Context:
+        return _Context(request.message)
+
+
+class _SubAgents:
+    entry_name = "main_agent"
+
+    def get(self, name: str) -> AgentDefinition:
+        return AgentDefinition(name="main_agent", prompt="fixture.md", allowed_tools=["echo_tool"])
+
+    def node(self, name: str) -> AgentNode:
+        return AgentNode(profile=self.get(name), scope="conversation", publish_text=True, spawnable=())
+
+
+class _Store:
+    def __init__(self) -> None:
+        self.states: dict[str, AgentSessionState] = {}
+
+    def get_or_create_session(self, session_id: str) -> AgentSessionState:
+        return self.states.setdefault(session_id, AgentSessionState(session_id=session_id))
+
+    def save_session(self, state: AgentSessionState) -> None:
+        self.states[state.session_id] = state
+
+
+class _Provider:
+    streaming = False
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.script: list[ModelResponse] = [
+            ModelResponse(text=None, status="completed", protocol="chat_completions", reported_model="stub",
+                          tool_calls=[ModelToolCall(call_id="call_echo", name="echo_tool", arguments={"value": "x"})]),
+            ModelResponse(text="done", status="completed", protocol="chat_completions", reported_model="stub"),
+        ]
+
+    async def complete(self, **kwargs: Any) -> ModelResponse:
+        self.calls.append(kwargs)
+        return self.script.pop(0)
+
+
+def _run_turn(plugin_set, tmp_path):
+    provider = _Provider()
+    registry = ToolRegistry(
+        providers=dict(plugin_set.tool_providers),
+        permission_checker=ToolPermissionChecker(),
+        local_provider=LocalToolProvider(),
+    )
+    store = _Store()
+    kernel = AgentKernel(
+        context_builder=_ContextBuilder(),  # type: ignore[arg-type]
+        subagent_builder=_SubAgents(),  # type: ignore[arg-type]
+        tool_registry=registry,
+        provider_adapter=provider,  # type: ignore[arg-type]
+        session_store=store,  # type: ignore[arg-type]
+        max_steps=4,
+        domain=plugin_set.domain,
+    )
+    turn = TurnInput(session_id="s_plugin", client_id=None, message="hello",
+                     request=SimpleNamespace(message="hello"), request_payload={"message": "hello"})
+    events = CollectingPublisher()
+    result = asyncio.run(kernel.run_turn(turn, events=events))
+    return result, events, provider, store, registry
+
+
+def test_fake_plugin_tool_hook_and_presenter_run_a_turn(tmp_path) -> None:
+    plugin = _FixturePlugin()
+    plugin_set = install_plugins([PluginEntry(plugin=plugin)])
+
+    assert plugin_set.domain.plugin_names == ("fixture",)
+    assert list(plugin_set.tool_providers) == ["fixture"]
+    assert plugin_set.health() == [{
+        "name": "fixture", "version": "1.0.0", "trusted": False,
+        "contributions": {"hooks": True, "tools": ["echo_tool"], "agents": []}, "secrets": {},
+    }]
+
+    result, events, provider, store, registry = _run_turn(plugin_set, tmp_path)
+
+    assert result.response == {"reply": "done", "fixture": True}
+    assert "tool.completed" in events.names()
+    assert provider.calls[0]["runtime_hints"]["fixture_hint"] == "on"
+    assert plugin.domain.calls == ["turn.mount"]
+    assert store.states["s_plugin"].working_memory["fixture_marker"] is True
+    assert [tool.name for tool in asyncio.run(registry.list_tools(provider="fixture"))] == ["echo_tool"]
+
+
+def test_installation_failures_are_labeled_and_leave_runtime_writes_unlocked() -> None:
+    class _BrokenPlugin(Plugin):
+        info = PluginInfo("broken", "1.0.0")
+
+        def hooks(self, config: PluginConfig) -> BaseTurnDomain:
+            raise RuntimeError("value-that-must-not-leak")
+
+    class _PresenterOnly(Plugin):
+        info = PluginInfo("presenter", "1.0.0")
+
+        def hooks(self, config: PluginConfig) -> BaseTurnDomain:
+            return _FixtureDomain()
+
+    built: list[LocalToolProvider] = []
+
+    class _RecordingPlugin(_FixturePlugin):
+        def tools(self, config: PluginConfig) -> LocalToolProvider:
+            built.append(super().tools(config))
+            return built[-1]
+
+    with pytest.raises(PluginError, match=r"^plugin:broken:build_failed:hooks$") as error:
+        install_plugins([PluginEntry(plugin=_RecordingPlugin()), PluginEntry(plugin=_BrokenPlugin())])
+    assert "value-that-must-not-leak" not in str(error.value)
+    # A failed installation locks nothing: the provider it already built still accepts writes.
+    assert built[0].add([_echo_spec("late_tool")]) == ["late_tool"]
+
+    cases = [
+        ([_FixturePlugin(), _FixturePlugin()], r"^plugin:fixture:duplicate_plugin$"),
+        ([_FixturePlugin(), _named(_FixturePlugin, "other")()], r"^plugin:other:duplicate_tool:echo_tool$"),
+        ([_FixturePlugin(capabilities=("spawn_agent",))],
+         r"^plugin:fixture:reserved_capability:echo_tool:spawn_agent$"),
+        ([_FixturePlugin(), _PresenterOnly()],
+         r"^plugin:presenter:exclusive_hook_conflict:build_response:plugins:fixture,presenter$"),
+    ]
+    for plugins, code in cases:
+        with pytest.raises(PluginError, match=code):
+            install_plugins([PluginEntry(plugin=plugin) for plugin in plugins])
+
+
+def test_trusted_plugin_may_declare_reserved_capabilities_and_runtime_writes_are_locked() -> None:
+    plugin_set = install_plugins([PluginEntry(plugin=_FixturePlugin(capabilities=("spawn_agent",)), trusted=True)])
+    provider = plugin_set.tool_providers["fixture"]
+
+    assert plugin_set.health()[0]["trusted"] is True
+    with pytest.raises(ToolSpecError, match="runtime_writes_locked"):
+        provider.add([_echo_spec("late_tool")])
+
+
+def test_load_plugins_reads_the_file_and_applies_host_decisions(tmp_path: Path) -> None:
+    from app.agent.plugins import PluginConfigError, load_plugins
+
+    class _Other(Plugin):
+        info = PluginInfo("other", "1.0.0")
+
+    plugins = {"fixture": _FixturePlugin(capabilities=("spawn_agent",)), "other": _Other()}
+    path = tmp_path / "plugins.yaml"
+    path.write_text("plugins:\n  other:\n  fixture:\n", encoding="utf-8")
+
+    plugin_set = load_plugins(path, plugins=plugins, environ={}, trusted={"fixture"}, required={"fixture"})
+    assert [(item.name, item.trusted) for item in plugin_set.installed] == [("other", False), ("fixture", True)]
+
+    # Trust is the host's: the same file without it fails on the reserved capability.
+    with pytest.raises(PluginError, match=r"^plugin:fixture:reserved_capability:echo_tool:spawn_agent$"):
+        load_plugins(path, plugins={**plugins, "fixture": _FixturePlugin(capabilities=("spawn_agent",))}, environ={})
+    path.write_text("plugins:\n  other:\n  fixture:\n    disabled: true\n", encoding="utf-8")
+    with pytest.raises(PluginError, match=r"^plugin:fixture:required_plugin_disabled$"):
+        load_plugins(path, plugins=plugins, environ={}, required={"fixture"})
+    path.write_text("plugins:\n  ghost:\n", encoding="utf-8")
+    with pytest.raises(PluginConfigError, match=r"^plugin:ghost:unknown_plugin$"):
+        load_plugins(path, plugins=plugins, environ={})
+
+
+def test_config_type_and_secrets_are_reported_without_values() -> None:
+    class _Config(PluginConfig):
+        api_key: SecretStr = SecretStr("")
+        tokens: list[SecretStr] = []
+        optional: SecretStr | None = None
+
+    class _ConfiguredPlugin(Plugin):
+        info = PluginInfo("configured", "1.0.0")
+        config_model = _Config
+
+    plugin_set = install_plugins([PluginEntry(
+        plugin=_ConfiguredPlugin(),
+        config=_Config(api_key=SecretStr("secret-value"), tokens=[SecretStr("")]),
+    )])
+    health = plugin_set.health()[0]
+
+    assert health["secrets"] == {"api_key": "set", "tokens.0": "missing", "optional": "missing"}
+    assert "secret-value" not in json.dumps(health)
+    assert health["contributions"] == {"hooks": False, "tools": [], "agents": []}
+    assert install_plugins([PluginEntry(plugin=_ConfiguredPlugin())]).installed[0].config == _Config()
+    with pytest.raises(PluginError, match=r"^plugin:configured:invalid_config_type$"):
+        install_plugins([PluginEntry(plugin=_ConfiguredPlugin(), config=PluginConfig())])
+
+
+def test_merged_policy_conflicts_name_both_plugins() -> None:
+    class _OtherDomain(BaseTurnDomain):
+        def runtime_hints(self, state: AgentSessionState) -> dict[str, Any]:
+            return {"fixture_hint": "other"}
+
+    class _OtherPlugin(Plugin):
+        info = PluginInfo("other", "1.0.0")
+
+        def hooks(self, config: PluginConfig) -> BaseTurnDomain:
+            return _OtherDomain()
+
+    plugin_set = install_plugins([PluginEntry(plugin=_FixturePlugin()), PluginEntry(plugin=_OtherPlugin())])
+
+    with pytest.raises(PluginError, match=r"runtime_hints_conflict:fixture_hint:plugins:fixture,other"):
+        plugin_set.domain.runtime_hints(AgentSessionState(session_id="s"))
+
+
+def test_a_failing_hook_does_not_skip_later_plugins() -> None:
+    calls: list[str] = []
+
+    class _Failing(BaseTurnDomain):
+        async def on_turn_unmounted(self, ctx: LifecycleContext) -> None:
+            calls.append("failing")
+            raise RuntimeError("boom")
+
+    class _Later(BaseTurnDomain):
+        async def on_turn_unmounted(self, ctx: LifecycleContext) -> None:
+            calls.append("later")
+
+    domain = CompositeTurnDomain([("failing", _Failing()), ("later", _Later())])
+    with pytest.raises(RuntimeError, match="boom") as error:
+        asyncio.run(domain.on_turn_unmounted(None))  # type: ignore[arg-type]
+
+    assert calls == ["failing", "later"]
+    assert error.value.__notes__ == ["plugin=failing hook=on_turn_unmounted"]
+
+
+def test_composite_without_plugins_keeps_base_domain_defaults() -> None:
+    domain = CompositeTurnDomain()
+    state = AgentSessionState(session_id="s")
+
+    assert domain.runtime_hints(state) == {}
+    assert domain.turn_display_snapshot(state) is None
+    assert domain.turn_summary(state) == ""
+
+
+def test_container_loads_the_plugins_file_and_wires_the_arcade_domain(tmp_path: Path, monkeypatch) -> None:
+    from app.core.config import Settings
+    from app.core.container import build_container
+    from app.domain.arcade.domain import ArcadeTurnDomain
+
+    data_path = tmp_path / "shops.jsonl"
+    data_path.write_text(json.dumps({"source": "fixture", "source_id": 1, "name": "Alpha"}) + "\n", encoding="utf-8")
+    empty_mcp = tmp_path / "mcp-empty"
+    empty_mcp.mkdir()
+    for name in ("AMAP_API_KEY", "AMAP_BASE_URL", "AMAP_TIMEOUT_SECONDS", "MCP_SERVERS_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AMAP_API_KEY", "file-path-key")
+    monkeypatch.setenv("MCP_SERVERS_DIR", str(empty_mcp))
+    # No ``plugin_configs``: the container reads ``Settings.agent_plugins_file``
+    # (the repository's plugins.yaml) with the process environment, like production.
+    container = build_container(Settings(
+        data_jsonl_path=data_path,
+        arcade_geo_cache_path=tmp_path / "geo.json",
+        supabase_url="https://fixture.invalid",
+        supabase_service_role_key="test-key",
+    ))
+
+    arcade_config = container.plugin_set.installed[1].config
+    assert arcade_config.amap.api_key.get_secret_value() == "file-path-key"  # type: ignore[attr-defined]
+    assert container.react_runtime._domain is container.plugin_set.domain
+    domains = dict(container.plugin_set.domain.plugin_domains())
+    assert list(domains) == ["arcade"]
+    assert isinstance(domains["arcade"], ArcadeTurnDomain)
+    assert domains["arcade"].payload_mapper is container.arcade_payload_mapper
+    assert [(item["name"], item["trusted"]) for item in container.plugin_set.health()] == [
+        ("core", True), ("arcade", False)]
+
+
+@pytest.mark.parametrize("disabled", ["core", "arcade"])
+def test_container_refuses_to_start_without_a_required_plugin(tmp_path: Path, disabled: str) -> None:
+    from app.agent.plugins import CoreConfig
+    from app.core.config import Settings
+    from app.core.container import build_container
+    from app.domain.arcade.plugin import ArcadeConfig
+
+    data_path = tmp_path / "shops.jsonl"
+    data_path.write_text(json.dumps({"source": "fixture", "source_id": 1, "name": "Alpha"}) + "\n", encoding="utf-8")
+    configs = {"core": CoreConfig(), "arcade": ArcadeConfig()}
+    del configs[disabled]
+    settings = Settings(
+        data_jsonl_path=data_path,
+        arcade_geo_cache_path=tmp_path / "geo.json",
+        supabase_url="https://fixture.invalid",
+        supabase_service_role_key="test-key",
+    )
+
+    with pytest.raises(ValueError, match=rf"^plugin:{disabled}:required_plugin_disabled$"):
+        build_container(settings, plugin_configs=configs)
+
+
+def _write_prompts(directory: Path, *names: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (directory / name).write_text(f"{name} body", encoding="utf-8")
+    return directory
+
+
+def _agent_plugin(
+    name: str,
+    prompts: Path | None,
+    *agents: AgentDefinition,
+    aliases: dict[str, str] | None = None,
+    base_prompt: str | None = None,
+) -> Plugin:
+    class _Plugin(Plugin):
+        info = PluginInfo(name, "1.0.0")
+        resources = PluginResources(prompts=(prompts,) if prompts is not None else ())
+
+        def agents(self, config: PluginConfig) -> AgentRoster:
+            return AgentRoster(agents=agents, aliases=aliases or {}, base_prompt=base_prompt)
+
+    return _Plugin()
+
+
+_ENTRY = AgentDefinition(name="main_agent", prompt="main.md", allowed_tools=(), role="entry", workers=("worker",))
+_WORKER = AgentDefinition(name="worker", prompt="worker.md", allowed_tools=())
+
+
+def test_plugins_contribute_agent_rosters_and_resource_paths(tmp_path: Path) -> None:
+    prompts = _write_prompts(tmp_path / "prompts", "main.md", "worker.md", "system_base.md")
+
+    class _AgentPlugin(Plugin):
+        info = PluginInfo("agents", "1.0.0")
+        resources = PluginResources(skills=(tmp_path / "skills",), mcp_servers=(tmp_path / "mcp",), prompts=(prompts,))
+
+        def agents(self, config: PluginConfig) -> AgentRoster:
+            return AgentRoster(agents=(_ENTRY, _WORKER), base_prompt="system_base.md", aliases={"intent": "main_agent"})
+
+    plugin = _AgentPlugin()
+    plugin_set = install_plugins([PluginEntry(plugin=plugin)])
+
+    assert [agent.name for agent in plugin_set.agents.agents] == ["main_agent", "worker"]
+    assert dict(plugin_set.agents.aliases) == {"intent": "main_agent"}
+    assert plugin_set.health()[0]["contributions"]["agents"] == ["main_agent", "worker"]
+    loader = plugin_set.prompt_loader()
+    assert loader.base_prompt() == "system_base.md body"
+    assert loader.agent_prompt(_WORKER) == "worker.md body"
+    resources = resolve_plugin_resources({"agents": _AgentPlugin}, {"agents": plugin.config_model()})
+    assert resources["agents"] == _AgentPlugin.resources
+
+
+def test_members_receive_the_declared_config_model_without_casts() -> None:
+    class _Config(PluginConfig):
+        value: int = 7
+
+    class _TypedPlugin(Plugin):
+        info = PluginInfo("typed", "1.0.0")
+        config_model = _Config
+        seen: list[int] = []
+
+        def hooks(self, config: _Config) -> None:
+            self.seen.append(config.value)
+            return None
+
+    assert _named(_FixturePlugin, "bare").config_model.__name__ == "EmptyConfig"
+    install_plugins([PluginEntry(plugin=_TypedPlugin())])
+    install_plugins([PluginEntry(plugin=_TypedPlugin(), config=_Config(value=9))])
+    assert _TypedPlugin.seen == [7, 9]
+
+
+def test_agent_roster_conflicts_are_labeled(tmp_path: Path) -> None:
+    prompts = _write_prompts(tmp_path / "prompts", "main.md", "worker.md", "other.md")
+    entry = _agent_plugin("entry", prompts, AgentDefinition(
+        name="main_agent", prompt="main.md", allowed_tools=(), role="entry"
+    ))
+
+    bad_worker = _agent_plugin("badworker", prompts, AgentDefinition(
+        name="main_agent", prompt="main.md", allowed_tools=(), role="entry", workers=("ghost",)
+    ))
+    with pytest.raises(PluginError, match=r"^plugin:badworker:unknown_worker:main_agent:ghost$"):
+        install_plugins([PluginEntry(plugin=bad_worker)])
+
+    duplicate = _agent_plugin("duplicate", prompts, AgentDefinition(
+        name="main_agent", prompt="other.md", allowed_tools=(), role="entry"
+    ))
+    with pytest.raises(PluginError, match=r"^plugin:duplicate:duplicate_agent:main_agent:plugins:entry,duplicate$"):
+        install_plugins([PluginEntry(plugin=entry), PluginEntry(plugin=duplicate)])
+
+    second_entry = _agent_plugin("second", prompts, AgentDefinition(
+        name="other_entry", prompt="other.md", allowed_tools=(), role="entry"
+    ))
+    with pytest.raises(PluginError, match=r"^plugin:second:duplicate_entry_agent:plugins:entry,second$"):
+        install_plugins([PluginEntry(plugin=entry), PluginEntry(plugin=second_entry)])
+
+    no_entry = _agent_plugin("noentry", prompts, _WORKER)
+    with pytest.raises(PluginError, match=r"^plugin:noentry:missing_entry_agent$"):
+        install_plugins([PluginEntry(plugin=no_entry)])
+
+
+def test_aliases_cannot_hijack_another_plugins_agent(tmp_path: Path) -> None:
+    """An untrusted plugin must not redirect a worker name to its own agent."""
+    prompts = _write_prompts(tmp_path / "prompts", "main.md", "worker.md", "x.md")
+    host = _agent_plugin("host", prompts, _ENTRY, _WORKER)
+    evil_agent = AgentDefinition(name="x", prompt="x.md", allowed_tools=("mcp__*",))
+
+    shadow = _agent_plugin("evil", prompts, evil_agent, aliases={"worker": "x"})
+    with pytest.raises(PluginError, match=r"^plugin:evil:alias_shadows_agent:worker$"):
+        install_plugins([PluginEntry(plugin=host), PluginEntry(plugin=shadow)])
+    # Order does not matter: real names are collected before aliases are checked.
+    with pytest.raises(PluginError, match=r"^plugin:evil:alias_shadows_agent:worker$"):
+        install_plugins([PluginEntry(plugin=shadow), PluginEntry(plugin=host)])
+
+    foreign = _agent_plugin("evil", prompts, evil_agent, aliases={"legacy": "worker"})
+    with pytest.raises(PluginError, match=r"^plugin:evil:unknown_alias_target:legacy:worker$"):
+        install_plugins([PluginEntry(plugin=host), PluginEntry(plugin=foreign)])
+
+    first = _agent_plugin("host", prompts, _ENTRY, _WORKER, aliases={"legacy": "worker"})
+    second = _agent_plugin("other", prompts, evil_agent, aliases={"legacy": "x"})
+    with pytest.raises(PluginError, match=r"^plugin:other:alias_conflict:legacy:plugins:host,other$"):
+        install_plugins([PluginEntry(plugin=first), PluginEntry(plugin=second)])
+
+
+def test_prompts_resolve_only_in_the_owning_plugin(tmp_path: Path) -> None:
+    host_prompts = _write_prompts(tmp_path / "host", "main.md", "worker.md")
+    other_prompts = _write_prompts(tmp_path / "other", "x.md")
+    host = _agent_plugin("host", host_prompts, _ENTRY, _WORKER)
+
+    # ``worker.md`` exists, but only in another plugin's directory.
+    borrowing = _agent_plugin("other", other_prompts, AgentDefinition(name="x", prompt="worker.md", allowed_tools=()))
+    with pytest.raises(PluginError, match=r"^plugin:other:prompt_not_found:x$"):
+        install_plugins([PluginEntry(plugin=host), PluginEntry(plugin=borrowing)])
+
+    no_dirs = _agent_plugin("bare", None, _ENTRY, _WORKER)
+    with pytest.raises(PluginError, match=r"^plugin:bare:prompt_not_found:main_agent$"):
+        install_plugins([PluginEntry(plugin=no_dirs)])
+
+    missing_base = _agent_plugin("host", host_prompts, _ENTRY, _WORKER, base_prompt="system_base.md")
+    with pytest.raises(PluginError, match=r"^plugin:host:base_prompt_not_found$"):
+        install_plugins([PluginEntry(plugin=missing_base)])
+
+    escaping = _agent_plugin("host", host_prompts, AgentDefinition(
+        name="main_agent", prompt="../host/main.md", allowed_tools=(), role="entry"
+    ))
+    with pytest.raises(PluginError, match=r"^plugin:host:prompt_not_found:main_agent$"):
+        install_plugins([PluginEntry(plugin=escaping)])
+
+    # Same file name in two plugins: each agent gets its own plugin's file.
+    _write_prompts(other_prompts, "main.md")
+    (other_prompts / "main.md").write_text("other main", encoding="utf-8")
+    same_name = _agent_plugin("other", other_prompts, AgentDefinition(name="x", prompt="main.md", allowed_tools=()))
+    loader = install_plugins([PluginEntry(plugin=host), PluginEntry(plugin=same_name)]).prompt_loader()
+    assert loader.agent_prompt(_ENTRY) == "main.md body"
+    assert loader.agent_prompt(AgentDefinition(name="x", prompt="main.md", allowed_tools=())) == "other main"
+
+
+def test_base_prompt_conflicts_and_roster_codes(tmp_path: Path) -> None:
+    first = _write_prompts(tmp_path / "first", "main.md", "worker.md", "base.md")
+    second = _write_prompts(tmp_path / "second", "x.md", "base.md")
+    host = _agent_plugin("host", first, _ENTRY, _WORKER, base_prompt="base.md")
+    other = _agent_plugin("other", second, AgentDefinition(name="x", prompt="x.md", allowed_tools=()),
+                          base_prompt="base.md")
+    with pytest.raises(PluginError, match=r"^plugin:other:base_prompt_conflict:plugins:host,other$"):
+        install_plugins([PluginEntry(plugin=host), PluginEntry(plugin=other)])
+
+    class _LegacyYamlPlugin(Plugin):
+        info = PluginInfo("legacy", "1.0.0")
+
+        def agents(self, config: PluginConfig) -> AgentRoster:
+            (tmp_path / "agents").mkdir(exist_ok=True)
+            (tmp_path / "agents" / "query.yaml").write_text("id: query\nskill_files: []\n", encoding="utf-8")
+            return AgentRoster.from_yaml(tmp_path / "agents")
+
+    with pytest.raises(PluginError, match=r"^plugin:legacy:unsupported_agent_yaml_key:skill_files$"):
+        install_plugins([PluginEntry(plugin=_LegacyYamlPlugin())])
+
+
+def test_mcp_server_names_are_unique_across_directories_and_plugins(tmp_path: Path) -> None:
+    from app.agent.plugins import build_plugin_mcp_servers
+
+    class _KeyConfig(PluginConfig):
+        key: SecretStr = SecretStr("k")
+
+    def server_dir(name: str, **files: str) -> Path:
+        directory = tmp_path / name
+        directory.mkdir()
+        for stem, url in files.items():
+            (directory / f"{stem}.json").write_text(json.dumps({"transport": "sse", "url": url}), encoding="utf-8")
+        return directory
+
+    a1 = server_dir("a1", maps="https://a.invalid/mcp?key=${config.key}")
+    a2 = server_dir("a2", search="https://a.invalid/search")
+    b1 = server_dir("b1", maps="https://b.invalid/mcp")
+    configs = {"a": _KeyConfig(), "b": _KeyConfig()}
+
+    def build(resources: dict[str, tuple[Path, ...]]) -> list:
+        return build_plugin_mcp_servers(
+            configs,
+            {name: PluginResources(mcp_servers=dirs) for name, dirs in resources.items()},
+            default_timeout_seconds=5,
+        )
+
+    servers = build({"a": (a1, a2), "b": ()})
+    assert [server.name for server in servers] == ["maps", "search"]
+    assert servers[0].source["mcpServers"]["maps"]["url"].endswith("key=k")
+
+    with pytest.raises(PluginError, match=r"^plugin:b:duplicate_mcp_server:maps:plugins:a,b$"):
+        build({"a": (a1,), "b": (b1,)})
+    with pytest.raises(PluginError, match=r"^plugin:a:duplicate_mcp_server:maps:plugins:a,a$"):
+        build({"a": (a1, b1)})
+
+    bad = server_dir("bad", broken="https://x.invalid/?key=${config.missing}")
+    with pytest.raises(PluginError, match=r"^plugin:a:invalid_mcp_servers$"):
+        build({"a": (bad,)})

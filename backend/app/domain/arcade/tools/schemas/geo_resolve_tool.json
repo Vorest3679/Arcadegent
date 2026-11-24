@@ -1,0 +1,18 @@
+{
+  "name": "geo_resolve_tool",
+  "kind": "function",
+  "description": "Resolve map provider by province code.",
+  "capabilities": ["read_only", "geo"],
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "province_code": {
+        "anyOf": [{ "type": "string" }, { "type": "null" }],
+        "title": "Province Code"
+      }
+    },
+    "required": ["province_code"],
+    "title": "GeoResolveArgs",
+    "type": "object"
+  }
+}

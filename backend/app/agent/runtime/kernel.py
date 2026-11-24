@@ -17,7 +17,7 @@ from uuid import uuid4
 from app.agent._logging import get_logger, log_exception_frames, log_ref
 from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.context_builder import ContextBuilder
-from app.agent.context.turn_recorder import append_turn
+from app.agent.context.turn_recorder import append_turn, save_session
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.actions import ToolActions
 from app.agent.runtime.agent_loop import STATUS_COMPLETED, AgentLoop, LoopOutcome, LoopSpec
@@ -132,9 +132,10 @@ class AgentKernel:
         self._domain: TurnDomain = domain or BaseTurnDomain()
         self._lifecycle = LifecycleDispatcher(self._domain)
         self._artifacts = artifacts or ArtifactSink()
+        self._entry_name = subagent_builder.entry_name
         # Shared by every worker dispatch so overlapping workers agree on the
         # parent's live ``active_subagent``.
-        self._worker_slots = ActiveWorkerSlots()
+        self._worker_slots = ActiveWorkerSlots(entry_name=self._entry_name)
 
     def _new_loop(self, turn: TurnInput) -> AgentLoop:
         # Built per run from the current attributes, so replaced collaborators
@@ -240,13 +241,13 @@ class AgentKernel:
 
     async def _run_turn(self, turn: TurnInput) -> TurnResult:
         session_id = turn.session_id or f"s_{uuid4().hex[:12]}"
-        state = self._session_store.get_or_create_session(session_id)
+        state = await asyncio.to_thread(self._session_store.get_or_create_session, session_id)
         self._bind_client_scope(state, turn.client_id)
         state.status = "running"
         state.last_error = None
         state.updated_at = _utc_now_iso()
         state.working_memory = ensure_working_memory_shape(state.working_memory)
-        self._session_store.save_session(state)
+        # Not saved yet: the user turn below is the first write of this run.
         run_ctx = self._lifecycle_context(
             LifecycleScope.RUN,
             LifecyclePhase.CREATE,
@@ -278,7 +279,7 @@ class AgentKernel:
             state.last_error = error_message
             state.working_memory["last_error"] = {"message": error_message}
             state.updated_at = _utc_now_iso()
-            self._session_store.save_session(state)
+            await save_session(self._session_store, state)
             publish_event(
                 KernelEvent.SESSION_FAILED,
                 {
@@ -310,7 +311,7 @@ class AgentKernel:
     ) -> TurnResult:
         state.turn_index += 1
         state.skill_execution = SkillExecution()
-        state.active_subagent = "main_agent"
+        state.active_subagent = self._entry_name
         state.working_memory = reset_turn_scratch(state.working_memory)
         # Generic artifact lifecycle is a kernel invariant: a domain may add its
         # legacy keys in a turn-mount hook, but never has to remember this step.
@@ -384,12 +385,12 @@ class AgentKernel:
             AgentTurn(
                 role="user",
                 content=turn.message,
-                agent="main_agent",
+                agent=self._entry_name,
                 scope="conversation",
                 payload=request_payload,
             ),
-            session_store=self._session_store,
         )
+        await save_session(self._session_store, state)
         publish_event(
             KernelEvent.SESSION_STARTED,
             {
@@ -431,13 +432,13 @@ class AgentKernel:
             # The reply was not published as model output (summary tool, fallback):
             # show it as a new output so earlier outputs stay sealed.
             output_id = _new_output_id()
-            publish_assistant_text(final_text, output_id=output_id, stream_mode="synthetic")
+            publish_assistant_text(final_text, output_id=output_id, stream_mode="synthetic", agent_name=self._entry_name)
         append_turn(
             state,
             AgentTurn(
                 role="assistant",
                 content=final_text,
-                agent="main_agent",
+                agent=self._entry_name,
                 scope="conversation",
                 payload={
                     "final": True,
@@ -445,7 +446,6 @@ class AgentKernel:
                     "map_artifacts": self._domain.turn_display_snapshot(state),
                 },
             ),
-            session_store=self._session_store,
         )
         response = await self._domain.build_response(
             session_id=session_id,
@@ -458,7 +458,7 @@ class AgentKernel:
         ctx.before_unmount_done = True
         ctx.phase = LifecyclePhase.BEFORE_UNMOUNT
         await self._emit(ctx)
-        state.active_subagent = "main_agent"
+        state.active_subagent = self._entry_name
         state.working_memory["reply"] = final_text
         state.updated_at = _utc_now_iso()
         if model_error is not None:
@@ -470,7 +470,7 @@ class AgentKernel:
         else:
             state.status = "completed"
             state.last_error = None
-        self._session_store.save_session(state)
+        await save_session(self._session_store, state)
         publish_event(
             KernelEvent.SESSION_FAILED if model_error else KernelEvent.ASSISTANT_COMPLETED,
             {
@@ -508,7 +508,7 @@ class AgentKernel:
         ctx: LifecycleContext,
         budget: RunBudget,
     ) -> LoopOutcome:
-        node = self._subagent_builder.node("main_agent")
+        node = self._subagent_builder.node(self._entry_name)
         spec = LoopSpec(
             session_id=session_id,
             state=state,

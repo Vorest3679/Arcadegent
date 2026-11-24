@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
+from app.agent.context.prompt_loader import PromptLoader
 from app.agent.context.context_payload import (
     ContextBlockKey,
     ContextBlockRefDto,
@@ -26,7 +26,7 @@ from app.agent.context.context_payload import (
     ShopTransportContextDto,
 )
 from app.agent.runtime.session_state import AgentSessionState, AgentTurn, get_working_memory_artifact
-from app.agent.subagents.subagent_builder import SubAgentProfile
+from app.agent.subagents.roster import AgentDefinition
 from app.agent.skills.registry import SkillRegistry
 from app.protocol.messages import ChatRequest
 
@@ -39,30 +39,62 @@ class BuiltContext:
     messages: list[dict[str, Any]]
 
 
+# Tool results are pruned for model input only; stored turns and artifacts keep
+# the full output. Like a context compiler's tool-result pruner, oversized text
+# keeps its head and tail (the closing rows and braces) and marks the elided
+# middle, counted in Unicode code points.
+_TOOL_MESSAGE_CHAR_BUDGET = 8192
+_TOOL_MESSAGE_HEAD_CHARS = 4096
+_TOOL_MESSAGE_TAIL_CHARS = 1024
+
+
+def _prune_text(text: str) -> str:
+    """``text`` when within budget; otherwise head + omission marker + tail."""
+    if len(text) <= _TOOL_MESSAGE_CHAR_BUDGET:
+        return text
+    head = text[:_TOOL_MESSAGE_HEAD_CHARS]
+    tail = text[-_TOOL_MESSAGE_TAIL_CHARS:]
+    omitted = len(text) - _TOOL_MESSAGE_HEAD_CHARS - _TOOL_MESSAGE_TAIL_CHARS
+    return f"{head}\n…[omitted {omitted} chars, full result stored in the session]…\n{tail}"
+
+
+def _bounded_text(text: str) -> str:
+    return _prune_text(text)
+
+
+def _bounded_value(value: Any, budget: int | None = None) -> Any:
+    """``value`` itself when its JSON fits; otherwise a pruned preview and its size."""
+    if value is None:
+        return None
+    encoded = json.dumps(value, ensure_ascii=False, default=str)
+    if len(encoded) <= (budget or _TOOL_MESSAGE_CHAR_BUDGET):
+        return value
+    return {"truncated": True, "chars": len(encoded), "preview": _prune_text(encoded)}
+
+
 class ContextBuilder:
     """Build model instructions and messages from session history."""
 
     def __init__(
         self,
         *,
-        prompt_root: Path,
+        prompt_loader: PromptLoader,
         history_turn_limit: int,
         skill_registry: SkillRegistry | None = None,
     ) -> None:
-        self._prompt_root = prompt_root
+        self._prompt_loader = prompt_loader
         self._skill_registry = skill_registry
         self._history_turn_limit = max(4, history_turn_limit)
-        self._prompt_cache: dict[str, str] = {}
 
     def build(
         self,
         *,
         session_state: AgentSessionState,
         request: ChatRequest,
-        subagent: SubAgentProfile,
+        subagent: AgentDefinition,
     ) -> BuiltContext:
-        base_prompt = self._load_prompt("system_base.md").strip()
-        subagent_prompt = self._load_prompt(subagent.prompt_file).strip()
+        base_prompt = self._prompt_loader.base_prompt().strip()
+        subagent_prompt = self._prompt_loader.agent_prompt(subagent).strip()
         skill_block = self._build_skill_block(session_state)
         client_location = self._client_location_payload(session_state=session_state, request=request)
         client_location_block = self._build_client_location_block(client_location)
@@ -71,12 +103,22 @@ class ContextBuilder:
             request=request,
             subagent=subagent,
         )
-        turn_scope = "worker" if subagent.name.endswith("_worker") else "conversation"
-        recent_tool_turns = (
-            session_state.turns
-            if turn_scope == "conversation"
-            else [turn for turn in session_state.turns if turn.scope == turn_scope]
-        )
+        turn_scope = "conversation" if subagent.role == "entry" else "worker"
+        # Each agent sees only its own scope's tool results. A worker's inner
+        # calls reach the entry agent through the worker envelope (its
+        # ``invoke_worker`` result) and the promoted artifacts, never twice.
+        history_turns = self._tail_turns(session_state.turns, scope=turn_scope)
+        # A tool result that is already a native tool message in this request
+        # must not be repeated in ``recent_tool_results``; the block only
+        # carries results that fell out of the message window.
+        in_messages = {
+            turn.call_id for turn in history_turns if turn.role == "tool" and turn.call_id
+        }
+        recent_tool_turns = [
+            turn
+            for turn in session_state.turns
+            if turn.scope == turn_scope and not (turn.call_id and turn.call_id in in_messages)
+        ]
         runtime_hint = {
             "session_id": session_state.session_id,
             "turn_index": session_state.turn_index,
@@ -90,8 +132,8 @@ class ContextBuilder:
                 "resolved_locations": self._compact_value(
                     self._memory_value(session_state.working_memory, "resolved_locations")
                 ),
-                "last_mcp_result": self._compact_value(
-                    session_state.working_memory.get("last_mcp_result")
+                "last_mcp_result": _bounded_value(
+                    self._compact_value(session_state.working_memory.get("last_mcp_result")),
                 ),
                 "last_error": self._compact_value(
                     session_state.working_memory.get("last_error")
@@ -346,7 +388,7 @@ class ContextBuilder:
         if turn.role == "tool":
             payload: dict[str, Any] = {
                 "role": "tool",
-                "content": turn.content,
+                "content": _bounded_text(turn.content),
             }
             if turn.name:
                 payload["name"] = turn.name
@@ -381,7 +423,7 @@ class ContextBuilder:
         *,
         session_state: AgentSessionState,
         request: ChatRequest,
-        subagent: SubAgentProfile,
+        subagent: AgentDefinition,
     ) -> RuntimeContextPayloadDto:
         query = self._build_query_context(session_state=session_state, request=request)
         search_catalog = self._build_search_catalog(session_state=session_state)
@@ -407,7 +449,7 @@ class ContextBuilder:
         self,
         *,
         session_state: AgentSessionState,
-        subagent: SubAgentProfile,
+        subagent: AgentDefinition,
         query: QueryContextDto | None,
         search_catalog: SearchCatalogContextDto | None,
         shop_details: list[ShopDetailContextDto],
@@ -510,14 +552,14 @@ class ContextBuilder:
             status = turn.payload.get("status") if isinstance(turn.payload, dict) else None
             if isinstance(status, str) and status:
                 item["status"] = status
-            arguments = turn.payload.get("arguments") if isinstance(turn.payload, dict) else None
+            arguments = self._tool_turn_arguments(turn)
             compact_arguments = self._compact_value(self._prune_tool_result(arguments))
             if compact_arguments not in (None, "", [], {}):
-                item["arguments"] = compact_arguments
+                item["arguments"] = _bounded_value(compact_arguments)
             result_payload = self._tool_turn_result(turn)
             compact_result = self._compact_value(self._prune_tool_result(result_payload))
             if compact_result not in (None, "", [], {}):
-                item["result"] = compact_result
+                item["result"] = _bounded_value(compact_result)
             if item:
                 results.append(item)
         return results
@@ -540,7 +582,17 @@ class ContextBuilder:
                 summaries.append(summary)
         return summaries
 
+    @staticmethod
+    def _tool_turn_arguments(turn: AgentTurn) -> Any:
+        """What the model asked for: the parsed call, not host-hydrated rows."""
+        payload = turn.payload if isinstance(turn.payload, dict) else {}
+        evidence = payload.get("argument_evidence")
+        if isinstance(evidence, dict) and isinstance(evidence.get("parsed_arguments"), dict):
+            return evidence["parsed_arguments"]
+        return payload.get("arguments")
+
     def _tool_turn_result(self, turn: AgentTurn) -> Any:
+        # Sessions saved before tool outputs were stored once keep a copy here.
         payload_result = turn.payload.get("result") if isinstance(turn.payload, dict) else None
         if isinstance(payload_result, dict):
             return payload_result
@@ -957,27 +1009,3 @@ class ContextBuilder:
 
     def _memory_value(self, memory: dict[str, Any], key: str) -> Any:
         return get_working_memory_artifact(memory, key)
-
-    def _load_prompt(self, filename: str) -> str:
-        return self._load_markdown(
-            filename=filename,
-            root=self._prompt_root,
-            cache=self._prompt_cache,
-        )
-
-    def _load_markdown(
-        self,
-        *,
-        filename: str,
-        root: Path,
-        cache: dict[str, str],
-    ) -> str:
-        if filename in cache:
-            return cache[filename]
-        path = root / filename
-        if not path.exists():
-            content = ""
-        else:
-            content = path.read_text(encoding="utf-8")
-        cache[filename] = content
-        return content

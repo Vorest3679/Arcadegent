@@ -1,0 +1,94 @@
+{
+  "name": "summary_tool",
+  "kind": "function",
+  "description": "Format a deterministic text summary from structured search or navigation context.",
+  "capabilities": ["read_only", "summary", "concludes_turn"],
+  "input_schema": {
+    "additionalProperties": false,
+    "properties": {
+      "topic": {
+        "enum": ["search", "navigation"],
+        "title": "Topic",
+        "type": "string"
+      },
+      "keyword": {
+        "anyOf": [{ "type": "string" }, { "type": "null" }],
+        "default": null,
+        "title": "Keyword"
+      },
+      "total": {
+        "anyOf": [{ "type": "integer" }, { "type": "null" }],
+        "default": null,
+        "title": "Total"
+      },
+      "shops": {
+        "anyOf": [
+          {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Shops"
+      },
+      "sort_by": {
+        "anyOf": [
+          {
+            "enum": ["default", "updated_at", "source_id", "arcade_count", "title_quantity", "distance"],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sort By"
+      },
+      "sort_order": {
+        "anyOf": [
+          {
+            "enum": ["asc", "desc"],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sort Order"
+      },
+      "sort_title_name": {
+        "anyOf": [{ "type": "string" }, { "type": "null" }],
+        "default": null,
+        "title": "Sort Title Name"
+      },
+      "shop_name": {
+        "anyOf": [{ "type": "string" }, { "type": "null" }],
+        "default": null,
+        "title": "Shop Name"
+      },
+      "route": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Route"
+      }
+    },
+    "required": ["topic"],
+    "title": "SummaryArgs",
+    "type": "object"
+  }
+}

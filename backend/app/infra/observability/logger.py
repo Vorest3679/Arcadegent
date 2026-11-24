@@ -1,36 +1,35 @@
-"""Observability layer: centralized logger setup for API and ETL/runtime tracing."""
+"""Observability layer: centralized logger setup for API and ETL/runtime tracing.
+
+The redaction helpers (``log_ref``, ``log_public_label``, ``log_exception_frames``)
+live in the agent package so agent and application log lines share one
+reference key; this module re-exports them and owns handlers and formatting.
+"""
 
 from __future__ import annotations
 
 import logging
-from hashlib import sha256
-from hmac import new as hmac_new
 from pathlib import Path
-from secrets import token_bytes
-from traceback import extract_tb
-from types import TracebackType
-from typing import Collection
 
+from app.agent._logging import (
+    configure_log_frame_root,
+    log_exception_frames,
+    log_public_label,
+    log_ref,
+    safe_traceback_frames,
+)
 
-_LOG_REF_KEY = token_bytes(32)
+__all__ = [
+    "PrivacyFormatter",
+    "get_logger",
+    "log_exception_frames",
+    "log_public_label",
+    "log_ref",
+    "setup_logging",
+]
+
+# parents[2] is the ``backend/app`` package: frames are reported relative to it.
 _APP_ROOT = Path(__file__).resolve().parents[2]
-# a trick:parents[2] is the root of the backend/app package, which is the root of the source tree
-
-def _safe_app_frames(tb: TracebackType) -> str:
-    """Keep code locations without absolute paths, source lines or exception text."""
-    frames: list[str] = []
-    for frame in extract_tb(tb):
-        try:
-            relative = Path(frame.filename).resolve().relative_to(_APP_ROOT)
-        except ValueError:
-            continue
-        frames.append(f"{relative.as_posix()}:{frame.lineno}")
-    return ",".join(frames[-8:])
-
-
-def log_exception_frames(exc: BaseException) -> str:
-    """Return backend frame locations safe to pass to any log handler."""
-    return _safe_app_frames(exc.__traceback__) if exc.__traceback__ else "-"
+configure_log_frame_root(_APP_ROOT)
 
 
 class PrivacyFormatter(logging.Formatter):
@@ -43,7 +42,7 @@ class PrivacyFormatter(logging.Formatter):
         if record.exc_info:
             message += f" exception_type={record.exc_info[0].__name__}"
             if application_log and record.exc_info[2] is not None:
-                frames = _safe_app_frames(record.exc_info[2])
+                frames = safe_traceback_frames(record.exc_info[2])
                 if frames:
                     message += f" app_frames={frames}"
         safe_record = logging.makeLogRecord({
@@ -56,16 +55,6 @@ class PrivacyFormatter(logging.Formatter):
             "stack_info": None,
         })
         return super().format(safe_record)
-
-
-def log_ref(value: str | None) -> str:
-    """Correlate IDs within this process without a reversible plain hash."""
-    return hmac_new(_LOG_REF_KEY, value.encode("utf-8"), sha256).hexdigest()[:12] if value else "-"
-
-
-def log_public_label(value: str | None, allowed: Collection[str]) -> str:
-    """Show known fixed labels; correlate all other caller-controlled labels."""
-    return value if value in allowed else f"ref:{log_ref(value)}"
 
 
 def setup_logging(level: str = "INFO") -> None:

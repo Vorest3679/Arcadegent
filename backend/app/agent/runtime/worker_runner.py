@@ -8,7 +8,7 @@ order, builds the envelope and restores the active agent.
 the two halves so parallel workers overlap while their commits stay ordered.
 
 While workers overlap, ``ActiveWorkerSlots`` keeps one live ``active_subagent``:
-the most recently started worker, or ``main_agent`` once the last one finishes.
+the most recently started worker, or the entry agent once the last one finishes.
 Every worker event still carries its own run id, so the UI can tell them apart.
 """
 
@@ -23,7 +23,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.agent.artifacts.sink import ArtifactSink
-from app.agent.context.turn_recorder import merge_usage_totals, persist_worker_evidence_turns
+from app.agent.context.turn_recorder import merge_usage_totals, persist_worker_evidence_turns, save_session
 from app.agent.runtime.agent_loop import STATUS_COMPLETED, STATUS_FAILED, LoopOutcome, LoopSpec
 from app.agent.runtime.domain_port import TurnDomain
 from app.agent.runtime.events import KernelEvent, emit_agent_changed, publish as publish_event
@@ -94,8 +94,9 @@ class ActiveWorkerSlots:
     能够正确地恢复 active_subagent。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, entry_name: str) -> None:
         # 元组会被封装成entry，entry[0]是parent_state，entry[1]是slots列表
+        self._entry_name = entry_name
         self._slots: dict[int, tuple[AgentSessionState, list[tuple[str, str]]]] = {}
 
     def _entry(self, parent: AgentSessionState) -> list[tuple[str, str]]:
@@ -113,14 +114,18 @@ class ActiveWorkerSlots:
         return previous
 
     def next_active(self, parent: AgentSessionState, *, run_id: str) -> str:
-        """切换到下一个活跃的worker，如果没有则返回main_agent"""
+        """切换到下一个活跃的worker，如果没有则返回入口 agent"""
         entry = self._slots.get(id(parent))
         remaining = [
             name
             for item_run_id, name in (entry[1] if entry is not None else [])
             if item_run_id != run_id # 循环过滤掉当前的run_id，剩下的就是其他活跃的worker
         ]
-        return remaining[-1] if remaining else "main_agent"
+        return remaining[-1] if remaining else self._entry_name
+
+    def has_active(self, parent: AgentSessionState) -> bool:
+        """Whether any worker of ``parent`` still holds a slot."""
+        return id(parent) in self._slots
 
     def clear(self, parent: AgentSessionState) -> None:
         """Drop every slot for ``parent`` (turn-end safety net)."""
@@ -139,7 +144,7 @@ class ActiveWorkerSlots:
             self._slots[id(parent)] = (entry[0], remaining)
         else:
             self._slots.pop(id(parent), None)
-        return remaining[-1][1] if remaining else "main_agent"
+        return remaining[-1][1] if remaining else self._entry_name
 
 
 @dataclass
@@ -165,6 +170,8 @@ class WorkerRun:
     slot_released: bool = False
     unmounted: bool = False
     error_emitted: bool = False
+    # Set when the parent changed in memory and still needs one save.
+    needs_save: bool = False
 
 
 @dataclass
@@ -215,7 +222,7 @@ class WorkerRunner:
         self._emit = emit
         self._safe_emit = safe_emit
         self._run_loop = run_loop
-        self._slots = slots or ActiveWorkerSlots()
+        self._slots = slots or ActiveWorkerSlots(entry_name=subagent_builder.entry_name)
 
     def prepare(
         self,
@@ -292,6 +299,7 @@ class WorkerRunner:
         except asyncio.CancelledError as exc:
             await self._emit_error(run, exc, reason="cancelled")
             self._recover(run)
+            await self._persist_parent(run)
             await self._unmount(run)
             raise
         except Exception as exc:
@@ -306,7 +314,7 @@ class WorkerRunner:
 
         The worker's ``active_subagent`` transition is the live UI signal:
         while several workers overlap the parent shows the most recently
-        started one, and ``main_agent`` returns once the last one finishes.
+        started one, and the entry agent returns once the last one finishes.
         Evidence, usage, artifacts and the envelope wait for ``finish``.
         Errors and cancellation propagate to ``start``, which owns recovery.
         """
@@ -329,8 +337,9 @@ class WorkerRunner:
             parent, run_id=run.run_id, worker_name=run.worker_name
         )
         run.slot_registered = True
+        # Live state only: the UI follows ``subagent.changed``; the parent is
+        # persisted when the worker's result is committed.
         parent.active_subagent = run.worker_name
-        self._session_store.save_session(parent)
         emit_agent_changed(
             from_agent=previous_agent,
             to_agent=run.worker_name,
@@ -393,6 +402,7 @@ class WorkerRunner:
             self._recover(run)
             raise
         finally:
+            await self._persist_parent(run)
             await self._unmount(run)
         dispatch.envelope = envelope
         return envelope
@@ -505,7 +515,7 @@ class WorkerRunner:
             return
         parent.active_subagent = target
         parent.updated_at = _utc_now_iso()
-        self._session_store.save_session(parent)
+        run.needs_save = True
         emit_agent_changed(
             from_agent=run.worker_name,
             to_agent=target,
@@ -519,6 +529,20 @@ class WorkerRunner:
             return
         self._commit_evidence(run)
         self._restore_parent(run, reason="worker.unmounted")
+
+    async def _persist_parent(self, run: WorkerRun) -> None:
+        """Save the parent once per settled worker, off the event loop.
+
+        While sibling workers still run, the save waits for the last one: the
+        committed evidence is in memory and the next save (that sibling's, or
+        the entry loop's next tool result) persists it.
+        """
+        if not run.needs_save:
+            return
+        run.needs_save = False
+        if self._slots.has_active(run.parent_state):
+            return
+        await save_session(self._session_store, run.parent_state)
 
     async def _unmount(self, run: WorkerRun) -> None:
         """Emit ``unmounted`` exactly once per worker."""

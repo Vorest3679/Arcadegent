@@ -100,10 +100,9 @@ class ArcadeTurnDomain(BaseTurnDomain):
         return observations.artifacts_from_result(state=state, result=result)
 
     def session_display(self, state: AgentSessionState) -> ArcadeDisplay:
-        """Current display projection shared by the response and session detail.
+        """Current display projection, the same one ``replies.ArcadeSessionDisplay`` gives the session detail.
 
-        Arcade-specific, so it is not part of the kernel's ``TurnPresenter``;
-        ``ChatSessionDetailService`` reaches it through its own narrow protocol.
+        Arcade-specific, so it is not part of the kernel's ``TurnPresenter``.
         """
         return replies.display_artifacts(state, artifact_sink=self.artifact_sink)
 

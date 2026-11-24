@@ -1,4 +1,0 @@
-{
-  "transport": "streamable-http",
-  "url": "https://mcp.amap.com/mcp?key=${AMAP_API_KEY}"
-}
