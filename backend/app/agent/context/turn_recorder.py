@@ -7,6 +7,7 @@ event order remains unchanged.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -39,20 +40,21 @@ def _new_usage_totals() -> dict[str, int]:
     }
 
 
-def append_turn(
-    state: AgentSessionState,
-    turn: AgentTurn,
-    *,
-    persist: bool = True,
-    session_store: SessionStore | None = None,
-) -> None:
-    """Append a turn to the session state, with optional persistence."""
+async def save_session(session_store: SessionStore, state: AgentSessionState) -> None:
+    """Persist ``state`` off the event loop.
+
+    Session stores may block on network I/O (Supabase over a synchronous
+    HTTP client), so the kernel never calls ``save_session`` directly from a
+    coroutine. The state must not be mutated until the save returns; every
+    caller awaits it in the loop coroutine that owns the state.
+    """
+    await asyncio.to_thread(session_store.save_session, state)
+
+
+def append_turn(state: AgentSessionState, turn: AgentTurn) -> None:
+    """Append a turn to the session state; callers persist with :func:`save_session`."""
     state.turns.append(turn)
     state.updated_at = _utc_now_iso()
-    if persist:
-        if session_store is None:
-            raise RuntimeError("session_store is required to persist turns")
-        session_store.save_session(state)
 
 
 def record_model_call(
@@ -125,7 +127,6 @@ def record_model_call(
             scope="worker" if worker_run_id else "conversation",
             payload={"model": model_payload},
         ),
-        persist=False,
     )
 
 
@@ -136,11 +137,13 @@ def record_tool_result_turn(
     agent_name: str,
     worker_run_id: str | None,
     tool_arguments: dict[str, Any] | None,
-    persist: bool,
     argument_evidence: dict[str, Any] | None = None,
-    session_store: SessionStore | None = None,
 ) -> None:
-    """Append the tool-result turn; the caller publishes the matching events."""
+    """Append the tool-result turn; the caller persists and publishes events.
+
+    The output is stored once, as the JSON ``content`` sent back to the model;
+    readers parse it instead of keeping a second copy in the payload.
+    """
     append_turn(
         state,
         AgentTurn(
@@ -153,13 +156,10 @@ def record_tool_result_turn(
             scope="worker" if worker_run_id else "conversation",
             payload={
                 "status": result.status,
-                "result": result.output,
                 "arguments": deepcopy(tool_arguments) if isinstance(tool_arguments, dict) else {},
                 "argument_evidence": deepcopy(argument_evidence) if isinstance(argument_evidence, dict) else None,
             },
         ),
-        persist=persist,
-        session_store=session_store,
     )
 
 
@@ -209,5 +209,4 @@ def persist_worker_evidence_turns(
                 payload=deepcopy(turn.payload),
                 created_at=turn.created_at,
             ),
-            persist=False,
         )

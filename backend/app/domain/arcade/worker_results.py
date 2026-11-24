@@ -42,18 +42,22 @@ _WORKER_SNAPSHOT_KEYS = (
     "resolved_locations",
     "client_location",
 )
-# Stable key order in the worker envelope used by the model.
-_ENVELOPE_ARTIFACT_ORDER = (
-    "shop",
-    "shops",
-    "selected_shops",
-    "total",
-    "route",
-    "resolved_locations",
-    "client_location",
-    "destination",
-    "view_payload",
+# The envelope is the worker's tool result for the parent model. Full shop rows
+# and routes already live in the parent's artifacts (promoted by
+# ``ArtifactSink``) and reach the model through ``context_payload``; the
+# envelope only names them. Each shop is listed once, with these fields.
+_ENVELOPE_SHOP_FIELDS = (
+    "source_id",
+    "name",
+    "province_name",
+    "city_name",
+    "county_name",
+    "address",
+    "arcade_count",
+    "distance_m",
 )
+_ENVELOPE_SHOP_LIMIT = 10
+_ENVELOPE_ROUTE_FIELDS = ("provider", "mode", "distance_m", "duration_s", "hint")
 
 
 def _short(text: str | None, *, limit: int = 120) -> str:
@@ -152,13 +156,19 @@ def worker_memory_promotions(worker_memory: dict[str, Any]) -> dict[str, Any]:
     return promoted
 
 
-def _ordered_promoted(promoted_artifacts: dict[str, Any]) -> dict[str, Any]:
-    """Keep the historical envelope key order regardless of promotion order."""
-    ordered = {key: promoted_artifacts[key] for key in _ENVELOPE_ARTIFACT_ORDER if key in promoted_artifacts}
-    for key, value in promoted_artifacts.items():
-        if key not in ordered:
-            ordered[key] = value
-    return ordered
+def _shop_brief(row: dict[str, Any]) -> dict[str, Any]:
+    """The identifying fields of one shop row; details stay in the artifacts."""
+    return {key: row[key] for key in _ENVELOPE_SHOP_FIELDS if row.get(key) not in (None, "")}
+
+
+def _route_brief(route: dict[str, Any]) -> dict[str, Any]:
+    """Route metrics without the polyline; the map reads the full route artifact."""
+    return {key: route[key] for key in _ENVELOPE_ROUTE_FIELDS if route.get(key) not in (None, "")}
+
+
+def _promoted_keys(promoted_artifacts: dict[str, Any]) -> list[str]:
+    """Names of the artifacts this worker committed to the parent, sorted."""
+    return sorted(promoted_artifacts)
 
 
 def build_worker_envelope(
@@ -171,8 +181,13 @@ def build_worker_envelope(
     promoted_artifacts: dict[str, Any],
     failed_error: str | None,
 ) -> dict[str, Any]:
-    """Build the worker result envelope consumed by the parent agent."""
-    promoted_artifacts = _ordered_promoted(promoted_artifacts)
+    """Build the worker result envelope consumed by the parent agent.
+
+    The envelope is model input, so it stays small: each shop appears once
+    with identifying fields only, routes carry metrics without polylines, and
+    ``artifacts`` lists the names of what was committed rather than copying it.
+    """
+    committed = _promoted_keys(promoted_artifacts)
     if worker_name == "navigation_worker":
         destination = get_working_memory_artifact(worker_memory, "shop")
         if not isinstance(destination, dict):
@@ -195,12 +210,9 @@ def build_worker_envelope(
             error=failed_error,
         )
         result = {
-            "summary": summary,
-            "destination": destination if isinstance(destination, dict) else None,
-            "route": route if isinstance(route, dict) else None,
+            "destination": _shop_brief(destination) if isinstance(destination, dict) else None,
+            "route": _route_brief(route) if isinstance(route, dict) else None,
             "provider": worker_memory.get("provider") or (route.get("provider") if isinstance(route, dict) else None),
-            "needs_clarification": bool(missing_fields),
-            "missing_fields": missing_fields,
         }
         return {
             "worker": worker_name,
@@ -208,7 +220,7 @@ def build_worker_envelope(
             "status": status,
             "summary": summary,
             "result": result,
-            "artifacts": promoted_artifacts,
+            "artifacts": committed,
             "missing_fields": missing_fields,
             "error": failed_error if status == "failed" else None,
             "task": task,
@@ -224,7 +236,6 @@ def build_worker_envelope(
         worker_memory.pop("last_db_query", None)
     candidate_shops = memory_shops(worker_memory)
     displayed_shops = display_shops(worker_memory)
-    selected_shop = displayed_shops[0] if displayed_shops else None
     total_raw = get_working_memory_artifact(worker_memory, "total")
     total = int(total_raw) if isinstance(total_raw, int) else len(candidate_shops)
     query = worker_memory.get("last_db_query") if isinstance(worker_memory.get("last_db_query"), dict) else None
@@ -243,15 +254,10 @@ def build_worker_envelope(
         error=failed_error,
     )
     result = {
-        "summary": summary,
         "total": total,
-        "shops": displayed_shops,
-        "candidates": candidate_shops,
-        "selected_shops": displayed_shops,
-        "selected_shop": selected_shop if isinstance(selected_shop, dict) else None,
-        "query": query,
-        "needs_clarification": bool(missing_fields),
-        "missing_fields": missing_fields,
+        # The committed cards, in display order; ``total`` counts all matches.
+        "shops": [_shop_brief(row) for row in displayed_shops[:_ENVELOPE_SHOP_LIMIT]],
+        "query": {key: value for key, value in query.items() if value not in (None, "")} if query else None,
     }
     return {
         "worker": worker_name,
@@ -259,7 +265,7 @@ def build_worker_envelope(
         "status": status,
         "summary": summary,
         "result": result,
-        "artifacts": promoted_artifacts,
+        "artifacts": committed,
         "missing_fields": missing_fields,
         "error": failed_error if status == "failed" else None,
         "task": task,

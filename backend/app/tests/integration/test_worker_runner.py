@@ -38,6 +38,7 @@ from backend.app.tests.integration._runtime_kernel_test_support import (
     _Store,
     _call,
     _run,
+    _runtime,
     _text,
 )
 
@@ -411,3 +412,39 @@ def test_worker_dispatch_exception_becomes_a_failed_tool_result(tmp_path: Path) 
     spawn_turns = [turn for turn in saved.turns if turn.name == "spawn"]
     assert spawn_turns and spawn_turns[-1].payload["status"] == "failed"
     assert saved.working_memory["last_error"]["type"] == "worker_dispatch_error"
+
+
+def test_session_saves_run_off_the_event_loop_and_skip_worker_start(tmp_path: Path) -> None:
+    """Blocking stores (Supabase over sync HTTP) must not stall the event loop."""
+    import threading
+
+    class _ThreadRecordingStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.saves: list[tuple[bool, str]] = []
+
+        def get_or_create_session(self, session_id: str) -> AgentSessionState:
+            assert threading.current_thread() is not threading.main_thread()
+            return super().get_or_create_session(session_id)
+
+        def save_session(self, state: AgentSessionState) -> None:
+            self.saves.append((threading.current_thread() is threading.main_thread(), state.active_subagent))
+            super().save_session(state)
+
+    store = _ThreadRecordingStore()
+    provider = _Provider([
+        ("main_agent", _call("spawn", worker="helper_worker", task="do it")),
+        ("helper_worker", _call("echo", value="x")),
+        ("helper_worker", _text("worker text")),
+        ("main_agent", _text("main done")),
+    ])
+
+    response, _events = _run(_runtime(tmp_path, provider, store), "go")
+
+    assert response.text == "main done"
+    assert store.saves, "the run must persist the session"
+    assert not [save for save in store.saves if save[0]], "save_session ran on the event loop thread"
+    # The worker start is a live UI transition, not a persisted state.
+    assert "helper_worker" not in [active for _on_loop, active in store.saves]
+    # user turn, worker commit, invoke_worker result, final state
+    assert len(store.saves) == 4

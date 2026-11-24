@@ -316,6 +316,17 @@ def plan(config):
             "case_sha256": hashlib.sha256(json.dumps([c.model_dump() for c in config.cases], sort_keys=True).encode()).hexdigest()}
 
 
+def _tool_turn_output(turn: dict) -> object:
+    """A stored tool turn's output: JSON ``content``, or the legacy ``payload.result`` copy."""
+    legacy = (turn.get("payload") or {}).get("result")
+    if legacy is not None:
+        return legacy
+    try:
+        return json.loads(turn.get("content") or "")
+    except (TypeError, ValueError):
+        return None
+
+
 def judge_evidence(attempt):
     """Keep actual tool facts and final answers, excluding nested model transcripts."""
     def clean(value):
@@ -335,7 +346,7 @@ def judge_evidence(attempt):
             if turn.get("role") != "tool":
                 continue
             payload = turn.get("payload") or {}
-            result = payload.get("result")
+            result = _tool_turn_output(turn)
             # Worker envelopes duplicate tool results and embed model transcripts.
             if turn.get("name") not in {"db_query_tool", "route_plan_tool", "geo_resolve_tool", "result_selection_tool"}:
                 continue

@@ -390,6 +390,13 @@ def test_judge_evidence_removes_recursive_raw_and_model_history():
     assert "private reasoning" not in serialized and "duplicate" not in serialized
     assert result["snapshots"][0]["tool_results"][0]["result"]["shops"][0]["price"] == "2"
 
+    # Current sessions store the tool output once, as the JSON content.
+    current = judge_evidence({"case": {}, "snapshots": [{"evidence_id": "e2", "state": {"turns": [
+        {"role": "tool", "name": "db_query_tool", "content": json.dumps({"shops": [{"source_id": 1, "price": "3"}]}),
+         "payload": {"status": "completed"}}
+    ]}, "response": {"reply": "3元"}}]})
+    assert current["snapshots"][0]["tool_results"][0]["result"]["shops"][0]["price"] == "3"
+
 
 def test_judge_has_independent_output_budget(tmp_path, monkeypatch):
     cfg = config(tmp_path, monkeypatch, "EVAL_JUDGE_ENABLED=true\nEVAL_MAX_OUTPUT_TOKENS=1024\n")

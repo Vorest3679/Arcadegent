@@ -23,7 +23,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.agent.artifacts.sink import ArtifactSink
-from app.agent.context.turn_recorder import merge_usage_totals, persist_worker_evidence_turns
+from app.agent.context.turn_recorder import merge_usage_totals, persist_worker_evidence_turns, save_session
 from app.agent.runtime.agent_loop import STATUS_COMPLETED, STATUS_FAILED, LoopOutcome, LoopSpec
 from app.agent.runtime.domain_port import TurnDomain
 from app.agent.runtime.events import KernelEvent, emit_agent_changed, publish as publish_event
@@ -123,6 +123,10 @@ class ActiveWorkerSlots:
         ]
         return remaining[-1] if remaining else self._entry_name
 
+    def has_active(self, parent: AgentSessionState) -> bool:
+        """Whether any worker of ``parent`` still holds a slot."""
+        return id(parent) in self._slots
+
     def clear(self, parent: AgentSessionState) -> None:
         """Drop every slot for ``parent`` (turn-end safety net)."""
         self._slots.pop(id(parent), None)
@@ -166,6 +170,8 @@ class WorkerRun:
     slot_released: bool = False
     unmounted: bool = False
     error_emitted: bool = False
+    # Set when the parent changed in memory and still needs one save.
+    needs_save: bool = False
 
 
 @dataclass
@@ -293,6 +299,7 @@ class WorkerRunner:
         except asyncio.CancelledError as exc:
             await self._emit_error(run, exc, reason="cancelled")
             self._recover(run)
+            await self._persist_parent(run)
             await self._unmount(run)
             raise
         except Exception as exc:
@@ -330,8 +337,9 @@ class WorkerRunner:
             parent, run_id=run.run_id, worker_name=run.worker_name
         )
         run.slot_registered = True
+        # Live state only: the UI follows ``subagent.changed``; the parent is
+        # persisted when the worker's result is committed.
         parent.active_subagent = run.worker_name
-        self._session_store.save_session(parent)
         emit_agent_changed(
             from_agent=previous_agent,
             to_agent=run.worker_name,
@@ -394,6 +402,7 @@ class WorkerRunner:
             self._recover(run)
             raise
         finally:
+            await self._persist_parent(run)
             await self._unmount(run)
         dispatch.envelope = envelope
         return envelope
@@ -506,7 +515,7 @@ class WorkerRunner:
             return
         parent.active_subagent = target
         parent.updated_at = _utc_now_iso()
-        self._session_store.save_session(parent)
+        run.needs_save = True
         emit_agent_changed(
             from_agent=run.worker_name,
             to_agent=target,
@@ -520,6 +529,20 @@ class WorkerRunner:
             return
         self._commit_evidence(run)
         self._restore_parent(run, reason="worker.unmounted")
+
+    async def _persist_parent(self, run: WorkerRun) -> None:
+        """Save the parent once per settled worker, off the event loop.
+
+        While sibling workers still run, the save waits for the last one: the
+        committed evidence is in memory and the next save (that sibling's, or
+        the entry loop's next tool result) persists it.
+        """
+        if not run.needs_save:
+            return
+        run.needs_save = False
+        if self._slots.has_active(run.parent_state):
+            return
+        await save_session(self._session_store, run.parent_state)
 
     async def _unmount(self, run: WorkerRun) -> None:
         """Emit ``unmounted`` exactly once per worker."""

@@ -118,13 +118,14 @@ def test_skill_discovery_loading_business_tools_and_execution_isolation(tmp_path
     state = client.app.state.container.session_store.get_session(payload["session_id"])
     query = next(turn for turn in state.turns if turn.name == "db_query_tool")
     assert query.payload["status"] == "completed"
-    assert query.payload["result"]["total"] == 1
+    assert json.loads(query.content)["total"] == 1
+    assert "result" not in query.payload  # stored once, in content
     for turn in state.turns:
         assert "PARENT_BODY_MARKER" not in turn.content
         assert "REFERENCE_MARKER" not in json.dumps(turn.payload)
         if turn.name == "read_skill":
             assert turn.payload["status"] == "completed"
-            assert turn.payload["result"]["status"] == "loaded"
+            assert json.loads(turn.content)["status"] == "loaded"
     assert "PARENT_BODY_MARKER" not in json.dumps(state_to_dict(state))
     chat_clock.advance()  # Pass the submission cooldown without sleeping.
     response = client.post("/api/chat", json={"client_id": "test-client", "message": "继续", "session_id": payload["session_id"]})

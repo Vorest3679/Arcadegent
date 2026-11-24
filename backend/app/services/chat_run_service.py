@@ -7,11 +7,16 @@ records cancelled/failed runs back into the session store when they finish.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.agent.runtime.react_runtime import ReactRuntime
-from app.agent.runtime.session_state import SessionOwnershipError, ensure_working_memory_shape
+from app.agent.runtime.session_state import (
+    AgentSessionState,
+    SessionOwnershipError,
+    ensure_working_memory_shape,
+)
 from app.infra.db.protocols import SessionStateRepository
 from app.infra.observability.logger import get_logger, log_ref
 from app.protocol.messages import ChatRequest, ChatResponse
@@ -46,10 +51,18 @@ class ChatRunService:
         self._runtime = runtime
         self._runs = runs
         self._session_store = session_store
+        # Serializes preparation per session id. Entries are reference counted
+        # and removed when idle so the map stays bounded by in-flight submits.
+        self._prepare_locks: dict[str, tuple[asyncio.Lock, int]] = {}
 
-    def dispatch(self, request: ChatRequest) -> tuple[ChatRequest, RunRecord]:
-        """Accept a turn as a background run; returns the normalized request and run."""
-        normalized = self._prepare(request)
+    async def dispatch(self, request: ChatRequest) -> tuple[ChatRequest, RunRecord]:
+        """Accept a turn as a background run; returns the normalized request and run.
+
+        Preparation reads and writes the stored session, which may block on a
+        remote store; it runs off the event loop, serialized per session so two
+        concurrent submissions cannot interleave their ownership checks.
+        """
+        normalized = await self._prepare(request)
         record = self._runs.dispatch(
             normalized.session_id or "",
             self._executor(normalized),
@@ -59,7 +72,7 @@ class ChatRunService:
 
     async def run(self, request: ChatRequest) -> tuple[ChatResponse, RunRecord]:
         """Run a turn in the caller's task with the same lifecycle as dispatch."""
-        normalized = self._prepare(request)
+        normalized = await self._prepare(request)
         return await self._runs.run_inline(
             normalized.session_id or "",
             self._executor(normalized),
@@ -70,7 +83,26 @@ class ChatRunService:
         """Cancel the named run of the session."""
         return await self._runs.cancel(session_id, run_id, reason=reason)
 
-    def _prepare(self, request: ChatRequest) -> ChatRequest:
+    async def _prepare(self, request: ChatRequest) -> ChatRequest:
+        """Run :meth:`_prepare_blocking` in a worker thread, one submitter at a time."""
+        session_key = request.session_id
+        if not session_key:
+            # A missing id becomes a fresh random one inside the thread; no contention.
+            return await asyncio.to_thread(self._prepare_blocking, request)
+        entry = self._prepare_locks.get(session_key)
+        lock, users = entry if entry is not None else (asyncio.Lock(), 0)
+        self._prepare_locks[session_key] = (lock, users + 1)
+        try:
+            async with lock:
+                return await asyncio.to_thread(self._prepare_blocking, request)
+        finally:
+            _, users = self._prepare_locks[session_key]
+            if users > 1:
+                self._prepare_locks[session_key] = (lock, users - 1)
+            else:
+                del self._prepare_locks[session_key]
+
+    def _prepare_blocking(self, request: ChatRequest) -> ChatRequest:
         """Normalize the session id, enforce owner scope and mark the stored session running.
 
         Done before the run is accepted so the session is listed and owned as
@@ -83,7 +115,12 @@ class ChatRunService:
             raise ServiceDrainingError()
         if self._runs.is_active(session_id):
             raise SessionBusyError(session_id)
-        state = self._session_store.get_or_create_session(session_id)
+        if request.session_id is None:
+            # A new id cannot already exist, so skip the read and create round
+            # trips; the single save below still registers it for listing.
+            state = AgentSessionState(session_id=session_id)
+        else:
+            state = self._session_store.get_or_create_session(session_id)
         if request.client_id is not None:
             if state.client_id is not None and state.client_id != request.client_id:
                 raise SessionOwnershipError(session_id)

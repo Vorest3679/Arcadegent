@@ -17,7 +17,7 @@ from uuid import uuid4
 from app.agent._logging import get_logger, log_exception_frames, log_ref
 from app.agent.artifacts.sink import ArtifactSink
 from app.agent.context.context_builder import ContextBuilder
-from app.agent.context.turn_recorder import append_turn
+from app.agent.context.turn_recorder import append_turn, save_session
 from app.agent.llm.provider_adapter import ProviderAdapter
 from app.agent.runtime.actions import ToolActions
 from app.agent.runtime.agent_loop import STATUS_COMPLETED, AgentLoop, LoopOutcome, LoopSpec
@@ -241,13 +241,13 @@ class AgentKernel:
 
     async def _run_turn(self, turn: TurnInput) -> TurnResult:
         session_id = turn.session_id or f"s_{uuid4().hex[:12]}"
-        state = self._session_store.get_or_create_session(session_id)
+        state = await asyncio.to_thread(self._session_store.get_or_create_session, session_id)
         self._bind_client_scope(state, turn.client_id)
         state.status = "running"
         state.last_error = None
         state.updated_at = _utc_now_iso()
         state.working_memory = ensure_working_memory_shape(state.working_memory)
-        self._session_store.save_session(state)
+        # Not saved yet: the user turn below is the first write of this run.
         run_ctx = self._lifecycle_context(
             LifecycleScope.RUN,
             LifecyclePhase.CREATE,
@@ -279,7 +279,7 @@ class AgentKernel:
             state.last_error = error_message
             state.working_memory["last_error"] = {"message": error_message}
             state.updated_at = _utc_now_iso()
-            self._session_store.save_session(state)
+            await save_session(self._session_store, state)
             publish_event(
                 KernelEvent.SESSION_FAILED,
                 {
@@ -389,8 +389,8 @@ class AgentKernel:
                 scope="conversation",
                 payload=request_payload,
             ),
-            session_store=self._session_store,
         )
+        await save_session(self._session_store, state)
         publish_event(
             KernelEvent.SESSION_STARTED,
             {
@@ -446,7 +446,6 @@ class AgentKernel:
                     "map_artifacts": self._domain.turn_display_snapshot(state),
                 },
             ),
-            session_store=self._session_store,
         )
         response = await self._domain.build_response(
             session_id=session_id,
@@ -471,7 +470,7 @@ class AgentKernel:
         else:
             state.status = "completed"
             state.last_error = None
-        self._session_store.save_session(state)
+        await save_session(self._session_store, state)
         publish_event(
             KernelEvent.SESSION_FAILED if model_error else KernelEvent.ASSISTANT_COMPLETED,
             {

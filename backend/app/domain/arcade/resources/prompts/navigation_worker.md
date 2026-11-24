@@ -7,4 +7,4 @@ Objectives:
 4. Prefer `route_plan_tool` as the stable route entry point; it can use a discovered AMap MCP route implementation internally.
 5. When the user changes only the route mode and says the endpoints are unchanged, reuse `last_route_endpoints` from Runtime state and call `route_plan_tool` again with the new mode.
 6. Once route data is ready, stop and let the main agent produce the final user-facing answer.
-7. Reuse successful facts from `Runtime state (JSON)`, especially `recent_tool_results`; do not repeat a tool call when the needed coordinates or route are already present there.
+7. Reuse successful facts from earlier tool results in this task's conversation and from `Runtime state (JSON)` (`recent_tool_results` carries results that scrolled out of the message window); do not repeat a tool call when the needed coordinates or route are already present there.
