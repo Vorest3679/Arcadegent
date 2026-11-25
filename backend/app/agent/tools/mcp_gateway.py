@@ -2,9 +2,11 @@
 
 from app.agent.tools.mcp import (
     MCPExecutionResult,
+    MCPResultNormalizer,
     MCPServerConfig,
     MCPServerState,
     MCPToolDescriptor,
+    MCPToolSelector,
     MCPToolGateway,
     MCP_TOOL_PREFIX,
     MCP_TOOL_WILDCARD,
@@ -13,9 +15,11 @@ from app.agent.tools.mcp import (
 
 __all__ = [
     "MCPExecutionResult",
+    "MCPResultNormalizer",
     "MCPServerConfig",
     "MCPServerState",
     "MCPToolDescriptor",
+    "MCPToolSelector",
     "MCPToolGateway",
     "MCP_TOOL_PREFIX",
     "MCP_TOOL_WILDCARD",

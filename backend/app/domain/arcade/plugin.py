@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from pydantic import Field, SecretStr
@@ -17,6 +18,12 @@ from app.agent.plugins import (
     RelPath,
 )
 from app.domain.arcade.domain import ArcadeTurnDomain
+from app.domain.arcade.mcp_route import (
+    AMAP_ROUTE_NORMALIZER,
+    AMAP_ROUTE_SELECTOR,
+    AMAP_SERVER,
+    ROUTE_SELECTOR,
+)
 from app.domain.arcade.profiles import MCP_SERVERS_DIR, PROMPTS_DIR, SKILLS_DIR, arcade_agent_roster
 from app.domain.arcade.tools import AMapConfig, arcade_tool_services, arcade_tool_specs
 from app.infra.db.protocols import ArcadeRepository
@@ -58,7 +65,13 @@ class ArcadePlugin(Plugin):
 
     info = PluginInfo(name="arcade", version="1.0.0", description="Arcade search, navigation and display domain.")
     config_model = ArcadeConfig
-    resources = PluginResources(skills=(SKILLS_DIR,), mcp_servers=(MCP_SERVERS_DIR,), prompts=(PROMPTS_DIR,))
+    resources = PluginResources(
+        skills=(SKILLS_DIR,),
+        mcp_servers=(MCP_SERVERS_DIR,),
+        prompts=(PROMPTS_DIR,),
+        mcp_selectors={ROUTE_SELECTOR: AMAP_ROUTE_SELECTOR},
+        mcp_normalizers={AMAP_SERVER: AMAP_ROUTE_NORMALIZER},
+    )
 
     def __init__(
         self,
@@ -77,11 +90,7 @@ class ArcadePlugin(Plugin):
     def resolved_resources(cls, config: ArcadeConfig) -> PluginResources:
         if config.mcp_servers_dir is None:
             return cls.resources
-        return PluginResources(
-            skills=cls.resources.skills,
-            mcp_servers=(config.mcp_servers_dir,),
-            prompts=cls.resources.prompts,
-        )
+        return replace(cls.resources, mcp_servers=(config.mcp_servers_dir,))
 
     def hooks(self, config: ArcadeConfig) -> ArcadeTurnDomain:
         return ArcadeTurnDomain(payload_mapper=self._payload_mapper, artifact_sink=self._artifact_sink)

@@ -30,8 +30,6 @@ BUSINESS_TOKENS = re.compile(
 ALLOWED_APP_IMPORTS: dict[str, tuple[str, ...]] = {
     "context/context_builder.py": ("app.protocol.messages",),
     "runtime/react_runtime.py": ("app.protocol.messages",),
-    "tools/mcp/dispatcher.py": ("app.protocol.messages",),
-    "tools/mcp/gateway.py": ("app.protocol.messages",),
 }
 
 ALLOWED_BUSINESS_TOKENS: dict[str, tuple[str, ...]] = {
@@ -40,9 +38,6 @@ ALLOWED_BUSINESS_TOKENS: dict[str, tuple[str, ...]] = {
     "runtime/kernel.py": ("map_artifacts",),
     "runtime/react_runtime.py": ("arcade",),
     "runtime/session_state.py": ("navigation_worker", "search_worker"),
-    "tools/mcp/discovery.py": ("导航", "路线"),
-    "tools/mcp/dispatcher.py": ("amap", "gcj02", "geopoint", "routesummarydto", "导航", "路线"),
-    "tools/mcp/gateway.py": ("amap", "gcj02", "geopoint", "routesummarydto", "路线"),
 }
 
 

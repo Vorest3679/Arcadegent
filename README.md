@@ -143,7 +143,7 @@ AGENT_CONTEXT_WINDOW=24
 AGENT_PROVIDER_PROFILE=default
 # AGENT_PLUGINS_FILE=backend/plugins.yaml
 
-# MCP_SERVERS_DIR=backend/app/domain/arcade/resources/mcp_servers
+# MCP_SERVERS_DIR=app/domain/arcade/resources/mcp_servers
 MCP_DEFAULT_TIMEOUT_SECONDS=10
 
 AMAP_API_KEY=
@@ -179,13 +179,15 @@ ARCADE_GEO_REQUEST_TIMEOUT_SECONDS=1.2
 
 文件名会成为 server name，例如 `amap.json` 会注册为 `amap`，远端工具会投影成类似 `mcp__amap__maps_direction_walking` 的本地工具名。
 
-如果第三方 MCP 工具命名发生变化，可以在同一个 JSON 里显式指定路线工具：
+如果第三方 MCP 工具命名发生变化，可以在同一个 JSON 里为选择器显式指定工具；机厅的路线选择器名为 `route`，未指定或指定的工具不存在时回落到领域侧的关键词选择：
 
 ```json
 {
   "transport": "streamable-http",
-  "url": "https://mcp.amap.com/mcp?key=${AMAP_API_KEY}",
-  "route_tool_name": "maps_direction_walking"
+  "url": "https://mcp.amap.com/mcp?key=${config.amap.api_key}",
+  "select_tools": {
+    "route": "maps_direction_walking"
+  }
 }
 ```
 
@@ -568,7 +570,7 @@ pnpm run test:e2e
 
 - 后端启动但无数据：检查 `ARCADE_DATA_JSONL` 是否存在，或访问 `/health` 看 `store` 状态。
 - Agent 回复 provider 错误：检查 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 和 `AGENT_PROVIDER_PROFILE`。
-- 高德 MCP 没有路线：访问 `/health`，查看 `mcp.servers.amap.available_tools`、`selected_route_tool`、`last_error`，必要时配置 `route_tool_name`。
+- 高德 MCP 没有路线：访问 `/health`，查看 `mcp.servers.amap.available_tools`、`selected_route_tool`、`last_error`，必要时在 MCP server JSON 中配置 `select_tools.route`。
 - 浏览器不弹定位授权：确认线上页面是 `https://` 打开，外层 Nginx 或 CDN 没有设置禁止定位的 `Permissions-Policy`，并在浏览器地址栏站点设置里清除旧的定位拒绝记录。
 - 前端地图不可用：检查 `VITE_AMAP_WEB_KEY` 是否是 Web JS API key，必要时配置 `VITE_AMAP_SECURITY_JS_CODE`。
 - 路线不可用或报错：通常是高德 MCP 和 REST 都不可用，检查 `AMAP_API_KEY`、额度、网络和 `/health`。
@@ -578,5 +580,5 @@ pnpm run test:e2e
 
 - 线上级认证、多用户隔离和权限管理尚未接入。
 - 公开仓库不附带真实数据集；本地体验完整检索能力需要自行准备兼容数据源。
-- MCP discovery 依赖第三方服务返回的 tool schema，远端命名变化时可能需要手动指定 `route_tool_name`。
+- MCP discovery 依赖第三方服务返回的 tool schema，远端命名变化时可能需要手动指定 `select_tools.route`。
 - 没有高德 Web JS key 时，前端仍可列表检索并生成高德跳转 URI，但内嵌地图不可用。

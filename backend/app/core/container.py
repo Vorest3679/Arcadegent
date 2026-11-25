@@ -17,6 +17,8 @@ from app.agent.plugins import (
     PluginConfig,
     PluginSet,
     build_plugin_mcp_servers,
+    collect_mcp_normalizers,
+    collect_mcp_selectors,
     collect_skill_roots,
     install_configured,
     load_plugin_configs,
@@ -122,7 +124,9 @@ def build_container(
                 configs,
                 resources,
                 default_timeout_seconds=settings.mcp_default_timeout_seconds,
-            )
+            ),
+            selectors=collect_mcp_selectors(resources),
+            normalizers=collect_mcp_normalizers(resources),
         )
     session_store = session_store if session_store is not None else _build_session_repository(settings)
     artifact_sink = ArtifactSink()

@@ -9,6 +9,7 @@ placeholders reference the same environment variables (plan 5, section 4.2).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from app.core.config import Settings
 from app.services.amap_reverse_geocoder import AMapReverseGeocoder, AMapReverseGeocoderConfig
@@ -53,4 +54,28 @@ def build_arcade_services(
     )
 
 
-__all__ = ["ArcadeServices", "build_arcade_services"]
+def arcade_mcp_health(health: dict[str, Any]) -> dict[str, Any]:
+    """Expose the arcade field name on top of the generic MCP health payload.
+
+    The gateway reports ``selected_tools`` keyed by selector name. The arcade
+    host presents the route selector as ``selected_route_tool``; other host
+    field names, if any, stay unchanged.
+    """
+    servers = health.get("servers")
+    if not isinstance(servers, dict):
+        return health
+    mapped = dict(health)
+    mapped_servers: dict[str, Any] = {}
+    for name, state in servers.items():
+        if isinstance(state, dict):
+            state = dict(state)
+            selected = state.pop("selected_tools", None)
+            state["selected_route_tool"] = (
+                selected.get("route") if isinstance(selected, dict) else None
+            )
+        mapped_servers[name] = state
+    mapped["servers"] = mapped_servers
+    return mapped
+
+
+__all__ = ["ArcadeServices", "arcade_mcp_health", "build_arcade_services"]

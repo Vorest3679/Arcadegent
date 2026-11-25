@@ -13,6 +13,10 @@ from app.agent.tools.local import LocalToolProvider
 from app.agent.tools.mcp_gateway import MCPServerConfig, MCPToolGateway
 from app.agent.tools.permission import ToolPermissionChecker
 from app.agent.tools.registry import ToolRegistry
+from app.domain.arcade.mcp_route import (
+    AMAP_ROUTE_NORMALIZER,
+    AMAP_ROUTE_SELECTOR,
+)
 from app.domain.arcade.tools import arcade_tool_services, arcade_tool_specs
 from app.infra.db.local import LocalArcadeStore
 
@@ -104,9 +108,11 @@ def _build_mcp_gateway() -> MCPToolGateway:
                 source=mcp,
                 url="memory://amap",
                 timeout_seconds=3,
-                route_tool_name="maps_direction_walking",
+                select_tools={"route": "maps_direction_walking"},
             )
-        ]
+        ],
+        selectors={"route": AMAP_ROUTE_SELECTOR},
+        normalizers={"amap": AMAP_ROUTE_NORMALIZER},
     )
     _run(gateway.refresh())
     return gateway

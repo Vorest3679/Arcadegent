@@ -14,16 +14,13 @@ from __future__ import annotations
 # - `mask_url()`: 对 URL 中的敏感信息进行掩码处理。
 # - `discover_tools()`: 从原始工具列表中提取工具描述符。
 # - `build_tool_definitions()`: 根据工具描述符构建工具定义列表，供模型使用。
-# - `pick_route_tool()`: 根据工具描述符和服务器配置选择一个最合适的工具作为路径规划工具。
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from app.agent.tools.mcp.models import (
-    MCPServerConfig,
     MCPToolDescriptor,
     MCP_TOOL_PREFIX,
     MCP_TOOL_WILDCARD,
@@ -149,39 +146,3 @@ def build_tool_definitions(
             }
         )
     return definitions
-
-
-def pick_route_tool(
-    *,
-    config: MCPServerConfig,
-    descriptors: list[MCPToolDescriptor],
-) -> str | None:
-    preferred = (config.route_tool_name or "").strip()
-    if preferred:
-        if preferred.startswith(f"{MCP_TOOL_PREFIX}{config.name}__"):
-            return preferred if any(item.local_name == preferred for item in descriptors) else None
-        local_preferred = local_tool_name(config.name, preferred)
-        return local_preferred if any(item.remote_name == preferred for item in descriptors) else None
-
-    ranked: list[tuple[int, str]] = []
-    for descriptor in descriptors:
-        text = " ".join(
-            [
-                descriptor.remote_name.lower(),
-                descriptor.description.lower(),
-                json.dumps(descriptor.input_schema, ensure_ascii=False).lower(),
-            ]
-        )
-        score = 0
-        if "route" in text or "direction" in text or "路径" in text or "路线" in text or "导航" in text:
-            score += 4
-        if "walking" in text or "driving" in text or "walk" in text or "drive" in text:
-            score += 2
-        if "origin" in text or "destination" in text or "起点" in text or "终点" in text:
-            score += 1
-        if score > 0:
-            ranked.append((score, descriptor.local_name))
-    if not ranked:
-        return None
-    ranked.sort(key=lambda item: (-item[0], item[1]))
-    return ranked[0][1]

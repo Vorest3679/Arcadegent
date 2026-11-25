@@ -5,6 +5,7 @@ from __future__ import annotations
 # 这里存放一些 MCP 工具相关的模型和常量定义（可以类比成 interface），
 # 供 discovery、gateway、client_manager 等模块使用。
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,14 +17,19 @@ MCP_TOOL_WILDCARD = "mcp__*"
 
 @dataclass(frozen=True)
 class MCPServerConfig:
-    """Runtime connection config for one MCP server."""
+    """Runtime connection config for one MCP server.
+
+    ``select_tools`` maps a selector name to an explicitly preferred tool,
+    either its remote name or its local ``mcp__<server>__<tool>`` name. The
+    selector still runs when the preferred tool is absent or unset.
+    """
 
     name: str
     enabled: bool
     source: Any
     url: str | None = None
     timeout_seconds: float = 10.0
-    route_tool_name: str | None = None
+    select_tools: Mapping[str, str] = field(default_factory=dict)
     source_type: str | None = None
 
 
@@ -47,7 +53,7 @@ class MCPServerState:
     configured: bool
     discovered: bool = False
     available_tools: list[str] = field(default_factory=list)
-    selected_route_tool: str | None = None
+    selected_tools: dict[str, str] = field(default_factory=dict)
     last_error: str | None = None
     last_discovery_at: str | None = None
     url: str | None = None

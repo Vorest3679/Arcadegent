@@ -16,7 +16,8 @@ Only declarations live here; installation is :mod:`app.agent.plugins.host`.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -25,6 +26,7 @@ from pydantic import BaseModel, ConfigDict
 from app.agent.runtime.domain_port import BaseTurnDomain
 from app.agent.subagents.roster import AgentRoster
 from app.agent.tools.local import LocalToolProvider
+from app.agent.tools.mcp.ports import MCPResultNormalizer, MCPToolSelector
 
 _PLUGIN_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
@@ -57,11 +59,17 @@ class PluginResources:
     prompts resolve against. Prompt lookups never cross plugins. A plugin may
     override the contents in :meth:`Plugin.resolved_resources` using its
     validated configuration.
+
+    ``mcp_selectors`` and ``mcp_normalizers`` are keyed by selector name and
+    MCP server name respectively. The host collects them into the MCP gateway;
+    names are globally unique across installed plugins.
     """
 
     skills: tuple[Path, ...] = ()
     mcp_servers: tuple[Path, ...] = ()
     prompts: tuple[Path, ...] = ()
+    mcp_selectors: Mapping[str, MCPToolSelector] = field(default_factory=dict)
+    mcp_normalizers: Mapping[str, MCPResultNormalizer] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

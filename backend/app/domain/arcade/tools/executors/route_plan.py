@@ -10,6 +10,7 @@ from typing import Any
 from app.agent.artifacts.model import Artifact
 from app.agent.tools.base import ToolOutcome
 from app.agent.tools.spec import ToolContext
+from app.domain.arcade.mcp_route import plan_amap_route
 from app.protocol.messages import Location
 from app.services.coordinate_transform import wgs84_to_gcj02
 
@@ -184,7 +185,8 @@ async def execute(context: ToolContext, args: dict[str, Any]) -> ToolOutcome:
     route = None
     mcp_tool_gateway = context.get("mcp_tool_gateway")
     if args["provider"] == "amap" and mcp_tool_gateway is not None:
-        route = await mcp_tool_gateway.plan_amap_route(
+        route = await plan_amap_route(
+            mcp_tool_gateway,
             mode=args["mode"],
             origin=origin,
             destination=destination,

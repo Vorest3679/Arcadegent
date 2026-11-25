@@ -181,7 +181,7 @@ def test_health_reports_mcp_tools_loaded_from_config_directory(tmp_path: Path) -
             {
                 "command": sys.executable,
                 "args": [str(fixture_server)],
-                "route_tool_name": "maps_direction_walking",
+                "select_tools": {"route": "maps_direction_walking"},
             }
         ),
         encoding="utf-8",

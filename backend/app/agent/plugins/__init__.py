@@ -27,6 +27,8 @@ from app.agent.plugins.host import (
 )
 from app.agent.plugins.resources import (
     build_plugin_mcp_servers,
+    collect_mcp_normalizers,
+    collect_mcp_selectors,
     collect_skill_roots,
     resolve_plugin_resources,
 )
@@ -40,6 +42,7 @@ from app.agent.plugins.spec import (
 )
 from app.agent.subagents.roster import AgentDefinition, AgentRoster, AgentRosterError
 from app.agent.tools.local import LocalToolProvider
+from app.agent.tools.mcp.ports import MCPResultNormalizer, MCPToolSelector
 
 __all__ = [
     "AgentDefinition",
@@ -52,6 +55,8 @@ __all__ = [
     "EmptyConfig",
     "InstalledPlugin",
     "LocalToolProvider",
+    "MCPResultNormalizer",
+    "MCPToolSelector",
     "Plugin",
     "PluginConfig",
     "PluginConfigError",
@@ -62,6 +67,8 @@ __all__ = [
     "PluginSet",
     "RelPath",
     "build_plugin_mcp_servers",
+    "collect_mcp_normalizers",
+    "collect_mcp_selectors",
     "collect_skill_roots",
     "config_placeholders",
     "install_configured",

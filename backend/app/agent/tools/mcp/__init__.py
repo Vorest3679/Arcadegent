@@ -14,15 +14,18 @@ from app.agent.tools.mcp.models import (
     MCP_TOOL_PREFIX,
     MCP_TOOL_WILDCARD,
 )
+from app.agent.tools.mcp.ports import MCPResultNormalizer, MCPToolSelector
 
 __all__ = [
     "MCPClientManager",
     "MCPDispatcher",
     "MCPExecutionResult",
+    "MCPResultNormalizer",
     "MCPServerConfig",
     "MCPServerState",
     "MCPToolDescriptor",
     "MCPToolGateway",
+    "MCPToolSelector",
     "MCP_TOOL_PREFIX",
     "MCP_TOOL_WILDCARD",
     "build_mcp_server_configs",

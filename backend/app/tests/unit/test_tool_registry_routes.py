@@ -36,8 +36,11 @@ def test_route_plan_tool_prefers_amap_mcp_when_available(tmp_path: Path) -> None
     assert result.output["route"]["duration_s"] == 678
 
 def test_amap_mcp_does_not_use_walking_tool_for_driving() -> None:
+    from app.domain.arcade.mcp_route import plan_amap_route
+
     gateway = _build_mcp_gateway()
-    route = _run(gateway.plan_amap_route(
+    route = _run(plan_amap_route(
+        gateway,
         mode="driving",
         origin=Location(lng=116.3, lat=39.9),
         destination=Location(lng=116.4, lat=39.91),
@@ -229,3 +232,46 @@ def test_route_uses_explicit_plugin_config_not_process_env(tmp_path, monkeypatch
     assert result.status == "completed"
     assert result.output["route"]["distance_m"] == 2000
     assert len(result.output["route"]["polyline"]) == 2
+
+
+def test_amap_mcp_route_selects_the_tool_for_each_mode() -> None:
+    from fastmcp import FastMCP
+    from app.agent.tools.mcp import MCPServerConfig, MCPToolGateway
+    from app.domain.arcade.mcp_route import (
+        AMAP_ROUTE_NORMALIZER,
+        AMAP_ROUTE_SELECTOR,
+        plan_amap_route,
+    )
+
+    mcp = FastMCP("Two-mode AMap MCP")
+
+    @mcp.tool(name="maps_direction_walking", description="步行路径规划，输入 origin 和 destination。")
+    def walking(origin: str, destination: str) -> dict[str, object]:
+        return {"paths": [{"distance": 100, "duration": 60}]}
+
+    @mcp.tool(name="maps_direction_driving", description="驾车路径规划，输入 origin 和 destination。")
+    def driving(origin: str, destination: str) -> dict[str, object]:
+        return {"paths": [{"distance": 200, "duration": 40}]}
+
+    gateway = MCPToolGateway(
+        servers=[
+            MCPServerConfig(
+                name="amap",
+                enabled=True,
+                source=mcp,
+                url="memory://amap",
+                timeout_seconds=3,
+            )
+        ],
+        selectors={"route": AMAP_ROUTE_SELECTOR},
+        normalizers={"amap": AMAP_ROUTE_NORMALIZER},
+    )
+    _run(gateway.refresh())
+
+    origin = Location(lng=116.3, lat=39.9)
+    destination = Location(lng=116.4, lat=39.91)
+    walk_route = _run(plan_amap_route(gateway, mode="walking", origin=origin, destination=destination))
+    drive_route = _run(plan_amap_route(gateway, mode="driving", origin=origin, destination=destination))
+
+    assert walk_route is not None and walk_route.distance_m == 100
+    assert drive_route is not None and drive_route.distance_m == 200

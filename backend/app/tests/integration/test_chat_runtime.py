@@ -141,7 +141,7 @@ def test_navigation_worker_hydrates_route_strings_and_returns_route(tmp_path: Pa
     (mcp_dir / "amap.json").write_text(json.dumps({
         "command": sys.executable,
         "args": [str(fixture_server)],
-        "route_tool_name": "maps_direction_walking",
+        "select_tools": {"route": "maps_direction_walking"},
     }), encoding="utf-8")
     client = _build_client(tmp_path, mcp_servers_dir=mcp_dir)
     adapter = client.app.state.container.react_runtime._provider_adapter
@@ -405,7 +405,7 @@ def test_incomplete_worker_call_is_not_executed(tmp_path: Path) -> None:
     assert any(event["event"] == "tool.failed" and event["data"].get("call_id") == "dispatch" for event in events)
 
 def test_route_metrics_without_geometry_does_not_invent_polyline() -> None:
-    from app.agent.tools.mcp.dispatcher import _extract_route_from_mapping
+    from app.domain.arcade.mcp_route import _extract_route_from_mapping
     route = _extract_route_from_mapping({"distance": 100, "duration": 90}, remote_name="maps_direction_walking", raw_arguments={"origin": "116,39", "destination": "116.01,39.01"}, depth=0)
     assert route is not None
     assert route.distance_m == 100

@@ -11,10 +11,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 from app.agent.plugins.config import config_placeholders
 from app.agent.plugins.spec import Plugin, PluginConfig, PluginError, PluginResources
 from app.agent.tools.mcp.gateway import MCPServerConfig, build_mcp_server_configs
+from app.agent.tools.mcp.ports import MCPResultNormalizer, MCPToolSelector
 
 
 def resolve_resources(name: str, plugin_type: type[Plugin], config: PluginConfig) -> PluginResources:
@@ -30,7 +32,67 @@ def resolve_resources(name: str, plugin_type: type[Plugin], config: PluginConfig
     for root in (*resources.skills, *resources.mcp_servers, *resources.prompts):
         if not isinstance(root, Path):
             raise PluginError(f"plugin:{name}:invalid_resources")
+    _port_items(name, resources, "mcp_selectors", "select", "selector")
+    _port_items(name, resources, "mcp_normalizers", "normalize", "normalizer")
     return resources
+
+
+def _port_items(
+    name: str,
+    resources: PluginResources,
+    attribute: str,
+    method: str,
+    kind: str,
+) -> tuple[tuple[str, object], ...]:
+    """Validated ``(binding name, port)`` pairs from one resource declaration."""
+    ports = getattr(resources, attribute)
+    if not isinstance(ports, Mapping):
+        raise PluginError(f"plugin:{name}:invalid_mcp_{kind}")
+    pairs: list[tuple[str, object]] = []
+    for key, port in ports.items():
+        if not isinstance(key, str) or not key.strip():
+            raise PluginError(f"plugin:{name}:invalid_mcp_{kind}")
+        if not callable(getattr(port, method, None)):
+            raise PluginError(f"plugin:{name}:invalid_mcp_{kind}")
+        pairs.append((key.strip(), port))
+    return tuple(pairs)
+
+
+def _collect_ports(
+    resources: Mapping[str, PluginResources],
+    attribute: str,
+    method: str,
+    kind: str,
+) -> dict[str, object]:
+    owned: dict[str, tuple[str, object]] = {}
+    for plugin_name, item in resources.items():
+        for key, port in _port_items(plugin_name, item, attribute, method, kind):
+            owner, _claimed = owned.setdefault(key, (plugin_name, port))
+            if owner != plugin_name:
+                raise PluginError(
+                    f"plugin:{plugin_name}:duplicate_mcp_{kind}:{key}:plugins:{owner},{plugin_name}"
+                )
+    return {key: port for key, (_owner, port) in owned.items()}
+
+
+def collect_mcp_selectors(
+    resources: Mapping[str, PluginResources],
+) -> dict[str, MCPToolSelector]:
+    """Selector ports in installation order, keyed by globally unique name."""
+    return cast(
+        dict[str, MCPToolSelector],
+        _collect_ports(resources, "mcp_selectors", "select", "selector"),
+    )
+
+
+def collect_mcp_normalizers(
+    resources: Mapping[str, PluginResources],
+) -> dict[str, MCPResultNormalizer]:
+    """Normalizer ports in installation order, keyed by MCP server name."""
+    return cast(
+        dict[str, MCPResultNormalizer],
+        _collect_ports(resources, "mcp_normalizers", "normalize", "normalizer"),
+    )
 
 
 def resolve_plugin_resources(
@@ -98,6 +160,8 @@ def _plugin_mcp_servers(
 
 __all__ = [
     "build_plugin_mcp_servers",
+    "collect_mcp_normalizers",
+    "collect_mcp_selectors",
     "collect_skill_roots",
     "resolve_plugin_resources",
     "resolve_resources",

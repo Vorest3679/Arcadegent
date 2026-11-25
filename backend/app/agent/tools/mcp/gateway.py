@@ -1,13 +1,22 @@
-"""FastMCP-backed discovery and dispatch bridge for runtime tools."""
+"""FastMCP-backed discovery and dispatch bridge for runtime tools.
+
+The gateway is domain-neutral: it discovers remote tools, exposes generic
+execution, and delegates two decisions to ports supplied by the host:
+
+* ``selectors`` (keyed by selector name) pick a tool per server for health
+  and fast lookup;
+* ``normalizers`` (keyed by server name) map a raw execution payload onto
+  domain data.
+
+An MCP server config may name an explicitly preferred tool per selector in
+``select_tools``; the selector is the fallback.
+"""
 
 from __future__ import annotations
 
-# 基于 FastMCP 的发现和调度桥梁，用于运行时工具。
-# 总得来说属于一个工具网关，负责发现 MCP 工具并通过 FastMCP 客户端执行它们。
-# 是本模块下的核心类，提供了工具发现、工具定义构建、工具执行等功能。
-
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -17,24 +26,21 @@ from app.agent.tools.mcp.discovery import (
     coerce_str,
     discover_tools,
     infer_source_type,
+    local_tool_name,
     mask_url,
-    pick_route_tool,
     utc_now_iso,
 )
-from app.agent.tools.mcp.dispatcher import (
-    MCPDispatcher,
-    build_route_arguments,
-    pick_route_descriptor,
-)
+from app.agent.tools.mcp.dispatcher import MCPDispatcher
 from app.agent.tools.mcp.models import (
     MCPExecutionResult,
     MCPServerConfig,
     MCPServerState,
     MCPToolDescriptor,
+    MCP_TOOL_PREFIX,
 )
+from app.agent.tools.mcp.ports import MCPResultNormalizer, MCPToolSelector
 from app.agent.tools.schemas import load_json_schema
 from app.agent._logging import get_logger, log_public_label, log_ref
-from app.protocol.messages import GeoPoint, Location, RouteSummaryDto
 
 logger = get_logger(__name__)
 _PUBLIC_SOURCE_TYPES = frozenset({"http", "stdio", "sse", "streamable-http", "script", "string", "config"})
@@ -43,8 +49,7 @@ _CONFIG_PLACEHOLDER = re.compile(r"\$\{([^}]+)\}")
 
 
 def _coerce_bool(value: Any, *, default: bool) -> bool:
-    """Coerce a value to boolean, accepting various common string and numeric representations, with a default fallback.
-    将一个值强制转换为布尔值，接受各种常见的字符串和数字表示，并提供默认回退。"""
+    """Coerce a value to boolean, accepting common string and numeric forms."""
 
     if isinstance(value, bool):
         return value
@@ -65,8 +70,7 @@ def _extract_timeout_seconds(
     *,
     default_timeout_seconds: float,
 ) -> float:
-    """Extract a timeout in seconds from the payload, accepting various common keys and formats, with a default fallback.
-    从负载中提取以秒为单位的超时，接受各种常见的键和格式，并提供默认回退。"""
+    """Extract a timeout in seconds from the payload, with a default fallback."""
     for key in ("client_timeout_seconds", "clientTimeoutSeconds", "timeout_seconds", "timeoutSeconds"):
         raw_value = payload.pop(key, None)
         if raw_value is None:
@@ -94,13 +98,13 @@ def _is_server_payload(value: Any) -> bool:
 
 def _expand_placeholders(value: Any, placeholders: Mapping[str, str]) -> Any:
     if isinstance(value, str):
-        def replace(match: re.Match[str]) -> str:
+        def replace_placeholder(match: re.Match[str]) -> str:
             key = match.group(1)
             if key not in placeholders:
                 raise ValueError("unresolved_mcp_placeholder")
             return placeholders[key]
 
-        return _CONFIG_PLACEHOLDER.sub(replace, value)
+        return _CONFIG_PLACEHOLDER.sub(replace_placeholder, value)
     if isinstance(value, list):
         return [_expand_placeholders(item, placeholders) for item in value]
     if isinstance(value, dict):
@@ -113,8 +117,7 @@ def _extract_server_configs(
     *,
     default_server_name: str | None = None,
 ) -> dict[str, Any]:
-    """Extract server configurations from raw MCP config objects.
-    从原始 MCP 配置对象中提取服务器配置。"""
+    """Extract server configurations from raw MCP config objects."""
     mcp_servers = raw_config.get("mcpServers")
     if isinstance(mcp_servers, dict):
         return mcp_servers
@@ -183,6 +186,27 @@ def _normalize_server_payload(server_name: str, raw_payload: Any) -> dict[str, A
     return payload
 
 
+def _read_select_tools(payload: dict[str, Any], *, server_name: str) -> dict[str, str]:
+    snake_case = payload.pop("select_tools", None)
+    camel_case = payload.pop("selectTools", None)
+    raw = snake_case if snake_case is not None else camel_case
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"mcp server '{server_name}' select_tools must be an object")
+
+    select_tools: dict[str, str] = {}
+    for selector_name, tool_name in raw.items():
+        if not isinstance(selector_name, str) or not selector_name.strip():
+            raise ValueError(f"mcp server '{server_name}' select_tools keys must be non-empty strings")
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            raise ValueError(
+                f"mcp server '{server_name}' select_tools values must be non-empty strings"
+            )
+        select_tools[selector_name.strip()] = tool_name.strip()
+    return select_tools
+
+
 def build_mcp_server_configs(
     *,
     raw_config: dict[str, Any] | None = None,
@@ -193,7 +217,7 @@ def build_mcp_server_configs(
     """Build runtime server configs from standard MCP JSON objects or directories.
 
     ``placeholders`` maps ``${key}`` tokens to values supplied by the owning
-    plugin's validated config (for example ``config.amap.api_key``). An unknown
+    plugin's validated config (for example ``config.xxx.api_key``). An unknown
     token fails instead of sending a literal secret reference to the server.
     """
     if raw_config is None:
@@ -221,7 +245,7 @@ def build_mcp_server_configs(
         enabled = _coerce_bool(payload.pop("enabled", True), default=True)
         if "disabled" in payload:
             enabled = not _coerce_bool(payload.pop("disabled"), default=False)
-        route_tool_name = coerce_str(payload.pop("route_tool_name", payload.pop("routeToolName", None)))
+        select_tools = _read_select_tools(payload, server_name=name)
         timeout_seconds = _extract_timeout_seconds(
             name,
             payload,
@@ -235,7 +259,7 @@ def build_mcp_server_configs(
                 source=source,
                 url=coerce_str(payload.get("url")),
                 timeout_seconds=timeout_seconds,
-                route_tool_name=route_tool_name,
+                select_tools=select_tools,
                 source_type=infer_source_type(source),
             )
         )
@@ -243,10 +267,7 @@ def build_mcp_server_configs(
 
 
 class MCPToolGateway:
-    """
-    Discover MCP tools and execute them via FastMCP Client.
-    发现MCP工具并通过FastMCP客户端执行它们。
-    """
+    """Discover MCP tools and execute them via a FastMCP client."""
 
     def __init__(
         self,
@@ -254,6 +275,8 @@ class MCPToolGateway:
         servers: list[MCPServerConfig] | None = None,
         client_manager: MCPClientManager | None = None,
         dispatcher: MCPDispatcher | None = None,
+        normalizers: Mapping[str, MCPResultNormalizer] | None = None,
+        selectors: Mapping[str, MCPToolSelector] | None = None,
     ) -> None:
         self._servers: dict[str, MCPServerConfig] = {
             item.name: item for item in (servers or []) if item.name.strip()
@@ -272,16 +295,15 @@ class MCPToolGateway:
         self._discovered_once = False
         self._client_manager = client_manager or MCPClientManager()
         self._dispatcher = dispatcher or MCPDispatcher(client_manager=self._client_manager)
+        self._normalizers = dict(normalizers or {})
+        self._selectors = dict(selectors or {})
 
     @property
     def enabled(self) -> bool:
         return any(config.enabled for config in self._servers.values())
 
     async def refresh(self) -> None:
-        """Refresh all configured MCP tool definitions.
-        刷新所有配置的MCP工具定义。
-        这个方法会遍历所有配置的MCP服务器，尝试从每个服务器获取工具列表，
-        并根据获取到的工具信息构建工具描述符和工具定义。   """
+        """Refresh all configured MCP tool definitions."""
         descriptors: dict[str, MCPToolDescriptor] = {}
         for server_name, config in self._servers.items():
             state = self._states.setdefault(
@@ -296,7 +318,7 @@ class MCPToolGateway:
             state.configured = bool(config.enabled and config.source is not None)
             state.last_discovery_at = utc_now_iso()
             state.available_tools = []
-            state.selected_route_tool = None
+            state.selected_tools = {}
             state.last_error = None
             state.discovered = False
             state.url = mask_url(config.url)
@@ -316,14 +338,14 @@ class MCPToolGateway:
                     state.available_tools.append(descriptor.local_name)
 
                 state.available_tools.sort()
-                state.selected_route_tool = pick_route_tool(config=config, descriptors=discovered)
+                state.selected_tools = self._select_tools(config, discovered)
                 state.discovered = True
                 logger.info(
-                    "mcp.discovery server_ref=%s source_type=%s tool_count=%s has_route_tool=%s",
+                    "mcp.discovery server_ref=%s source_type=%s tool_count=%s selected_tool_count=%s",
                     log_ref(server_name),
                     log_public_label(state.source_type, _PUBLIC_SOURCE_TYPES),
                     len(state.available_tools),
-                    state.selected_route_tool is not None,
+                    len(state.selected_tools),
                 )
             except Exception as exc:  # pragma: no cover - exercised by integration/network failures
                 state.last_error = str(exc)
@@ -336,6 +358,50 @@ class MCPToolGateway:
 
         self._tools = descriptors
         self._discovered_once = True
+
+    def _select_tools(
+        self,
+        config: MCPServerConfig,
+        descriptors: list[MCPToolDescriptor],
+    ) -> dict[str, str]:
+        selected: dict[str, str] = {}
+        for selector_name, selector in self._selectors.items():
+            tool_name = self._resolve_explicit_tool(
+                config,
+                descriptors,
+                config.select_tools.get(selector_name),
+            )
+            if tool_name is None:
+                try:
+                    candidate = selector.select(server=config.name, descriptors=tuple(descriptors))
+                except Exception as exc:
+                    logger.warning(
+                        "mcp.selection.failed server_ref=%s selector_ref=%s exception_type=%s",
+                        log_ref(config.name),
+                        log_ref(selector_name),
+                        type(exc).__name__,
+                    )
+                    continue
+                tool_name = candidate if isinstance(candidate, str) else None
+                if not any(item.local_name == tool_name for item in descriptors):
+                    tool_name = None
+            if tool_name is not None:
+                selected[selector_name] = tool_name
+        return selected
+
+    def _resolve_explicit_tool(
+        self,
+        config: MCPServerConfig,
+        descriptors: list[MCPToolDescriptor],
+        value: str | None,
+    ) -> str | None:
+        preferred = (value or "").strip()
+        if not preferred:
+            return None
+        if preferred.startswith(f"{MCP_TOOL_PREFIX}{config.name}__"):
+            return preferred if any(item.local_name == preferred for item in descriptors) else None
+        local_name = local_tool_name(config.name, preferred)
+        return local_name if any(item.remote_name == preferred for item in descriptors) else None
 
     async def ensure_ready(self) -> None:
         if self.enabled and not self._discovered_once:
@@ -381,6 +447,24 @@ class MCPToolGateway:
     def has_tool(self, tool_name: str) -> bool:
         return tool_name in self._tools
 
+    def tools_for_server(self, server_name: str) -> tuple[MCPToolDescriptor, ...]:
+        """Discovered tools for one server, sorted by local name."""
+        return tuple(sorted(
+            (item for item in self._tools.values() if item.server_name == server_name),
+            key=lambda item: item.local_name,
+        ))
+
+    def configured_tool(self, selector_name: str, *, server_name: str) -> str | None:
+        """The explicitly configured tool for a selector, resolved to a local name."""
+        config = self._servers.get(server_name)
+        if config is None:
+            return None
+        return self._resolve_explicit_tool(
+            config,
+            list(self._tools.values()),
+            config.select_tools.get(selector_name),
+        )
+
     async def execute(
         self,
         *,
@@ -405,68 +489,39 @@ class MCPToolGateway:
                 output={"error": {"type": "runtime_error", "message": message}},
                 error_message=message,
             )
-        return await self._dispatcher.execute(
+        result = await self._dispatcher.execute(
             config=config,
             descriptor=descriptor,
             raw_arguments=raw_arguments,
         )
+        return self._normalize(descriptor, raw_arguments, result)
 
-    async def plan_amap_route(
+    def _normalize(
         self,
-        *,
-        mode: str,
-        origin: Location,
-        destination: Location,
-    ) -> RouteSummaryDto | None:
-        """Use a discovered AMap MCP route tool when one is available.
-        当有可用的已发现的AMap MCP路线工具时使用它。"""
-        await self.ensure_ready()
-        descriptor = pick_route_descriptor(
-            descriptors=list(self._tools.values()),
-            server_name="amap",
-            mode=mode,
-        )
-        if descriptor is None:
-            return None
-        arguments = build_route_arguments(
-            descriptor=descriptor,
-            origin=origin,
-            destination=destination,
-            mode=mode,
-        )
-        result = await self.execute(tool_name=descriptor.local_name, raw_arguments=arguments)
-        if result.status != "completed":
-            logger.warning(
-                "mcp.route.failed tool_ref=%s has_error=%s",
-                log_ref(descriptor.local_name),
-                bool(result.error_message),
-            )
-            return None
-        route_payload = result.output.get("route")
-        if not isinstance(route_payload, dict):
-            return None
+        descriptor: MCPToolDescriptor,
+        arguments: dict[str, Any],
+        result: MCPExecutionResult,
+    ) -> MCPExecutionResult:
+        normalizer = self._normalizers.get(descriptor.server_name)
+        if normalizer is None:
+            return result
         try:
-            route = RouteSummaryDto.model_validate(route_payload)
-        except Exception:
-            return None
-        updates: dict[str, object] = {}
-        if route.origin is None:
-            updates["origin"] = GeoPoint(
-                lng=origin.lng,
-                lat=origin.lat,
-                coord_system="gcj02",
-                source="client",
-                precision="approx",
+            normalized = normalizer.normalize(
+                descriptor=descriptor,
+                arguments=arguments,
+                output=result.output,
             )
-        if route.destination is None:
-            updates["destination"] = GeoPoint(
-                lng=destination.lng,
-                lat=destination.lat,
-                coord_system="gcj02",
-                source="route",
-                precision="approx",
+        except Exception as exc:
+            logger.warning(
+                "mcp.normalize.failed tool_ref=%s exception_type=%s",
+                log_ref(descriptor.local_name),
+                type(exc).__name__,
             )
-        return route.model_copy(update=updates) if updates else route
+            return result
+        if not isinstance(normalized, dict):
+            logger.warning("mcp.normalize.invalid tool_ref=%s", log_ref(descriptor.local_name))
+            return result
+        return replace(result, output=normalized)
 
     def health(self) -> dict[str, Any]:
         return {
@@ -477,8 +532,8 @@ class MCPToolGateway:
                     "enabled": state.enabled,
                     "configured": state.configured,
                     "discovered": state.discovered,
-                    "available_tools": state.available_tools,
-                    "selected_route_tool": state.selected_route_tool,
+                    "available_tools": list(state.available_tools),
+                    "selected_tools": dict(state.selected_tools),
                     "last_error": state.last_error,
                     "last_discovery_at": state.last_discovery_at,
                     "url": state.url,

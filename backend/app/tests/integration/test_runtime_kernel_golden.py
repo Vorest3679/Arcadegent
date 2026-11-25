@@ -224,7 +224,7 @@ def test_golden_navigation_worker_route(tmp_path: Path) -> None:
     (mcp_dir / "amap.json").write_text(json.dumps({
         "command": sys.executable,
         "args": [str(fixture_server)],
-        "route_tool_name": "maps_direction_walking",
+        "select_tools": {"route": "maps_direction_walking"},
     }), encoding="utf-8")
     client = _build_client(tmp_path, mcp_servers_dir=mcp_dir)
     main_steps = iter([

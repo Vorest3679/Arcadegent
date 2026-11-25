@@ -592,3 +592,53 @@ def test_mcp_server_names_are_unique_across_directories_and_plugins(tmp_path: Pa
     bad = server_dir("bad", broken="https://x.invalid/?key=${config.missing}")
     with pytest.raises(PluginError, match=r"^plugin:a:invalid_mcp_servers$"):
         build({"a": (bad,)})
+
+
+def test_mcp_selector_and_normalizer_ports_are_collected_and_unique() -> None:
+    from app.agent.plugins import collect_mcp_normalizers, collect_mcp_selectors
+
+    class _Selector:
+        def select(self, *, server: str, descriptors: tuple) -> None:
+            return None
+
+    class _Normalizer:
+        def normalize(self, *, descriptor, arguments, output):
+            return output
+
+    class _PortsPlugin(Plugin):
+        info = PluginInfo("ports", "1.0.0")
+        resources = PluginResources(
+            mcp_selectors={"route": _Selector()},
+            mcp_normalizers={"server": _Normalizer()},
+        )
+
+    resources = resolve_plugin_resources(
+        {"ports": _PortsPlugin},
+        {"ports": _PortsPlugin.config_model()},
+    )
+    assert list(collect_mcp_selectors(resources)) == ["route"]
+    assert list(collect_mcp_normalizers(resources)) == ["server"]
+
+    class _OtherPlugin(Plugin):
+        info = PluginInfo("other", "1.0.0")
+        resources = PluginResources(mcp_selectors={"route": _Selector()})
+
+    resources = resolve_plugin_resources(
+        {"ports": _PortsPlugin, "other": _OtherPlugin},
+        {"ports": _PortsPlugin.config_model(), "other": _OtherPlugin.config_model()},
+    )
+    with pytest.raises(
+        PluginError,
+        match=r"^plugin:other:duplicate_mcp_selector:route:plugins:ports,other$",
+    ):
+        collect_mcp_selectors(resources)
+
+    class _InvalidPlugin(Plugin):
+        info = PluginInfo("badports", "1.0.0")
+        resources = PluginResources(mcp_selectors={"route": object()})
+
+    with pytest.raises(PluginError, match=r"^plugin:badports:invalid_mcp_selector$"):
+        resolve_plugin_resources(
+            {"badports": _InvalidPlugin},
+            {"badports": _InvalidPlugin.config_model()},
+        )

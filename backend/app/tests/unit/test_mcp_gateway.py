@@ -17,6 +17,7 @@ from app.agent.tools.mcp import (
     MCPToolGateway,
     build_mcp_server_configs,
 )
+from app.domain.arcade.mcp_route import AMAP_ROUTE_NORMALIZER, AMAP_ROUTE_SELECTOR
 
 
 def _build_http_transport(app: object, *, path: str = "/mcp") -> StreamableHttpTransport:
@@ -77,7 +78,7 @@ def test_build_mcp_server_configs_accepts_standard_stdio_json() -> None:
                     "env": {"LOG_LEVEL": "INFO"},
                     "cwd": "/tmp",
                     "enabled": False,
-                    "route_tool_name": "assistant_answer",
+                    "select_tools": {"route": "assistant_answer"},
                 }
             }
         },
@@ -89,7 +90,7 @@ def test_build_mcp_server_configs_accepts_standard_stdio_json() -> None:
     assert config.name == "assistant"
     assert config.enabled is False
     assert config.timeout_seconds == 11
-    assert config.route_tool_name == "assistant_answer"
+    assert config.select_tools == {"route": "assistant_answer"}
     assert config.source_type == "stdio"
     assert config.source["mcpServers"]["assistant"]["command"] == "python"
     assert config.source["mcpServers"]["assistant"]["args"] == ["./assistant_server.py"]
@@ -173,7 +174,7 @@ def test_mcp_gateway_discovers_and_executes_tools_from_json_directory(tmp_path: 
             {
                 "command": sys.executable,
                 "args": [str(fixture_server)],
-                "route_tool_name": "maps_direction_walking",
+                "select_tools": {"route": "maps_direction_walking"},
             }
         ),
         encoding="utf-8",
@@ -183,7 +184,9 @@ def test_mcp_gateway_discovers_and_executes_tools_from_json_directory(tmp_path: 
         servers=build_mcp_server_configs(
             config_dir=config_dir,
             default_timeout_seconds=3,
-        )
+        ),
+        selectors={"route": AMAP_ROUTE_SELECTOR},
+        normalizers={"amap": AMAP_ROUTE_NORMALIZER},
     )
 
     asyncio.run(gateway.refresh())
@@ -199,6 +202,9 @@ def test_mcp_gateway_discovers_and_executes_tools_from_json_directory(tmp_path: 
     assert result.output["tool"] == "maps_direction_walking"
     assert result.output["route"]["distance_m"] == 1350
     assert gateway.health()["servers"]["amap"]["discovered"] is True
+    assert gateway.health()["servers"]["amap"]["selected_tools"] == {
+        "route": "mcp__amap__maps_direction_walking"
+    }
 
 
 def test_mcp_gateway_discovers_and_executes_http_tools() -> None:
@@ -236,10 +242,12 @@ def test_mcp_gateway_discovers_and_executes_http_tools() -> None:
                     source=_build_http_transport(app),
                     url="http://testserver/mcp",
                     timeout_seconds=3,
-                    route_tool_name="maps_direction_walking",
+                    select_tools={"route": "maps_direction_walking"},
                     source_type="http",
                 )
-            ]
+            ],
+            selectors={"route": AMAP_ROUTE_SELECTOR},
+            normalizers={"amap": AMAP_ROUTE_NORMALIZER},
         )
 
         asyncio.run(gateway.refresh())
@@ -265,3 +273,59 @@ def test_mcp_gateway_discovers_and_executes_http_tools() -> None:
         assert result.output["route"]["distance_m"] == 2468
         assert result.output["route"]["duration_s"] == 1200
         assert gateway.health()["servers"]["amap"]["source_type"] == "http"
+
+
+def test_mcp_gateway_selector_fallback_and_no_domain_normalization() -> None:
+    mcp = FastMCP("Selector MCP")
+
+    @mcp.tool(
+        name="maps_direction_walking",
+        description="步行路径规划，输入 origin 和 destination，输出 paths。",
+    )
+    def maps_direction_walking(origin: str, destination: str) -> dict[str, object]:
+        return {"origin": origin, "destination": destination, "paths": [{"distance": 10}]}
+
+    gateway = MCPToolGateway(
+        servers=[
+            MCPServerConfig(
+                name="amap",
+                enabled=True,
+                source=mcp,
+                url="memory://amap",
+                timeout_seconds=3,
+                select_tools={"route": "missing_tool"},
+            )
+        ],
+        selectors={"route": AMAP_ROUTE_SELECTOR},
+    )
+
+    asyncio.run(gateway.refresh())
+    assert gateway.health()["servers"]["amap"]["selected_tools"] == {
+        "route": "mcp__amap__maps_direction_walking"
+    }
+
+    result = asyncio.run(
+        gateway.execute(
+            tool_name="mcp__amap__maps_direction_walking",
+            raw_arguments={"origin": "116.3,39.9", "destination": "116.4,39.91"},
+        )
+    )
+    assert result.status == "completed"
+    assert "route" not in result.output
+
+
+def test_build_mcp_server_configs_validates_select_tools() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="select_tools"):
+        build_mcp_server_configs(
+            raw_config={"mcpServers": {"x": {"url": "https://x.invalid", "select_tools": []}}},
+        )
+    with pytest.raises(ValueError, match="select_tools"):
+        build_mcp_server_configs(
+            raw_config={"mcpServers": {"x": {"url": "https://x.invalid", "select_tools": {"": "tool"}}}},
+        )
+    with pytest.raises(ValueError, match="select_tools"):
+        build_mcp_server_configs(
+            raw_config={"mcpServers": {"x": {"url": "https://x.invalid", "selectTools": {"route": ""}}}},
+        )
